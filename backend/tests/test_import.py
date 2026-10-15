@@ -300,3 +300,62 @@ def test_authentication_path_injection_and_sensitive_validation_errors(tmp_path:
             assert response.status_code == 400 and path not in response.text
         response = client.get(f"/api/sessions/{uuid4()}/media", headers=HEADERS)
         assert response.status_code == 404 and str(data_dir) not in response.text
+
+
+def test_same_original_cannot_be_attributed_to_two_camera_sessions(
+    tmp_path: Path, videos: dict[str, Path],
+) -> None:
+    copy = tmp_path / "same-recording.mp4"
+    shutil.copyfile(videos["cfr_mp4"], copy)
+    with TestClient(create_app(Settings(tmp_path / "app-data", TOKEN))) as client:
+        first = session(client)
+        second = session(client)
+        upgraded(client)
+        assert import_files(client, first, [videos["cfr_mp4"]])["state"] == "complete"
+
+        for source in (videos["cfr_mp4"], copy):
+            attempted = import_files(client, second, [source])
+            assert attempted["state"] == "failed"
+            assert attempted["error"]["code"] == "duplicate_source"
+            assert inventory(client, second)["segments"] == []
+
+        # Another recording with distinct content is a legitimate second camera source.
+        assert import_files(client, second, [videos["short_mp4"]])["state"] == "complete"
+        assert len(inventory(client, first)["segments"]) == 1
+        assert len(inventory(client, second)["segments"]) == 1
+        with sqlite3.connect(tmp_path / "app-data" / "bat_innovation.sqlite3") as connection:
+            assert connection.execute("SELECT COUNT(DISTINCT session_id) FROM segment").fetchone()[0] == 2
+            with pytest.raises(sqlite3.IntegrityError):
+                connection.execute(
+                    "UPDATE segment SET sha256 = (SELECT sha256 FROM segment WHERE session_id=?) "
+                    "WHERE session_id=?", (first, second),
+                )
+
+
+def test_unreadable_original_is_not_reported_as_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = tmp_path / "existing.mp4"
+    original.write_bytes(b"synthetic content")
+    identity = media.identity_info(original)
+    row = {"source_path": str(original), "identity_json": json.dumps(identity)}
+
+    def inaccessible(_path: Path) -> dict:
+        raise media.MediaError("unreadable_metadata", "Access denied")
+
+    monkeypatch.setattr(media, "identity_info", inaccessible)
+    assert imports.source_state(row) == "unreadable_source"
+    monkeypatch.undo()
+
+    actual_open = Path.open
+
+    def forbidden_open(path: Path, *args, **kwargs):
+        if path == original:
+            raise PermissionError("Synthetic access denied")
+        return actual_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", forbidden_open)
+    assert imports.source_state(row) == "unreadable_source"
+    monkeypatch.undo()
+    original.unlink()
+    assert imports.source_state(row) == "missing_source"
