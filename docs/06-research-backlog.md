@@ -3,6 +3,10 @@
 Last reviewed: 2026-10-15  
 Status: open research programme. Priorities are proposals, not committed WSP tasks.
 
+## Implementation sequencing
+
+The authoritative, checklist-based development sequence is [implementation/plan.md](../implementation/plan.md). Media timebase and source-video playback are the first technical risk; complete motion summaries and reviewer QA follow. Keep this research backlog as a decision/evidence register, not a duplicate implementation tracker.
+
 ## Immediate implementation and evidence priorities
 
 | ID | Deliverable | Responsible role (not assigned person) | Dependency |
@@ -10,7 +14,7 @@ Status: open research programme. Priorities are proposals, not committed WSP tas
 | I01 | Confirm local Windows workstation, installation permissions, data folder and approved offline execution | App owner + IT | Before real-file execution |
 | I02 | Build lean React/TypeScript + local FastAPI/SQLite project skeleton; package in Electron after a working vertical slice, following the [verified Camera_Trap reference](10-camera-trap-architecture-reference.md) | Developer | Gate 0, synthetic inputs |
 | I03 | Unit-test segmented timebase, clock-offset handling, camera movement and all-window summaries | Developer | I02 |
-| I03a | Test a source-video jump and local UI <-> API <-> SQLite write before adding tracking | Developer | I02 |
+| I03a | Implement/test minimal Electron native media selection, source-video seek and local UI/API/SQLite writes before adding tracking | Developer | I02 |
 | I04 | Produce local reviewer and QA history with reporting CSV and audit export | Developer + ecological reviewer | I02 |
 | I05 | Verify original-file format and metadata on permitted examples; treat spreadsheet labels as prelabels | Data custodian + ecological lead | Gate 1 access/permissions |
 | I06 | Identify final ecological sign-off owner, disagreeing QA reconciliation and acceptance thresholds | Ecological lead | Before benchmark |
@@ -76,6 +80,7 @@ Status: open research programme. Priorities are proposals, not committed WSP tas
 | 2026-10-15 | Prioritise **all-window IR motion summaries plus ecological review** as the first prototype, with tracking and AI as optional later stages. | Publicly documented workflows and lower initial training-data requirements; not a performance finding. | Representative IR benchmark or reviewer feedback contradicts the hypothesis |
 | 2026-10-15 | **Superseded:** earlier Gradio/no-database recommendation was based on an incorrect inspection of Camera_Trap. | Live repo does not match that description. | Superseded by corrected design below |
 | 2026-10-15 | Use the **local Windows-first Electron + React/TypeScript + FastAPI + SQLite pattern** of Camera_Trap, with a small vertical slice, no cloud, training stack or distributed infrastructure. | Direct inspection of Electron main, frontend package, backend app, local database and verification components. | Performance, packaging or real multi-user requirements justify change |
+| 2026-10-15 | Adopt the reviewed [implementation sequence](../implementation/plan.md): media/PTS proof first, then motion-summary coverage, review/QA, export and Windows packaging. | Multi-perspective review and explicit go/no-go tests documented in [implementation/review.md](../implementation/review.md). | Findings from implemented tests require refinement |
 | 2026-10-15 | Thermal and acoustic processing are **out of v1**. | IR-first scope decision. | Separately prioritised later |
 | 2026-10-15 | Start with existing spreadsheet entries as **prelabels, not verified ground truth**. | Label provenance must be independently checked. | Final ecological adjudication establishes test labels |
 | 2026-10-15 | Gate 0 permits synthetic/public tests; authorised real-footage feasibility follows Gate 1; formal measured benchmark requires Gate 2. | Separate permission to inspect originals from having a validated labelled benchmark. | Evidence and approvals support the respective stage |
