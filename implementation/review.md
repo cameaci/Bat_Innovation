@@ -19,9 +19,9 @@ Reviewed 2026-10-15. This records **design review and decisions before code**, n
 
 | Risk in a superficially simple implementation | Required solution, not a workaround | Test/gate |
 | --- | --- | --- |
-| \`.MTS\` sometimes does not play in Chromium | Prove codec-specific playback and use documented **on-demand local preview transcoding** when necessary, preserving source PTS | First media fidelity spike |
-| \`frame_index / fps\` creates false timing | Read and preserve actual decoded presentation timestamps; evaluate PyAV versus FFmpeg timestamp workflow | VFR / discontinuity fixtures |
-| Several recorded clips treated as one continuous file | Explicit \`session -> segment\` timeline and continuity state, source-linked event spans | Segment gap/boundary tests |
+| `.MTS` sometimes does not play in Chromium | Prove codec-specific playback and use documented **on-demand local preview transcoding** when necessary, preserving source PTS | First media fidelity spike |
+| `frame_index / fps` creates false timing | Read and preserve actual decoded presentation timestamps; evaluate PyAV versus FFmpeg timestamp workflow | VFR / discontinuity fixtures |
+| Several recorded clips treated as one continuous file | Explicit `session -> segment` timeline and continuity state, source-linked event spans | Segment gap/boundary tests |
 | Tripod moves or IR lamp activates | Global-scene/illumination diagnostic, flag, explicit reference reset and invalidated roost zones | Scene-change fixtures |
 | An empty-looking image suppresses an emergence | Generate **all windows** and preserve source-video navigation; never auto-label quiet as negative | Coverage and ecological miss analysis |
 | A summary window is counted as one bat | Separate review window from biological observation and optional count | Multiple-event fixture and ecological rubric |
