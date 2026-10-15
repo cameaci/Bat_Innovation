@@ -20,7 +20,7 @@ SQLite (small schema) + local generated summary images and previews
 Original media files remain untouched in authorised local storage
 \`\`\`
 
-Use a **single application**, one local backend process and one processing job at a time in v1. Do not introduce a distributed queue, WebSocket service, multi-user auth system, cloud persistence or generic plugin platform. Develop frontend and backend first. Electron then becomes a narrow desktop shell for Windows installation and controlled native file selection.
+Use a **single application**, one local backend process and one processing job at a time in v1. Do not introduce a distributed queue, WebSocket service, multi-user auth system, cloud persistence or generic plugin platform. Run React and FastAPI in development from Slice 0. Add a **minimal Electron development shell with a native file picker in Slice 1**, because large source videos must not be uploaded through a browser file form or accepted as arbitrary paths. Build the distributable Windows installer only in Slice 5.
 
 **Ownership:** Python owns original-media time mapping, processing and ecological record validation. React presents typed data and asks Python to save review decisions; it does not recompute time offsets or decide which data are final.
 
@@ -58,6 +58,8 @@ This tree is an **upper bound to start**, not a minimum number of files to creat
 Use the reference repo only as a **pattern library** for API boundaries, desktop startup, validation, gallery navigation, status and export. See [reuse.md](reuse.md).
 
 ## 3. Media and time contracts
+
+**Decoder decision:** test [PyAV](https://github.com/PyAV-Org/PyAV) as the first candidate for reading frames with their actual `pts` and `time_base`, with OpenCV used for pixel masks and FFmpeg/ffprobe for media inspection and preview. Adopt PyAV only after pinned Windows build, codec, PTS and licensing tests; avoid simultaneously maintaining two unsynchronised decoder pipelines.
 
 **Recording session:** one camera on one survey visit. It contains an explicitly ordered list of original **segments** (e.g. independently recorded clips). Each segment has a source-file ID, path stored **only locally**, checksum, video stream metadata, orientation, field order/interlacing and source PTS timebase.
 
@@ -136,7 +138,7 @@ Use typed Pydantic requests/responses and a small TypeScript API client. Prefer 
 ## 7. Local security and filesystem rules
 
 - Electron loads the expected local origin only, has \`nodeIntegration=false\`, \`contextIsolation=true\`, a narrow preload bridge and no unrestricted shell/file access exposed to React.
-- Backend binds to \`127.0.0.1\`. Restrict origins; use a per-launch local token where feasible. Do not call this enterprise user authentication.
+- Backend binds to \`127.0.0.1\`. Restrict origins and require a **random per-launch local token** for application API access; pass it only via the trusted Electron startup/preload boundary in packaged mode. Development mode uses an explicit local-only equivalent and never disables checks in production. Do not call this enterprise user authentication.
 - Native file selection grants the backend access to **allowlisted file IDs**, not arbitrary user-controlled query paths. Validate that segment files still exist and match expected identity before reading.
 - Start FFmpeg as a structured argument array without \`shell=True\`. Confirm bundled binary version/codec support and licence; handle timeout, cancellation and process cleanup.
 - Keep \`SQLite\`, logs, private media manifests, derived images and preview clips in an app-specific authorised local data directory, never this public Git tree.
