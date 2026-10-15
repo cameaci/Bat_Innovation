@@ -5,7 +5,7 @@ Status: proposed research safeguards, not a legal or WSP policy determination.
 
 ## Public repository classification
 
-The GitHub repository `cameaci/Bat_Innovation` was verified as **public** on 2026-10-15. Treat all committed Markdown as publicly accessible. It is not an authorised storage location for WSP or client confidential material.
+The GitHub repositories `cameaci/Bat_Innovation` **and** `cameaci/Camera_Trap` were verified as **public** using GitHub metadata on 2026-10-15. Treat all committed Markdown as publicly accessible. It is not an authorised storage location for WSP or client confidential material.
 
 **Do not commit:** original or derived client videos; images, crops or screenshots from client surveys; private spreadsheets; survey coordinates; internal paths; project identifiers; names of clients or confidential sites; contracts; credentials; internal-only policies; model weights trained on restricted data; sensitive ecological locations; or unapproved dataset extracts.
 
@@ -19,6 +19,8 @@ Public papers, public URLs, general methods, generic templates and clearly label
 4. **Research-use rights:** written confirmation that the proposed processing, training, testing, retention and sharing are permitted by the relevant contracts and data owners.
 5. **IT/security:** approval of the execution environment, software dependencies, network behaviour, storage and access controls.
 6. **External data/software licences:** independent review of dataset terms, source-code licences, model-weight licences and third-party services.
+7. **Privacy screening:** original footage and derived summaries may contain people, vehicles, buildings and identifying details. Determine appropriate minimisation, redaction or access restrictions and whether a data-protection impact assessment is required.
+8. **Repository IP:** confirm code and documentation ownership, publication rights and licence intent before adding application code to a public repository.
 
 Approval to **view or analyse for project delivery** does not by itself prove permission to **train a reusable AI model**. Similarly, code being open source does not grant rights over footage or model weights.
 
@@ -39,7 +41,8 @@ Approval to **view or analyse for project delivery** does not by itself prove pe
 
 ## Processing restrictions
 
-- Run sensitive experiments only in a WSP-approved environment after the above gates are met.
+- Run sensitive experiments only in an authorised organisational environment after the above gates are met.
+- Confirm access restrictions for cross-team or cross-border reviewers; a local prototype does not automatically authorise network sharing.
 - Prefer offline execution, controlled storage, least-privilege access and dependency pinning.
 - Disable unapproved telemetry and automatic uploads; verify whether tools download model weights or send diagnostics.
 - Do not use public hosted annotation, AI, storage or video services for client data without explicit approval.
@@ -65,3 +68,7 @@ Current documented status: **Gate 0 only**. This is not a claim that WSP lacks a
 - [Bat Conservation Trust - NVA technical guide](https://www.bats.org.uk/resources/guidance-for-professionals/bat-emergence-surveys-with-night-vision-aids-a-technical-guide)
 - [CVAT Community self-hosting and licence notes](https://github.com/cvat-ai/cvat)
 - [MegaDetector model-specific licences](https://github.com/microsoft/MegaDetector/blob/main/docs/model_zoo.md)
+
+## Practical boundary for a lean prototype
+
+A public repository may contain source code and generic synthetic tests; the executable can still run **locally and offline**. Client footage, time-sync material that may show people/phones, derived summaries, reviewer names, local paths, JSONL logs and exports must remain in authorised storage and be excluded from Git. The initial local Gradio UI is **not** an authentication system. Real footage testing follows the applicable gates; internal policy implementation details belong in private organisational records.
