@@ -31,7 +31,7 @@ These are provisional project terms. A qualified ecological lead must approve th
 1. Local IR recording-session ingestion (including split segments) and technical metadata checks.
 2. Complete timestamped motion-summary windows, camera stability and day-to-IR/illumination change checks.
 3. Optional motion blobs and object tracking, after the baseline summary gallery works.
-4. Event review with original timestamps, clips and traceable file identifiers.
+4. Event review with original timestamps, clips and traceable file identifiers, using a **Camera_Trap-style desktop verification interface**.
 5. Explicit reviewer and QA decisions, uncertainty recording, and review-effort measurement.
 6. Technical comparison of algorithms under a common evaluation protocol.
 
@@ -65,7 +65,7 @@ These are provisional project terms. A qualified ecological lead must approve th
 
 ## Deployment constraint
 
-Prefer an offline or WSP-approved internal execution environment. Architecture choices remain subject to security, legal, IT and ecological approval. This public repository contains only shareable research and design notes.
+A local Windows application with an Electron desktop shell, React UI, local FastAPI Python processing and SQLite persistence is the selected implementation pattern. Its first instance is single-user and offline by design. Organisational execution remains subject to security, legal, IT and ecological approval. This public repository contains only shareable research and design notes.
 
 ## References
 
@@ -81,4 +81,4 @@ Publicly documented bat video review workflows demonstrate a simpler initial pro
 
 The workflow must accommodate **attended and unattended** cameras. For attended footage, observer notes may be cross-checked; for unattended footage, a complete review and explicit QA strategy matter more. Pre-existing spreadsheet annotations may serve as **prelabels for locating candidate events**, but they are not automatically verified ground truth.
 
-A qualified ecological owner must define the acceptable miss rate and decide final event and survey conclusions. No threshold is invented in this document. Follow the minimal [local app architecture](09-ir-first-architecture-draft.md).
+A qualified ecological owner must define the acceptable miss rate and decide final event and survey conclusions. Camera_Trap's existing verified/confirmed review patterns are a UI and persistence reference, **not an ecological sign-off procedure**. No threshold is invented in this document. Follow the minimal [local app architecture](09-ir-first-architecture-draft.md).
