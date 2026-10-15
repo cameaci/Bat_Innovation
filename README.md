@@ -2,7 +2,7 @@
 
 **Research and documentation for an in-house, human-reviewed bat emergence video analysis workflow.**
 
-Status: **research + lean app architecture (no application code yet)**. Last reviewed: **2026-10-15**.
+Status: **Gate 0 implementation in progress; local Python/SQLite foundation committed, desktop UI pending**. Last reviewed: **2026-10-15**.
 
 ## Purpose
 
@@ -49,7 +49,7 @@ This is an exploratory project, **not an official WSP publication, endorsed solu
 
 ## Status and next step
 
-The initial source register is a **scoping review**, not a systematic or exhaustive literature review. **An implementation plan has now been reviewed and committed under [implementation/](implementation/README.md). No application source code or benchmark results have been produced.** A local, IR-first application is the selected implementation direction; app code is not yet committed. External-source links have been collected, but repository/code quality, dataset availability, licence compatibility, and empirical performance on target footage still require checks. A deeper literature and prior-art review has been requested. The [motion-summary review](docs/08-motion-summary-prior-art.md) gives the public prior art; the [architecture decision](docs/09-ir-first-architecture-draft.md) points to the authoritative [technical design](implementation/design.md) and [delivery plan](implementation/plan.md).
+The initial source register is a **scoping review**, not a systematic or exhaustive literature review. The backend now has a local authenticated FastAPI entry point, SQLite session persistence and six passing foundation tests on a development machine. **No usable desktop video reviewer or ecological performance result exists yet.** **An implementation plan has now been reviewed and committed under [implementation/](implementation/README.md). No application source code or benchmark results have been produced.** A local, IR-first application is the selected implementation direction; app code is not yet committed. External-source links have been collected, but repository/code quality, dataset availability, licence compatibility, and empirical performance on target footage still require checks. A deeper literature and prior-art review has been requested. The [motion-summary review](docs/08-motion-summary-prior-art.md) gives the public prior art; the [architecture decision](docs/09-ir-first-architecture-draft.md) points to the authoritative [technical design](implementation/design.md) and [delivery plan](implementation/plan.md).
 
 ## Documentation conventions
 
