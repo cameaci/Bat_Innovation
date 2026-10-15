@@ -7,6 +7,16 @@ Status: design hypotheses. No approach has been benchmarked on authorised target
 
 The proposed output is a **review queue of candidate events** linked to original video. Detection, tracking and ecological event interpretation are separate tasks. The first prototype should be reproducible, inspectable and runnable in an approved environment.
 
+## Preferred first baseline - All-window temporal motion summaries
+
+**Components:** configurable time windows (initially 30 seconds), frame-wise motion evidence, representative/background scene, temporal colour overlay, camera-stability diagnostics, a timestamped image for **every window**, and a human review gallery linked to original footage.
+
+**Why test first:** a working reviewer can be built without individual object tracking, bat classification or training labels. Every time window remains visible to the ecologist, avoiding automatic exclusion of apparently quiet intervals during initial validation.
+
+**Important limitations:** motion suppression may miss faint bats; composite tracks can overlap; colours do not automatically give exact timing; an apparently empty image is not a verified negative. The method is a review aid, not an automated ecological decision.
+
+**Evidence:** [public motion-summary prior art](08-motion-summary-prior-art.md), including [Wildlife Imaging Systems](https://www.wildlifeimagingsystems.com/services-bat-emergence), [WISARD](https://www.wildlifeimagingsystems.com/wisard-software) and a [published survey workflow example](https://docs.planning.org.uk/20250910/73/SSP14ADWH6X00/ueyziikzwnauclwd.PDF).
+
 ## Option A - Classical computer vision baseline
 
 **Components:** frame differencing or background subtraction (for example, OpenCV MOG2/KNN), morphological filtering, connected components, size/shape/motion filters, track association, event grouping.
@@ -52,11 +62,10 @@ Original video in approved storage
     -> file inventory and SHA-256
     -> ffprobe metadata and timebase audit
     -> frame decoding at original timebase
-    -> motion proposal / learned detector
-    -> multi-object tracking
-    -> roost-zone and trajectory analysis
-    -> candidate interval grouping
-    -> ecologist review and adjudication
+    -> per-window motion summary (ALL windows retained)
+    -> stability/quality flags and timestamped image manifest
+    -> ecologist gallery, original-video seek and adjudication
+    -> optional candidate detection / tracking / roost-zone analysis
     -> audit-ready event report + performance metrics
 ```
 
@@ -67,6 +76,7 @@ The original video must remain accessible for review. Derived clips should be li
 | Baseline | Training required | Primary output | What it can establish |
 | --- | --- | --- | --- |
 | A0 - Full manual review | No | Human event log | Reference review time and QA process |
+| A1S - All-window motion-summary review | No | Time-ordered summary images, labels and video links | Review time and visibility of adjudicated events without automatic exclusion |
 | A1 - Frame differencing / background subtraction | No | Motion intervals | Value of motion-based triage |
 | A2 - A1 plus tracking and entrance-region rules | No | Candidate event tracks | Value of temporal/spatial context |
 | A3 - Learned bat detector plus tracking | Yes, or external weights | Candidate bat tracks | Added value versus A2 |
@@ -79,3 +89,7 @@ Select by **event recall at an acceptable false-alert burden**, not frame mAP al
 ## Reproducibility requirements
 
 Log source video hash, exact stream and frame timestamps, code version, dependency versions, model/weights identity, processing parameters, hardware, test split and adjudicated labels. Keep restricted artefacts outside this public repository.
+
+## Architecture update
+
+For the IR-first MVP, the **A1S all-window summary** should be built and benchmarked before track-level detection. See [draft architecture](09-ir-first-architecture-draft.md). The earlier track-first pipeline remains a candidate later enhancement, not a mandatory dependency of the first reviewer.
