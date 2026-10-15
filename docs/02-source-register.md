@@ -16,7 +16,10 @@ This register is **curated**, not exhaustive or PRISMA-complete. Future addition
 
 ## Camera_Trap reference
 
-The public [Camera_Trap repository](https://github.com/cameaci/Camera_Trap) was reviewed directly on 2026-10-15 as an architectural reference, **not** as a bat detection benchmark. Its Gradio application, Python processing calls, structured local outputs and small utility tests are relevant; its species models are not required for a motion-summary-first app. See [source-backed implementation review](10-camera-trap-architecture-reference.md). The repository's actual ecological QA review workflow was **not verified**.
+The public [Camera_Trap repository](https://github.com/cameaci/Camera_Trap) was inspected directly on 2026-10-15 as an **application architecture and review workflow reference**, not as a bat-detection benchmark. Current code contains an [Electron desktop shell](https://github.com/cameaci/Camera_Trap/blob/main/electron/src/main.ts), [React + TypeScript frontend](https://github.com/cameaci/Camera_Trap/blob/main/frontend/package.json), [FastAPI backend](https://github.com/cameaci/Camera_Trap/blob/main/backend/app/main.py), [SQLite data layer](https://github.com/cameaci/Camera_Trap/blob/main/backend/app/db/base.py), and a [verify gallery](https://github.com/cameaci/Camera_Trap/blob/main/frontend/src/components/verify/VerifyView.tsx) with human labels and count confirmation. See the corrected [implementation review](10-camera-trap-architecture-reference.md). The reference has an [MIT licence with a WSP copyright notice](https://github.com/cameaci/Camera_Trap/blob/main/LICENSE); the licence and approval for Bat Innovation must be assessed separately.
+
+**Correction:** an earlier entry incorrectly described the live reference repository as a Gradio application. That claim has been withdrawn.
+
 
 ## A. Professional guidance and grey literature
 
