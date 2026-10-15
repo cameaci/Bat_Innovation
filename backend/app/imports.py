@@ -40,11 +40,21 @@ def selected_sources(paths: list[str], data_dir: Path) -> list[Path]:
 
 
 def source_state(row: dict) -> str:
+    path = Path(row["source_path"])
     try:
-        current = media.identity_info(Path(row["source_path"]))
-    except (OSError, media.MediaError):
+        current = media.identity_info(path)
+        if current != json.loads(row["identity_json"]):
+            return "changed_source"
+        # File metadata may still be available when its contents are unreadable.
+        with path.open("rb"):
+            pass
+    except media.MediaError as error:
+        return "missing_source" if error.code == "missing_source" else "unreadable_source"
+    except FileNotFoundError:
         return "missing_source"
-    return "ready" if current == json.loads(row["identity_json"]) else "changed_source"
+    except OSError:
+        return "unreadable_source"
+    return "ready"
 
 
 class ImportJobs:
