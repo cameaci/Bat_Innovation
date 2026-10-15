@@ -1,10 +1,31 @@
 # 07 - Research log
 
+## 2026-10-15 - Synthetic video PTS spike for Slice 1A
+
+**Scope:** Small locally generated synthetic media only, with FFmpeg/ffprobe 7.1.5. No project/client footage was accessed.
+
+**Method:** Created a 25 fps, three-second MPEG-4 MP4, an MPEG-2 MPEG-TS container with `.mts` extension, and a second MP4 made with an irregular frame-selection pattern while retaining presentation times. Inspected stream `time_base`, `start_time`, reported frame rates and decoded frame `best_effort_timestamp_time` with `ffprobe`.
+
+**Observed results:**
+- CFR MP4: first decoded video PTS 0.000 seconds, subsequent timestamps 0.040, 0.080, 0.120; stream timebase 1/12800.
+- Synthetic MPEG-TS `.mts`: first decoded video PTS **1.440 seconds**, subsequent timestamps 1.480, 1.520, 1.560; stream timebase 1/90000. The stream PTS origin is not the survey start clock.
+- Genuinely irregular-timestamp MP4: frame timestamps 0.000, 0.040, 0.120, 0.160, 0.200, 0.280, 0.320 and 0.360 seconds, with alternating 0.040 and 0.080-second intervals. `r_frame_rate` was 25/1 while `avg_frame_rate` differed. This illustrates why `frame_index / FPS` must not be the authoritative event timestamp.
+
+**Correction made during review:** An earlier frame-drop fixture retaining every third frame produced *regular* 0.120-second intervals, despite its VFR filename. It was replaced with a genuine mixed-interval fixture before finalising this record and the Codex issue.
+
+**Limits:** An MPEG-TS file merely named `.mts` is **not** a compatibility test for actual Canon XA / Sony AX53 / Nightfox AVCHD camera footage. PyAV was not installed, so no PyAV-versus-FFmpeg decoder comparison was performed. The synthetic clips are not bat-recognition test data.
+
+**Decision:** Keep source presentation timestamps, segment-relative elapsed time, optional session continuity, and optional real-world clock anchor explicitly distinct. Require a measured single-decoder decision before building time-accurate motion summaries. Do not infer exact timing from nominal FPS.
+
+**Codex handoff:** [Issue #3 - Slice 1A media fidelity](https://github.com/cameaci/Bat_Innovation/issues/3). This is a prepared implementation task, not a started Codex execution or a validated camera support claim.
+
+---
+
 ## 2026-10-15 - PR #2 startup diagnostics review refinement
 
 **Finding:** The Electron shell originally lost useful SQLite startup errors and returned a generic unavailable message. A previous raw stderr-text matching proposal was replaced during review because it would couple the shell to Python traceback wording.
 
-**Change:** Introduced a specific \`DatabaseSchemaError\` in persistence, explicit redacted \`BAT_STARTUP_ERROR\` codes at the Python entry point, narrow Electron mapping and real startup regression tests for existing incompatible SQLite files. Neither raw Python tracebacks nor local file paths are sent to the renderer. No generic error framework, alternate database or workaround was introduced.
+**Change:** Introduced a specific `DatabaseSchemaError` in persistence, explicit redacted `BAT_STARTUP_ERROR` codes at the Python entry point, narrow Electron mapping and real startup regression tests for existing incompatible SQLite files. Neither raw Python tracebacks nor local file paths are sent to the renderer. No generic error framework, alternate database or workaround was introduced.
 
 **Independent checks:** Exact Git blob SHA verification for the three Python source files and original foundation tests, 6/6 pytest tests, three actual Python startup subprocess scenarios (future-schema, unversioned and corrupt SQLite) with correct exit code, unchanged file bytes and safe code-only stderr, plus six isolated Node diagnostic-mapping checks and three Node-to-real-Python subprocess contract tests.
 
