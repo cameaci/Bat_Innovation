@@ -1,6 +1,6 @@
 # Implementation plan
 
-Reviewed 2026-10-15. Status: **planned, not started**. This is a dependency-ordered sequence, not a promise of dates. The application is built in **small vertical slices**, each delivering observable behavior and tests. No workarounds or speculative infrastructure.
+Reviewed 2026-10-15. Status: **Slice 0 partly implemented; subsequent slices not started**. This is a dependency-ordered sequence, not a promise of dates. The application is built in **small vertical slices**, each delivering observable behavior and tests. No workarounds or speculative infrastructure.
 
 ## Principles of execution
 
@@ -12,13 +12,21 @@ Reviewed 2026-10-15. Status: **planned, not started**. This is a dependency-orde
 
 ## Slice 0 - Foundation and reality checks
 
+**Progress (2026-10-15):** The original local Python/FastAPI/SQLite foundation has been committed on `main`. Six pytest checks passed and a separate live HTTP loopback smoke test returned 200 for authenticated health and 401 for unauthenticated access. This does not demonstrate a working React or Electron UI. [Codex handoff #1](https://github.com/cameaci/Bat_Innovation/issues/1) specifies the remaining UI and desktop development shell work; it has not been launched automatically.
+
+- [x] Create original Python FastAPI startup with explicit data directory and per-launch token requirement, plus a local session API.
+- [x] Create SQLite v1 session schema and refuse unknown/unversioned databases without silent migration.
+- [x] Add local-data `.gitignore` exclusions and backend dependency pins.
+- [x] Run six Python tests and real loopback HTTP smoke test on the available Linux development environment.
+- [ ] Integrate React and Electron, exercise persistent sessions and validate Windows development/packaging assumptions.
+
 **Goal:** make the codebase reliably runnable with the selected stack before feature work.
 
 - [ ] Confirm ownership/publication and reuse conditions for Camera_Trap components and planned source code.
 - [ ] Verify compatible Windows Python, Node and Electron versions, plus local packaging policy. Pin versions and lock dependencies.
 - [ ] Create the minimal \`backend/\`, \`frontend/\`, and eventually \`electron/\` layout from [design.md](design.md); avoid importing the full Camera_Trap app.
 - [ ] Stand up one FastAPI \`/health\` endpoint and a minimal React interface that displays actual backend readiness.
-- [ ] Add a small SQLite schema/version check and an app-specific local user-data folder; generated/private data must be gitignored.
+- [x] Add a small SQLite schema/version check and an app-specific local user-data folder; generated/private data must be gitignored.
 - [ ] Verify local-only behavior: no unapproved network calls, explicit error on missing FFmpeg or configuration.
 - [ ] Add a narrow integration smoke test covering React -> local API -> SQLite read/write.
 - [ ] Document actual third-party and binary licences; confirm code-copy notices before committing copied portions.
