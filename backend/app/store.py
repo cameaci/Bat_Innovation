@@ -11,6 +11,10 @@ from uuid import uuid4
 SCHEMA_VERSION = 1
 
 
+class DatabaseSchemaError(RuntimeError):
+    """Refuse an unknown on-disk schema without changing user data."""
+
+
 def connect(db_path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(db_path, timeout=30)
     connection.row_factory = sqlite3.Row
@@ -24,7 +28,7 @@ def initialise(db_path: Path) -> None:
     with closing(connect(db_path)) as connection, connection:
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         if version not in (0, SCHEMA_VERSION):
-            raise RuntimeError(
+            raise DatabaseSchemaError(
                 f"Unsupported database schema version {version}; expected {SCHEMA_VERSION}"
             )
         if version == 0:
@@ -33,7 +37,7 @@ def initialise(db_path: Path) -> None:
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
             ).fetchone()
             if existing is not None:
-                raise RuntimeError("Existing unversioned database cannot be initialised safely")
+                raise DatabaseSchemaError("Existing unversioned database cannot be initialised safely")
             connection.execute(
                 """CREATE TABLE recording_session (
                     id TEXT PRIMARY KEY,
