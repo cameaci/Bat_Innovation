@@ -5,9 +5,18 @@ Scope: **initial curated scoping review**, not an exhaustive systematic review. 
 
 ## Evidence status convention
 
-- **Primary source reviewed:** official guidance, paper, project page, or project-maintained repository inspected at source level.
-- **Source-reported:** a result or licence is stated by the publisher or maintainer; it has not been independently reproduced or legally approved.
-- **Candidate / unverified:** an interesting lead whose code, data, rights, quality or applicability have not been fully audited.
+- **Directly verified:** the cited source was inspected. This verifies what the source says, not that its performance claims have been reproduced.
+- **Source-reported:** the author, vendor or maintainer states a claim; it has not been independently reproduced or legally approved.
+- **Inference:** a reasoned interpretation that is not directly established by the source.
+- **Unverified:** a lead or claim that has not yet been checked.
+
+## Search and inclusion method (living scoping review)
+
+This register is **curated**, not exhaustive or PRISMA-complete. Future additions should record the research date, searched location (journal database, scholarly search, GitHub, official regulator site or vendor site), exact search string, inclusion/exclusion reason and date accessed in [the research log](07-research-log.md). Prioritise original IR/thermal bat video, verified repositories and reproducible methods. Exclude purely acoustic classification from the initial video-method shortlist. Check vendor claims against papers or independent examples where possible; record failed searches and access barriers. **Do not backfill fictitious search strings for older entries.**
+
+## Camera_Trap reference
+
+The public [Camera_Trap repository](https://github.com/cameaci/Camera_Trap) was reviewed directly on 2026-10-15 as an architectural reference, **not** as a bat detection benchmark. Its Gradio application, Python processing calls, structured local outputs and small utility tests are relevant; its species models are not required for a motion-summary-first app. See [source-backed implementation review](10-camera-trap-architecture-reference.md). The repository's actual ecological QA review workflow was **not verified**.
 
 ## A. Professional guidance and grey literature
 
@@ -86,3 +95,7 @@ For each new item record: stable URL/DOI, authors, year, modality (active IR, th
 - Data and model licences suitable for internal commercial consulting use.
 - Full NVA technical-guide requirements and local jurisdiction differences.
 - Benchmark videos with frame-level bat boxes **and** adjudicated event-level emergence labels.
+
+## Additional practice-relevant research leads (not yet verified)
+
+Further checks are warranted for Fiji/TrackMate, DeepLabCut, thermal bat tracking products and publicly shared bat-counting YOLO/SORT examples. These are **research leads only**: modality, code/weight licences, download availability and practical relevance have not yet been verified. Validate before citing as evidence or recommending installation. Record FFmpeg build-specific licence terms and exact Ultralytics code/weight licensing as priority reviews.
