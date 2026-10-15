@@ -51,17 +51,17 @@ Approval to **view or analyse for project delivery** does not by itself prove pe
 
 ## Release gates
 
-**Gate 0 - Public research:** public literature and public repositories only; allowed in this repository.
+**Gate 0 - Public research and clean-code prototyping:** public literature, shareable source code, synthetic fixtures and appropriately licensed public examples. No client media or unauthorised internal data.
 
-**Gate 1 - Internal feasibility:** documented source access, metadata, reuse permission, IT approval and QA authority.
+**Gate 1 - Authorised internal feasibility:** documented source access, proposed use rights, environment/security approval, privacy screening and accountable ecological reviewer. Technical metadata audit of client files begins only with these permissions.
 
-**Gate 2 - Experimental dataset:** validated original-file mapping, adjudicated labels, representative positive/negative sampling, defined retention and access controls.
+**Gate 2 - Controlled evaluation dataset:** validated original-file mapping and original-speed provenance, adjudicated labels, representative positive/negative sampling, defined retention and access controls. Required before claiming measured accuracy or beginning a benchmark.
 
 **Gate 3 - Pilot:** locked benchmark, predefined metrics, ecological acceptance criteria, legal/security review and rollback process.
 
 **Gate 4 - Operational deployment:** repeatable QA, monitoring for missed events and drift, incident response, model/change control, and approved reporting practice.
 
-Current documented status: **Gate 0 only**. This is not a claim that WSP lacks approvals elsewhere; they have not been established in this public research record.
+Current documented status: **Gate 0 only**, including public/synthetic application design. This is not a claim that WSP lacks approvals elsewhere; they have not been established in this public research record.
 
 ## Useful public references
 
