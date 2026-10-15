@@ -9,7 +9,7 @@ Recorded infrared (IR) and thermal night-vision-aid (NVA) surveys can require le
 
 ## Proposed Phase 1 objective
 
-Build and evaluate an **ecologist-assisted candidate-event review workflow** for existing recorded NVA footage. The first output should be timestamped candidate intervals and evidence clips, not autonomous ecological conclusions.
+Build and evaluate an **ecologist-assisted candidate-event review workflow** for existing recorded NVA footage. The preferred initial output is a **time-ordered summary image for every video window**, including apparently quiet windows, with a direct link to the original video. Candidate-event intervals and evidence clips are optional enhancements. The tool must not issue autonomous ecological conclusions.
 
 ## Terms
 
@@ -45,10 +45,10 @@ These are provisional project terms. A qualified ecological lead must approve th
 
 1. **Ingest:** record file hash, camera, site code, codec, resolution, frame rate, timebase and duration.
 2. **Synchronise:** resolve original-speed provenance and any workbook-to-video timestamp offset.
-3. **Propose:** identify moving regions with background subtraction / temporal difference or a learned detector.
-4. **Track:** associate candidates across frames and estimate trajectory and direction.
-5. **Contextualise:** apply ecologist-defined roost entrance regions and trajectory rules.
-6. **Review:** show candidate clips with surrounding context and the original source video.
+3. **Summarise:** generate an inspectable, timestamped motion summary for every configurable interval, and flag scene instability. Do not silently drop apparently quiet intervals.
+4. **Optional tracking:** associate candidates across frames and estimate trajectory and direction once baseline summary review is evaluated.
+5. **Optional context:** apply ecologist-defined roost entrance regions and trajectory rules as candidate interpretations.
+6. **Review:** show every window summary, allow original-video seeking and optional candidate clips.
 7. **Adjudicate:** record reviewer, final class, confidence/uncertainty and decision history.
 8. **Evaluate:** measure event recall, false alerts per hour, reviewer time and traceability.
 
@@ -70,3 +70,7 @@ Prefer an offline or WSP-approved internal execution environment. Architecture c
 - [Bat Conservation Trust - Good Practice Guidelines, 4th edition](https://www.bats.org.uk/resources/guidance-for-professionals/bat-surveys-for-professional-ecologists-good-practice-guidelines-4th-edition)
 - [Bat Conservation Trust - NVA technical guide](https://www.bats.org.uk/resources/guidance-for-professionals/bat-emergence-surveys-with-night-vision-aids-a-technical-guide)
 - [University of Exeter - Automated Detection and Tracking of Bats within Infrared Videos (research poster)](https://cdn.bats.org.uk/uploads/events-training/William_Rees_NBC_Poster.pdf?v=1725643811)
+
+## Motion-summary-first MVP decision
+
+Publicly documented bat video review workflows demonstrate a simpler initial product: a complete gallery of timestamped motion-summary images with original-video navigation and ecologist annotations. This is now the **preferred prototype order** for predominantly IR recordings, with tracking and AI classification as optional later features. See [public prior art](08-motion-summary-prior-art.md) and [provisional architecture](09-ir-first-architecture-draft.md). Camera stability must be assessed per recording, even for tripod-mounted cameras.
