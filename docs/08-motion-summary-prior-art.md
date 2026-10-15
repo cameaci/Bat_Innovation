@@ -101,3 +101,7 @@ Compare (A) full manual review; (B) all-window motion summaries plus source-vide
 6. [Ecordea - Roost](https://www.ecordea.com/)
 7. [TrackBats](https://trackbats.com/en/)
 8. [ThruTracker - User Guide](https://www.thrutrackeranalytics.com/user-guide)
+
+## Implementation note (2026-10-15)
+
+For the proposed in-house implementation, select the simplest offline stack consistent with the existing [Camera_Trap Gradio pattern](10-camera-trap-architecture-reference.md). A reviewer gallery, source-video verification clip, and a local append-only QA log are sufficient for the first app. An online image service, database server, learned model, and cloud workflow are **not prerequisites**.
