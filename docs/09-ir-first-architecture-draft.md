@@ -16,7 +16,7 @@ Audio is out of scope because existing acoustic review is separate. Thermal is *
 | Area | Agreed direction / evidence | Still to verify |
 | --- | --- | --- |
 | Deployment | **Local application** on a Windows machine; offline by design | Which specific workstation and installation restrictions are approved |
-| Users | Primary ecologist reviewer and potential separate QA reviewer; shared use may be relevant in future | Whether local sequential hand-off is enough for UK and GCC workflows |
+| Users | Primary ecologist reviewer and potential separate QA reviewer; shared use may be relevant in future | Whether local sequential hand-off is enough across reviewer teams |
 | Input | Recorded active-IR video; MP4 and MTS as initial candidate formats | Real codecs, FPS, interlacing, resolution, orientation and original-speed provenance |
 | Recording unit | A **session** may contain several sequential video segments | Segment continuity, missing frames and gap conventions |
 | Time | Separate **video-relative** and **survey clock** times; allow a manually documented offset | Trustworthy offset source and treatment of changed clock/segment starts |
