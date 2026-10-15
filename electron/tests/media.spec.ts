@@ -133,7 +133,18 @@ test('native selection inspects real media and persists explicit segment order a
     await expect(shell.page.locator('body')).not.toContainText(directory);
 
     await shell.page.getByRole('article', { name: /nonzero\.mts/ }).getByRole('button', { name: /^Move up/ }).click();
-    await shell.page.getByRole('button', { name: 'Save order', exact: true }).click();
+    // A dirty provenance timeline must not be silently replaced by refresh, import or session navigation.
+    await expect(shell.page.getByRole('button', { name: 'Refresh media', exact: true })).toBeDisabled();
+    await expect(shell.page.getByRole('button', { name: 'Choose original videos', exact: true })).toBeDisabled();
+    await expect(shell.page.getByRole('button', { name: 'Inspect media', exact: true })).toBeDisabled();
+    await expect(shell.page.getByRole('button', { name: 'Discard unsaved changes' })).toBeEnabled();
+    expect((await getMedia(shell, sessionID)).segments.map(segment => segment.metadata.filename))
+      .toEqual(['cfr.mp4', 'nonzero.mts', 'irregular.mp4']);
+    await shell.page.getByRole('button', { name: 'Discard unsaved changes' }).click();
+    await expect(shell.page.getByRole('article').first()).toHaveAccessibleName('Segment 1: cfr.mp4');
+    await expect(shell.page.getByRole('button', { name: 'Refresh media', exact: true })).toBeEnabled();
+    await shell.page.getByRole('article', { name: /nonzero\.mts/ }).getByRole('button', { name: /^Move up/ }).click();
+    await shell.page.getByRole('button', { name: 'Save timeline', exact: true }).click();
     await expect.poll(async () => (await getMedia(shell!, sessionID)).segments.map((segment) => segment.metadata.filename))
       .toEqual(['nonzero.mts', 'cfr.mp4', 'irregular.mp4']);
     await shell.page.reload();
