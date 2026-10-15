@@ -210,6 +210,32 @@ def test_flagged_corrupt_decoded_frame_fails_explicitly() -> None:
     assert error.value.code == "decode_failed"
 
 
+def test_last_frame_without_duration_keeps_end_unknown(
+    media: dict[str, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not invent a final frame duration or turn missing metadata into a crash."""
+    def frames_with_unknown_last_duration(container, stream, cancelled=lambda: False):
+        last = None
+        for frame in decoded_frames(container, stream, cancelled):
+            if last is not None:
+                yield last
+            last = frame
+        if last is not None:
+            yield SimpleNamespace(
+                pts=last.pts, time_base=last.time_base,
+                width=last.width, height=last.height,
+                rotation=last.rotation, interlaced_frame=last.interlaced_frame,
+                duration=None,
+            )
+
+    monkeypatch.setattr("backend.app.media.decoded_frames", frames_with_unknown_last_duration)
+    result = inspect_source(media["short_mp4"])
+    assert result["frame_count"] == 3
+    assert result["last_pts"] == "1024"
+    assert result["end_time"] is None and result["elapsed_end"] is None
+    assert "The final decoded frame has no duration; the source end is unknown." in result["warnings"]
+
+
 def test_disguised_playlist_cannot_fetch_network(tmp_path: Path) -> None:
     requests: list[str] = []
 
