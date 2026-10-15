@@ -2,11 +2,11 @@
 
 **Research and documentation for an in-house, human-reviewed bat emergence video analysis workflow.**
 
-Status: **research / discovery**. Last reviewed: **2026-10-15**.
+Status: **research + lean app architecture (no application code yet)**. Last reviewed: **2026-10-15**.
 
 ## Purpose
 
-This public repository collects literature, open-source software, datasets, technical options, validation methods, and decision records relevant to analysing bat emergence and re-entry in recorded night-vision footage. The intended use case is to investigate a potential **WSP-operated, in-house** workflow that reduces manual video review while retaining ecological oversight and an auditable trail.
+This public repository documents research **and the planned source code** for a lean local application to support human review of recorded **active infrared (IR)** bat emergence footage. The intended use case is to investigate a potential **WSP-operated, in-house** workflow that reduces manual video review while retaining ecological oversight and an auditable trail.
 
 This is an exploratory project, **not an official WSP publication, endorsed solution, or approved use of client data**. No model, dataset, workflow, or research-use permission has yet been validated for WSP deployment.
 
@@ -15,7 +15,7 @@ This is an exploratory project, **not an official WSP publication, endorsed solu
 1. Can a local or WSP-approved environment identify candidate bat activity in infrared/night-vision recordings?
 2. Can trajectories and roost context help distinguish emergence, re-entry, commuting, insects, birds, and uncertain events?
 3. Can ecologists review a complete set of timestamped motion-summary windows, then inspect original video only where necessary, without missing important events?
-4. Which tools, algorithms, datasets, and licences are suitable for an internally operated solution?
+4. Which tools, algorithms, datasets, and licences are suitable for an internally operated solution, without unnecessary infrastructure?
 5. What evidence, governance approvals, and validation results are required before a pilot?
 
 **Important distinction:** detecting a moving animal is not equivalent to proving a roost emergence. Event interpretation requires location, direction, temporal context, and ecological review.
@@ -32,7 +32,8 @@ This is an exploratory project, **not an official WSP publication, endorsed solu
 | [06 - Research backlog](docs/06-research-backlog.md) | Open questions and priority research tasks |
 | [07 - Research log](docs/07-research-log.md) | Dated research notes and decisions |
 | [08 - Motion-summary prior art](docs/08-motion-summary-prior-art.md) | Public product comparison, time-window summaries, evidence limitations |
-| [09 - IR-first architecture draft](docs/09-ir-first-architecture-draft.md) | Provisional in-house motion-summary-first pipeline, data contracts and review UI |
+| [09 - IR-first app architecture](docs/09-ir-first-architecture-draft.md) | Lean local Gradio app, processing modules, recording sessions, review/QA and exports |
+| [10 - Camera_Trap reference](docs/10-camera-trap-architecture-reference.md) | Reviewed implementation patterns to reuse and avoid |
 | [Source review template](docs/source-review-template.md) | Standard format for future source assessments |
 
 ## Working principles
@@ -46,12 +47,20 @@ This is an exploratory project, **not an official WSP publication, endorsed solu
 
 ## Status and next step
 
-The initial source register is a **scoping review**, not a systematic or exhaustive literature review. External-source links have been collected, but repository/code quality, dataset availability, licence compatibility, and empirical performance on target footage still require checks. A deeper literature and prior-art review has been requested. The [motion-summary review](docs/08-motion-summary-prior-art.md) adds public evidence for a lower-complexity, all-window summary-first MVP; the [architecture draft](docs/09-ir-first-architecture-draft.md) is provisional pending requirements answers.
+The initial source register is a **scoping review**, not a systematic or exhaustive literature review. A local, IR-first application is the selected implementation direction; app code is not yet committed. External-source links have been collected, but repository/code quality, dataset availability, licence compatibility, and empirical performance on target footage still require checks. A deeper literature and prior-art review has been requested. The [motion-summary review](docs/08-motion-summary-prior-art.md) adds public evidence for a lower-complexity, all-window summary-first MVP; the [architecture draft](docs/09-ir-first-architecture-draft.md) is provisional pending requirements answers.
 
 ## Documentation conventions
 
-All project documentation is written in English and stored as Markdown (`.md`). New research should update the [source register](docs/02-source-register.md), [research log](docs/07-research-log.md), and relevant topic document. Label claims as **verified from source**, **reported by source**, **inference**, or **unverified**.
+All project documentation is written in English and stored as Markdown (`.md`). New research should update the [source register](docs/02-source-register.md), [research log](docs/07-research-log.md), and relevant topic document. Use these four evidence labels consistently: **directly verified** (we inspected the cited source), **source-reported** (claim stated by a source but not reproduced), **inference** (our interpretation), or **unverified** (not checked). Source verification never implies the claim is independently reproduced.
 
 ## Security note
 
-**This repository is public.** Do not commit survey footage, internal workbooks, customer/site identifiers, access paths, contract terms, credentials, restricted datasets, or other non-public material. Internal project evidence must stay in separately approved WSP storage and governance systems.
+**Both this repository and the Camera_Trap reference repository were confirmed public through GitHub repository metadata on 2026-10-15.** Do not commit survey footage, internal workbooks, customer/site identifiers, access paths, contract terms, credentials, restricted datasets, or other non-public material. Internal project evidence must stay in separately approved WSP storage and governance systems.
+
+## App design decision
+
+Use the lean local Gradio/Python patterns of [Camera_Trap](docs/10-camera-trap-architecture-reference.md), **not** its training pipeline or large dependency tree. Start with streamed time-window IR motion summaries, original video verification, review/QA records, and CSV export. Tracking is an optional next enhancement. **Thermal and acoustic analysis are outside v1.** Any controlled test on client footage requires documented access and permission checks first. See [architecture](docs/09-ir-first-architecture-draft.md).
+
+## Ownership and licence
+
+The code/IP owner and intended distribution licence have **not been determined**. No licence should be inferred from the repository's public visibility. Confirm ownership and reuse rights before publishing application code or copying reference implementations.
