@@ -1,5 +1,21 @@
 # 07 - Research log
 
+## 2026-10-15 - PR #4 independent review and focused corrections
+
+**Status:** Source-level refinements committed on the open Slice 1A PR branch; **not merged**. This entry records code changes, not new passing full-suite test results.
+
+**Finding 1, source attribution:** The initial schema prevented duplicate checksums only within one session. Since the current domain model binds each original to one camera recording session, the first v2 schema now enforces global unique source path, SHA256 and stored filesystem identity, alongside per-session sequence uniqueness. The insert operation compares prior sources across all sessions, keeping session-specific position calculation. Added a test for identical originals across two sessions (same pathname and copied bytes), for a truly distinct recording, and for DB-level uniqueness.
+
+**Finding 2, missing versus unreadable:** Existing media inventory previously converted read/metadata access failures into missing files. It now returns a distinct \`unreadable_source\` classification, checks a one-byte read of otherwise unchanged originals, and presents an actionable UI notice without revealing source paths. The regression test uses explicit permission/error injection independent of root-user chmod behavior.
+
+**Finding 3, unsaved provenance edits:** Reordering, clock-anchor edits and continuity changes now block Refresh, adding another source and parent session navigation until saved or explicitly discarded. A small explicit Discard button restores the last saved media inventory. Electron UI regression steps test navigation-blocking, unchanged SQLite before save, explicit discard and saved clock provenance remaining unchanged.
+
+**Verification:** Re-fetched current PR source through GitHub and checked 15 key source-to-test invariants; all 15 present. **Full tests have not been rerun for these new commits.** The available independent container does not have PyAV or the project's npm/Electron dependencies, and the current source cannot be claimed validated by Codex's original (pre-fix) 34 Python / 16 Node / 5 Electron results. Test execution in the Codex environment is required before merge.
+
+**Next:** On the same PR branch, run \`python -m pytest backend/tests -q\`, \`npm run typecheck\`, \`npm test\` and \`npm run test:e2e\`; resolve any failing test without changing the agreed architecture. Keep Windows, original-camera AVCHD and FFmpeg/PyAV wheel redistribution gates separate and open.
+
+---
+
 ## 2026-10-15 - Slice 1A native media import and decoded-PTS gate
 
 **Scope and baseline:** Implemented [issue #3](https://github.com/cameaci/Bat_Innovation/issues/3) from merged Slice 0 `main` at `d8e8d2f`. This adds original-file identity, exact timestamp inspection and ordered per-camera segments. Playback/seek, preview/transcoding, summaries, motion detection, tracking, AI and reporting remain excluded.
