@@ -24,8 +24,8 @@ Reviewed 2026-10-15. Status: **Slice 0 partly implemented; subsequent slices not
 
 - [ ] Confirm ownership/publication and reuse conditions for Camera_Trap components and planned source code.
 - [ ] Verify compatible Windows Python, Node and Electron versions, plus local packaging policy. Pin versions and lock dependencies.
-- [ ] Create the minimal \`backend/\`, \`frontend/\`, and eventually \`electron/\` layout from [design.md](design.md); avoid importing the full Camera_Trap app.
-- [ ] Stand up one FastAPI \`/health\` endpoint and a minimal React interface that displays actual backend readiness.
+- [ ] Create the minimal `backend/`, `frontend/`, and eventually `electron/` layout from [design.md](design.md); avoid importing the full Camera_Trap app.
+- [ ] Stand up one FastAPI `/health` endpoint and a minimal React interface that displays actual backend readiness.
 - [x] Add a small SQLite schema/version check and an app-specific local user-data folder; generated/private data must be gitignored.
 - [ ] Verify local-only behavior: no unapproved network calls, explicit error on missing FFmpeg or configuration.
 - [ ] Add a narrow integration smoke test covering React -> local API -> SQLite read/write.
@@ -39,9 +39,9 @@ Reviewed 2026-10-15. Status: **Slice 0 partly implemented; subsequent slices not
 
 - [ ] Create tiny synthetic CFR and variable-timebase media; at least one AVCHD/MTS-like transport-stream sample and one MP4 sample. Synthetic .ts output does not prove every camera-specific .MTS works.
 - [ ] Compare simple FFmpeg decoding and [PyAV](https://github.com/PyAV-Org/PyAV) for access to actual decoded frame PTS. **Preferred investigation:** PyAV gives direct frame timestamps and may eliminate brittle frame-number mapping. Verify Windows wheel, Python version, package/bundled-FFmpeg licences and measured decoding performance before deciding; use only **one authoritative decoder path** in the eventual engine.
-- [ ] Implement \`ffprobe\` metadata extraction, codec identity, field/interlace flags, rotation and detected stream timebase; reject unsupported or malformed streams clearly.
+- [ ] Implement `ffprobe` metadata extraction, codec identity, field/interlace flags, rotation and detected stream timebase; reject unsupported or malformed streams clearly.
 - [ ] Implement a minimal Electron development shell and **native source-file selector**. Do not simulate large-video import by pushing complete files through a browser upload or accepting arbitrary filesystem paths over HTTP.
-- [ ] Import **ordered source segments** into a recording session. Record a checksum, exact sequence and explicit \`contiguous / gap / unknown\` status. Do not assume filenames prove continuity.
+- [ ] Import **ordered source segments** into a recording session. Record a checksum, exact sequence and explicit `contiguous / gap / unknown` status. Do not assume filenames prove continuity.
 - [ ] Map source PTS -> segment elapsed -> optional session position -> optional anchored real-world survey clock, with visible provenance and uncertainty.
 - [ ] Implement original-media verification with a working player. Compare direct browser playback versus **on-demand FFmpeg preview clips** for non-browser-compatible codecs. Choose by an actual seek-accuracy and start/end-boundary test, not extension.
 - [ ] Preserve original-speed provenance and flag derivatives of unknown speed.
@@ -60,7 +60,7 @@ Reviewed 2026-10-15. Status: **Slice 0 partly implemented; subsequent slices not
 - [ ] Build a two-panel motion summary: reference image and motion evidence with a documented early/middle/late colour legend.
 - [ ] Flag rather than silently erase significant camera shake/re-aiming, day-to-IR switching, sharp illumination changes and unusable image/codec conditions. Reset background only as an explicit logged operation.
 - [ ] Support per-camera exclusion masks only when configured and labelled; no secret hard-coded HUD masking or global insect deletion.
-- [ ] Store \`processing_run\` parameters and the complete \`summary_window\` manifest in SQLite; write images atomically. Interrupted processing is marked incomplete and can be safely restarted without duplicate windows.
+- [ ] Store `processing_run` parameters and the complete `summary_window` manifest in SQLite; write images atomically. Interrupted processing is marked incomplete and can be safely restarted without duplicate windows.
 - [ ] Provide progress and a reproducible processing error record with segment and window identity.
 
 **Exit:** every valid window produces exactly one summary or an explicitly failed record. Given a two-hour continuous recording and 30-second windows, expect 240 coverage records, not necessarily 240 successfully rendered images when errors occur. The UI cannot claim complete if any planned window is missing.
@@ -86,7 +86,7 @@ Reviewed 2026-10-15. Status: **Slice 0 partly implemented; subsequent slices not
 **Goal:** preserve actual review authority and produce useful reporting artefacts.
 
 - [ ] Implement sequential first-review and second-review actions in the same workspace. Store distinct reviewer/QA attribution, revisions, disagreements, comments and finalisation.
-- [ ] Enforce valid transitions. A first reviewer cannot claim second-review approval merely by toggling a badge; unresolved disagreement cannot silently become \`finalised\`.
+- [ ] Enforce valid transitions. A first reviewer cannot claim second-review approval merely by toggling a badge; unresolved disagreement cannot silently become `finalised`.
 - [ ] Keep observations, ecological interpretations and review status in separate fields. Include commuting, foraging, possible or precautionary emergence, re-entry and uncertainty without forcing unsupported counts.
 - [ ] Export **two separate artefacts** from one authoritative DB: ecology-oriented CSV (mapped to an approved spreadsheet template), plus a technical audit CSV/JSON containing source PTS, file checksums, warnings, processing run and review history.
 - [ ] Support explicit "provisional" and "finalised" output states. Report export must not label unfinished review as final.
@@ -126,7 +126,7 @@ Only if supported by measured benefit: motion blobs and tracking (OpenCV/Norfair
 
 ## Dependency graph
 
-\`\`\`text
+```text
 Rights + minimal stack
           |
 Local media/PTS + usable source preview
@@ -144,7 +144,7 @@ Authorised independent ecological validation
 Gate 1 rights/environment and Gate 2 adjudicated benchmark
 can progress in parallel with synthetic code development,
 but must be satisfied before claims based on client footage.
-\`\`\`
+```
 
 ## Definition of done for every slice
 
