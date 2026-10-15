@@ -1,5 +1,28 @@
 # 07 - Research log
 
+## 2026-10-15 - Lean local architecture review and decisions
+
+**Question:** How should a local IR bat reviewer be structured without overengineering, and what patterns can be reused from an existing camera-trap application?
+
+**Method:** Inspected GitHub metadata and source files in [cameaci/Camera_Trap](https://github.com/cameaci/Camera_Trap), especially [app.py](https://github.com/cameaci/Camera_Trap/blob/main/app.py), [classifier adapter](https://github.com/cameaci/Camera_Trap/blob/main/wildlife_classifier.py), [utility module](https://github.com/cameaci/Camera_Trap/blob/main/species_postprocessing.py), [tests](https://github.com/cameaci/Camera_Trap/tree/main/tests), and [dependencies](https://github.com/cameaci/Camera_Trap/blob/main/requirements.txt). Also checked the public visibility of both repositories via GitHub metadata.
+
+**Findings:**
+1. The reference app uses **Gradio Blocks**, local Python callbacks, image/video/batch actions and JSON inference results; it launches with `share=False`.
+2. Its inspected app and repository search did **not establish a complete human ecological QA sign-off feature**. Reuse the interaction design, but implement a minimal explicit reviewer/QA history for Bat Innovation.
+3. The reference has useful unit-test and modular adapter patterns, but its ML dependencies, trained weights, demo assets and generated files are **not** needed in the IR motion-summary MVP.
+4. Existing spreadsheet entries in the intended workflow may provide event **prelabels**; they must not be presented as approved ground truth.
+5. IR-specific timing, camera movement and survey-level evaluation requirements should be addressed in a simple local workflow.
+
+**Decisions:** Local Windows-first **Gradio** app, with five small Python modules; no database, web API, cloud infrastructure or deep-learning dependency in v1. Video session -> segments -> all motion-summary windows -> ecologist review/QA -> reporting and audit exports. Simple tracking can be added later; thermal/acoustics are out of scope. User-specific requirements not yet resolved are documented as open, not invented.
+
+**Governance:** Both GitHub repositories were **public** at inspection. This research record adds no client footage, private workbook, site details or non-public vendor meeting content. Rights, data access, final ecological owner and acceptance thresholds remain to be established before a real-data pilot.
+
+**Sources and direct links:** [Camera_Trap architecture audit](10-camera-trap-architecture-reference.md) | [IR architecture](09-ir-first-architecture-draft.md).
+
+**Changed files:** README.md, docs/01-problem-and-scope.md, docs/02-source-register.md, docs/03-technical-approaches.md, docs/04-data-governance.md, docs/05-evaluation-framework.md, docs/06-research-backlog.md, docs/07-research-log.md, docs/08-motion-summary-prior-art.md, docs/09-ir-first-architecture-draft.md, docs/10-camera-trap-architecture-reference.md, docs/source-review-template.md.
+
+---
+
 ## 2026-10-15 - Public motion-summary prior art and IR-first design revision
 
 **Question:** Could an in-house, IR-first bat survey reviewer be useful before implementing individual-object tracking or training a bat detector?
@@ -72,11 +95,20 @@
 
 ### YYYY-MM-DD - Short title
 
-**Question:**  
-**Sources and links:**  
-**Method:**  
-**Findings:**  
-**Limitations and uncertainty:**  
-**Licences/access:**  
-**Decision or next action:**  
+**Question:**
+
+**Sources and links:**
+
+**Search locations / exact queries (if applicable):**
+
+**Method:**
+
+**Findings:**
+
+**Limitations and uncertainty:**
+
+**Licences/access:**
+
+**Decision or next action:**
+
 **Changed files:**
