@@ -26,6 +26,8 @@ Use one copy or section per source. Never copy restricted source text or data in
 - **Inputs and outputs:**
 - **Annotation type:** frame boxes / tracks / event timestamps / density maps / none
 - **Evidence unit:** original video segment / time window / candidate event / final survey conclusion
+- **Prelabels versus final adjudication:**
+- **Human review/QA stages and final decision owner:**
 - **Ground truth and QA method:**
 - **Reported metrics and evaluation split:**
 - **Reported limitations:**
