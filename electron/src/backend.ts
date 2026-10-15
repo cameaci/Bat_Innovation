@@ -10,6 +10,25 @@ const unavailable = (message = 'Backend unavailable. Reopen the app after checki
   ({ ok: false, error: { code: 'unavailable', message } }) as const;
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/** Recognise known startup failures without forwarding Python tracebacks or private paths. */
+function safeStartupFailure(output: string): string | undefined {
+  const mediaTool = output.match(/Required media tool is unavailable: (ffmpeg|ffprobe)\b/);
+  if (mediaTool) return 'Required media tool is unavailable: ' + mediaTool[1] + '. Install it on PATH and reopen the app.';
+  if (/Unsupported database schema version \d+; expected \d+/.test(output)) {
+    return 'The local database has an unsupported schema version. Open it with a compatible app version or restore a supported backup. The database was not changed.';
+  }
+  if (output.includes('Existing unversioned database cannot be initialised safely')) {
+    return 'The local database has an unrecognised schema. Restore a supported backup; the existing database was not changed.';
+  }
+  if (/sqlite3\.(?:DatabaseError|OperationalError): (?:file is not a database|database disk image is malformed)/.test(output)) {
+    return 'The local database cannot be read safely. Preserve it and restore a known-good backup.';
+  }
+  if (output.includes('sqlite3.OperationalError: unable to open database file')) {
+    return 'The local database could not be opened. Check the application data directory and its permissions.';
+  }
+  return undefined;
+}
+
 /** Fixed routes only. This client lives in the main process, never in React. */
 export class BackendClient {
   constructor(private readonly port: number, private readonly token: string) {}
@@ -146,8 +165,8 @@ export class BackendRuntime {
       let stderr = '';
       child.stderr?.on('data', (data: Buffer) => {
         stderr = (stderr + data.toString()).slice(-8192);
-        const missing = stderr.match(/Required media tool is unavailable: (ffmpeg|ffprobe)\b/);
-        if (missing) this.failure = unavailable(`Required media tool is unavailable: ${missing[1]}. Install it on PATH and reopen the app.`);
+        const diagnostic = safeStartupFailure(stderr);
+        if (diagnostic) this.failure = unavailable(diagnostic);
       });
       const deadline = Date.now() + 15000;
       while (!this.stopped && this.child && Date.now() < deadline) {
