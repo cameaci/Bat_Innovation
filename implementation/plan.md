@@ -36,6 +36,8 @@ Reviewed 2026-10-15. Status: **Slice 0 UI and development shell verified on Linu
 
 ## Slice 1 - Source-video fidelity spike (first technical risk)
 
+**Pre-implementation evidence:** Synthetic FFprobe checks confirmed nonzero `.mts` stream PTS origin (1.44 s) and irregular MP4 frame timestamps. These are **not** tests on original camera footage. See the [research log](../docs/07-research-log.md) and the narrowly scoped [Codex Slice 1A task](https://github.com/cameaci/Bat_Innovation/issues/3). No Slice 1 implementation is claimed yet.
+
 **Goal:** accurate original-video seeking and segmented session import, not a decorative UI.
 
 - [ ] Create tiny synthetic CFR and variable-timebase media; at least one AVCHD/MTS-like transport-stream sample and one MP4 sample. Synthetic .ts output does not prove every camera-specific .MTS works.
