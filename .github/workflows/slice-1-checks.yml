@@ -1,11 +1,8 @@
 name: Slice 1 media checks
 
+# Optional manual verification only; GitHub-hosted runner quota currently unavailable.
 on:
-  pull_request:
-  push:
-    branches:
-      - main
-      - codex/slice-1-media-import
+  workflow_dispatch:
 
 permissions:
   contents: read
