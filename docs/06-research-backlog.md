@@ -3,6 +3,21 @@
 Last reviewed: 2026-10-15  
 Status: open research programme. Priorities are proposals, not committed WSP tasks.
 
+## Immediate implementation and evidence priorities
+
+| ID | Deliverable | Responsible role (not assigned person) | Dependency |
+| --- | --- | --- | --- |
+| I01 | Confirm local Windows workstation, installation permissions, data folder and approved offline execution | App owner + IT | Before real-file execution |
+| I02 | Build clean Gradio/Python project skeleton matching the [Camera_Trap reference](10-camera-trap-architecture-reference.md) | Developer | Gate 0, synthetic inputs |
+| I03 | Unit-test segmented timebase, clock-offset handling, camera movement and all-window summaries | Developer | I02 |
+| I04 | Produce local reviewer and QA history with reporting CSV and audit export | Developer + ecological reviewer | I02 |
+| I05 | Verify original-file format and metadata on permitted examples; treat spreadsheet labels as prelabels | Data custodian + ecological lead | Gate 1 access/permissions |
+| I06 | Identify final ecological sign-off owner, disagreeing QA reconciliation and acceptance thresholds | Ecological lead | Before benchmark |
+| I07 | Measure full manual review baseline and compare with complete summary-assisted review | Ecological lead + reviewer(s) | Gate 2 benchmark |
+| I08 | Decide whether optional motion tracks materially improve review | Developer + ecological lead | I07 results |
+
+**Focus:** deliver a working **local summary reviewer**, not an infrastructure platform. Future multi-user sharing, hosted services, detectors and acoustic/thermal integration are deferred.
+
 ## Priority 0 - Evidence and rights
 
 | ID | Question / task | Evidence required | Completion condition |
@@ -33,7 +48,7 @@ Status: open research programme. Priorities are proposals, not committed WSP tas
 | R14 | Which local review functions provide the greatest practical benefit? | User workflow testing: gallery, zoom, original-video seek, labels, QA, CSV | Usable reviewer with traceable and complete window coverage |
 | R15 | What is the local CPU processing speed and memory footprint for representative MP4/MTS footage? | Approved workstation, original-format video and profiler | Repeatable throughput and resource measurements |
 
-## Priority 2 - Productisation questions
+## Deferred productisation questions (not blockers for Gate 0 code scaffolding)
 
 - Offline Windows workstation versus internal server deployment.
 - Support for `.MTS`, `.MP4` and camera-specific timebases.
@@ -58,3 +73,7 @@ Status: open research programme. Priorities are proposals, not committed WSP tas
 | 2026-10-15 | Prioritise in-house, human-reviewed event triage over autonomous roost conclusions. | Technical/ecological risk framing; not an empirical result. | Pilot evidence available |
 | 2026-10-15 | Do not select a target dataset or model yet. | Provenance, permissions and target performance not established. | Data and approval gates satisfied |
 | 2026-10-15 | Prioritise **all-window IR motion summaries plus ecological review** as the first prototype, with tracking and AI as optional later stages. | Publicly documented workflows and lower initial training-data requirements; not a performance finding. | Representative IR benchmark or reviewer feedback contradicts the hypothesis |
+| 2026-10-15 | Use a **local Windows-first Gradio/Python monolith** inspired by the publicly inspected Camera_Trap app. No server, database, cloud or model-training dependency in v1. | Direct repository inspection and explicit lean-code preference. | Real multi-user or offline constraints demand change |
+| 2026-10-15 | Thermal and acoustic processing are **out of v1**. | IR-first scope decision. | Separately prioritised later |
+| 2026-10-15 | Start with existing spreadsheet entries as **prelabels, not verified ground truth**. | Label provenance must be independently checked. | Final ecological adjudication establishes test labels |
+| 2026-10-15 | Conduct any client-footage PoC only **after relevant Gate 1 and Gate 2 requirements**. | Data, security and ecological evaluation prerequisites. | Permissions and benchmark are documented |
