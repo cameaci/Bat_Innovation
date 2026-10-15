@@ -1,25 +1,19 @@
 # 07 - Research log
 
-## 2026-10-15 - Lean local architecture review and decisions
+## 2026-10-15 - Correction: Camera_Trap repository inspection and lean desktop decision
 
-**Question:** How should a local IR bat reviewer be structured without overengineering, and what patterns can be reused from an existing camera-trap application?
+**Question:** What are the real architecture, verification features and code conventions of the current public [Camera_Trap](https://github.com/cameaci/Camera_Trap) repository, and which are appropriate for a small IR emergence-review app?
 
-**Method:** Inspected GitHub metadata and source files in [cameaci/Camera_Trap](https://github.com/cameaci/Camera_Trap), especially [app.py](https://github.com/cameaci/Camera_Trap/blob/main/app.py), [classifier adapter](https://github.com/cameaci/Camera_Trap/blob/main/wildlife_classifier.py), [utility module](https://github.com/cameaci/Camera_Trap/blob/main/species_postprocessing.py), [tests](https://github.com/cameaci/Camera_Trap/tree/main/tests), and [dependencies](https://github.com/cameaci/Camera_Trap/blob/main/requirements.txt). Also checked the public visibility of both repositories via GitHub metadata.
+**Method:** Inspected the live default-branch Git tree and the following primary-source code and docs: [README](https://github.com/cameaci/Camera_Trap/blob/main/README.md), [Electron main process](https://github.com/cameaci/Camera_Trap/blob/main/electron/src/main.ts), [frontend package](https://github.com/cameaci/Camera_Trap/blob/main/frontend/package.json), [FastAPI entry point](https://github.com/cameaci/Camera_Trap/blob/main/backend/app/main.py), [SQLite setup](https://github.com/cameaci/Camera_Trap/blob/main/backend/app/db/base.py), [verification gallery](https://github.com/cameaci/Camera_Trap/blob/main/frontend/src/components/verify/VerifyView.tsx), [count confirmation](https://github.com/cameaci/Camera_Trap/blob/main/frontend/src/components/verify/EventCountPanel.tsx), [export UI](https://github.com/cameaci/Camera_Trap/blob/main/frontend/src/pages/ExportPage.tsx), [conventions](https://github.com/cameaci/Camera_Trap/blob/main/CONVENTIONS.md), [licence](https://github.com/cameaci/Camera_Trap/blob/main/LICENSE), and [user guide](https://github.com/cameaci/Camera_Trap/blob/main/wsp/docs/USER_GUIDE.md).
 
-**Findings:**
-1. The reference app uses **Gradio Blocks**, local Python callbacks, image/video/batch actions and JSON inference results; it launches with `share=False`.
-2. Its inspected app and repository search did **not establish a complete human ecological QA sign-off feature**. Reuse the interaction design, but implement a minimal explicit reviewer/QA history for Bat Innovation.
-3. The reference has useful unit-test and modular adapter patterns, but its ML dependencies, trained weights, demo assets and generated files are **not** needed in the IR motion-summary MVP.
-4. Existing spreadsheet entries in the intended workflow may provide event **prelabels**; they must not be presented as approved ground truth.
-5. IR-specific timing, camera movement and survey-level evaluation requirements should be addressed in a simple local workflow.
+**Correction:** The earlier draft in this research record incorrectly described the current repository as a single-file **Gradio** application without an identified QA workflow or top-level licence. **Those statements were wrong and have been withdrawn.** The current codebase is an **Electron desktop shell + React/TypeScript frontend + FastAPI Python backend + local SQLite data layer**, with interactive human label verification, count correction and reviewed-progress workflows. It has a root-level MIT licence with a WSP copyright notice.
 
-**Decisions:** Local Windows-first **Gradio** app, with five small Python modules; no database, web API, cloud infrastructure or deep-learning dependency in v1. Video session -> segments -> all motion-summary windows -> ecologist review/QA -> reporting and audit exports. Simple tracking can be added later; thermal/acoustics are out of scope. User-specific requirements not yet resolved are documented as open, not invented.
+**Decision:** Follow the existing **desktop and QA interaction patterns**, not the full product feature set. Build an IR-first, single-machine React/FastAPI/SQLite vertical slice, then add Electron packaging. Keep recording sessions, segmented files, time mapping, every-window motion summaries, original video navigation, simple reviewer/QA records and report/audit exports. Defer deep-learning models, cloud hosting, cross-camera deduplication, acoustic analysis and thermal support.
 
-**Governance:** Both GitHub repositories were **public** at inspection. This research record adds no client footage, private workbook, site details or non-public vendor meeting content. Rights, data access, final ecological owner and acceptance thresholds remain to be established before a real-data pilot.
+**Constraints and open issues:** Existing timestamped workbook annotations can serve as **prelabels** but are not validated reference truth; a named ecological lead must own final sign-off and performance thresholds. Gate 0 allows synthetic/licensed-public development. Use of client footage requires documented permissions and privacy/security checks; no client media or non-public internal details were committed. Both repositories were confirmed **public** through GitHub metadata; Bat Innovation's code/IP owner and licence remain open.
 
-**Sources and direct links:** [Camera_Trap architecture audit](10-camera-trap-architecture-reference.md) | [IR architecture](09-ir-first-architecture-draft.md).
-
-**Changed files:** README.md, docs/01-problem-and-scope.md, docs/02-source-register.md, docs/03-technical-approaches.md, docs/04-data-governance.md, docs/05-evaluation-framework.md, docs/06-research-backlog.md, docs/07-research-log.md, docs/08-motion-summary-prior-art.md, docs/09-ir-first-architecture-draft.md, docs/10-camera-trap-architecture-reference.md, docs/source-review-template.md.
+**Code scope:** This entry changes only Markdown; no application source was created.  
+**Changed files:** README.md; docs/01-problem-and-scope.md; docs/02-source-register.md; docs/03-technical-approaches.md; docs/04-data-governance.md; docs/06-research-backlog.md; docs/07-research-log.md; docs/09-ir-first-architecture-draft.md; docs/10-camera-trap-architecture-reference.md.
 
 ---
 
