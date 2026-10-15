@@ -54,10 +54,23 @@ Scope: **initial curated scoping review**, not an exhaustive systematic review. 
 
 **No dataset in this register is yet confirmed to be a cleared, representative benchmark for UK roost emergence analysis.** An acoustic bat-call dataset is not interchangeable with an IR-video event dataset.
 
+## E. Public commercial and grey-literature workflow precedents (2026-10-15 update)
+
+| ID | Source | Publicly supported relevance | Limits / deployment implications | Status |
+| --- | --- | --- | --- | --- |
+| V01 | [Wildlife Imaging Systems - Bat Emergence](https://www.wildlifeimagingsystems.com/services-bat-emergence) | Vendor describes cloud-based, camera-agnostic near-IR/thermal motion summaries, one per **30-60 seconds**, with ecologist review and source-video navigation. | Up to 90% time savings is a **vendor claim**, not a validated WSP result. Exact algorithm and code are not disclosed. | Official vendor page reviewed |
+| V02 | [Wildlife Imaging Systems - WISARD](https://www.wildlifeimagingsystems.com/wisard-software) | Image/track labels, notes, original-video jump, filtering, QA and reporting; its FAQ confirms the review app **does not produce summaries locally**. | [GitHub releases](https://github.com/WildlifeImagingSystems/wisard-labeling-tool-releases) are **installer-only**, not reusable open-source code. | Official page and repository README reviewed |
+| V03 | [Public bat survey report (2025), section 4.3.4 and Plate 1](https://docs.planning.org.uk/20250910/73/SSP14ADWH6X00/ueyziikzwnauclwd.PDF) | Documents actual use of 30-second colour motion-trace summaries followed by ecological review and original-video inspection. | One public report demonstrates workflow use, not sensitivity or quantified time savings. Avoid republishing survey site details or imagery. | Public grey literature reviewed |
+| V04 | [Reflex Cameras - Motion Analysis Service](https://reflexcameras.co.uk/video-motion-analysis-service/) | Vendor describes **locally processed**, 15-second timestamped motion-summary images for bat IR/thermal footage. | Independent quality, licence and local implementation not verified. | Official vendor page reviewed |
+| V05 | [Ecordea Roost](https://www.ecordea.com/) | Vendor describes one motion composite per approximately 32 seconds with original thermal video and acoustic review. | Thermal-first; acoustic integration out of scope for Phase 1. | Official vendor page reviewed |
+| V06 | [ThruTracker - User Guide](https://www.thrutrackeranalytics.com/user-guide) | Public guidance on tracking, crossing gates and emergence counting. | Primarily thermal tracking/counting precedent; evaluate separately from IR motion-summary baseline. | Official documentation reviewed |
+
+See [motion-summary prior art and independent design considerations](08-motion-summary-prior-art.md). Public vendor descriptions and published examples do not establish permission to copy proprietary implementations.
+
 ## Initial synthesis
 
 1. Directly relevant precedent exists for automated bat tracking and counting, especially thermal video. The closest NVA-specific lead is the Exeter poster.
-2. A defensible first baseline is conventional motion detection plus tracking, compared with learned detectors only after a labelled validation sample exists.
+2. A **simpler first baseline** is a complete set of timestamped motion-summary images with ecologist review and original-video navigation. Add tracking and learned detectors only if they improve measured outcomes.
 3. Roost emergence classification is a **temporal and spatial ecological decision**, not simply object detection.
 4. Public availability, reproducibility, permissive software licences, dataset licences and client reuse permissions are separate checks.
 5. No external reported accuracy should be presented as validated WSP performance.
