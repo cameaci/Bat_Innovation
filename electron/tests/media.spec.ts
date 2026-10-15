@@ -160,6 +160,15 @@ test('native selection inspects real media and persists explicit segment order a
     const reopened = await getMedia(shell, sessionID);
     expect(reopened.clock_anchor).toBeNull();
     expect(reopened.segments.every((segment) => segment.continuity === 'unknown')).toBe(true);
+    // Clock provenance edits are protected by the same unsaved-changes guard.
+    await shell.page.getByLabel('Clock anchor segment').selectOption(reopened.segments[0]!.id);
+    await shell.page.getByLabel('Clock anchor UTC').fill('2026-10-15T20:00:00Z');
+    await shell.page.getByLabel('Clock anchor provenance').fill('Synthetic clock reference');
+    await expect(shell.page.getByRole('button', { name: 'Refresh media', exact: true })).toBeDisabled();
+    await expect(shell.page.getByRole('button', { name: 'Inspect media', exact: true })).toBeDisabled();
+    await shell.page.getByRole('button', { name: 'Discard unsaved changes' }).click();
+    await expect(shell.page.getByLabel('Clock anchor segment')).toHaveValue('');
+    expect((await getMedia(shell, sessionID)).clock_anchor).toBeNull();
     expect(await Promise.all(selected.map(digest)), 'Inspection and reordering must leave original bytes unchanged').toEqual(hashes);
     await quit(shell);
     shell = undefined;
