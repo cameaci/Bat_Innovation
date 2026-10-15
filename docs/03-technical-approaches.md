@@ -5,7 +5,7 @@ Status: design hypotheses. No approach has been benchmarked on authorised target
 
 ## Design premise
 
-The proposed output is a **review queue of candidate events** linked to original video. Detection, tracking and ecological event interpretation are separate tasks. The first prototype should be reproducible, inspectable and runnable in an approved environment.
+The first output is a **complete gallery of all time-window motion summaries** linked to original video. Optional candidate events and tracks are secondary. Detection, tracking and ecological event interpretation are separate tasks. The first prototype should be reproducible, inspectable and runnable in an approved environment.
 
 ## Preferred first baseline - All-window temporal motion summaries
 
@@ -58,15 +58,18 @@ The proposed output is a **review queue of candidate events** linked to original
 ## Candidate processing architecture
 
 ```text
-Original video in approved storage
-    -> file inventory and SHA-256
-    -> ffprobe metadata and timebase audit
-    -> frame decoding at original timebase
+Original IR session in approved local storage (ordered segments)
+    -> original files inventory and SHA-256
+    -> ffprobe metadata: FPS, field order, rotation, timestamps
+    -> segment timeline, missing-gap check and clock offset
+    -> camera movement / IR illumination / scene-change flags
+    -> streamed frame decoding with optional clock-overlay mask
     -> per-window motion summary (ALL windows retained)
     -> stability/quality flags and timestamped image manifest
     -> ecologist gallery, original-video seek and adjudication
     -> optional candidate detection / tracking / roost-zone analysis
-    -> audit-ready event report + performance metrics
+    -> reviewer + QA records in local append-only log
+    -> reporting CSV and separate audit export
 ```
 
 The original video must remain accessible for review. Derived clips should be linked by file identity and frame/timestamp range; do not silently replace original evidence with speed-altered clips.
@@ -85,6 +88,17 @@ The original video must remain accessible for review. Derived clips should be li
 ## Decision rule
 
 Select by **event recall at an acceptable false-alert burden**, not frame mAP alone. Report review time, false alerts per video hour, evidence traceability, deployment complexity, licence constraints and robustness across cameras/sites. Do not claim automation of emergence classification from generic motion detection.
+
+## IR-specific failure modes and safeguards
+
+- Dusk-to-IR transitions, torch beams and lighting changes can overwhelm ordinary background subtraction: flag the affected interval and rebuild the background as required.
+- Tripod-mounted cameras can be re-aimed: detect significant global motion and invalidate saved roost regions until reconfirmed.
+- Insects near IR sources may dominate candidates. Begin with visible, configurable sensitivity and **flagging rather than aggressive suppression**, to avoid masking bats. Evaluate optional track-based insect discrimination only against adjudicated data.
+- A recording may contain multiple video files; build the session timeline explicitly rather than interpreting every file as a new survey.
+- Original-speed changes, interlacing, image rotation, broken/missing timestamps and moving clock overlays require inspection or quality flags, not blanket assumptions.
+- Exact bat flight speed, distance or species cannot reliably be inferred from one uncalibrated camera view.
+
+**Implementation architecture:** [lean local Gradio design](09-ir-first-architecture-draft.md); [Camera_Trap patterns](10-camera-trap-architecture-reference.md).
 
 ## Reproducibility requirements
 
