@@ -104,4 +104,4 @@ Compare (A) full manual review; (B) all-window motion summaries plus source-vide
 
 ## Implementation note (2026-10-15)
 
-For the proposed in-house implementation, select the simplest offline stack consistent with the existing [Camera_Trap Gradio pattern](10-camera-trap-architecture-reference.md). A reviewer gallery, source-video verification clip, and a local append-only QA log are sufficient for the first app. An online image service, database server, learned model, and cloud workflow are **not prerequisites**.
+For the proposed in-house implementation, use a **small offline desktop application** consistent with the [actual Camera_Trap Electron/React/FastAPI/SQLite architecture](10-camera-trap-architecture-reference.md). A reviewer gallery, source-video verification clip, persisted local QA decisions and two simple exports are sufficient for the first app. An online image service, **central** database server, learned model and cloud workflow are **not prerequisites**.
