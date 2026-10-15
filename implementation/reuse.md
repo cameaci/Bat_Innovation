@@ -1,0 +1,64 @@
+# Reuse and dependency audit
+
+Reviewed: 2026-10-15. Source: live default branch of [cameaci/Camera_Trap](https://github.com/cameaci/Camera_Trap) and upstream project documentation already in the [research register](../docs/02-source-register.md).
+
+## Reuse policy
+
+**Reuse a verified small function/component when its dependencies and semantics fit. Adapt a proven interaction pattern when direct copying imports too much code. Write bat-specific logic independently.** A public MIT repository is not automatically authority to publish WSP-owned work elsewhere: confirm ownership and preserve the source licence and attribution for any copied portions. No source code has been copied at the planning stage.
+
+For each candidate record: exact path and licence, transitive dependencies, external I/O, what remains applicable, necessary changes, and a minimal regression test. Prefer one maintained implementation to two diverging local forks.
+
+## Inspected Camera_Trap code
+
+| Source (verified path) | Actually does | Decision | Reason / tests |
+| --- | --- | --- | --- |
+| [\`frontend/src/components/verify/VerifyDetailShell.tsx\`](https://github.com/cameaci/Camera_Trap/blob/main/frontend/src/components/verify/VerifyDetailShell.tsx) | Shared modal frame, image/details/actions layout and next/previous navigation | **Adapt small component** after rights check | Reasonably bounded UI composition; replace camera-trap content with motion summary/source video; test keyboard navigation and accessibility |
+| [\`frontend/src/components/verify/shortcuts.ts\`](https://github.com/cameaci/Camera_Trap/blob/main/frontend/src/components/verify/shortcuts.ts) | Small typed shortcut descriptors and platform modifier names | **Candidate direct small reuse** after rights check | Isolated utility; verify platform modifier behavior |
+| [\`frontend/src/lib/download.ts\`](https://github.com/cameaci/Camera_Trap/blob/main/frontend/src/lib/download.ts) | Tiny browser Blob download helper | **Candidate direct small reuse** after rights check | No domain coupling; test filenames, CSV encoding and correct cleanup |
+| [\`frontend/src/components/verify/StatusBadgeCluster.tsx\`](https://github.com/cameaci/Camera_Trap/blob/main/frontend/src/components/verify/StatusBadgeCluster.tsx) | Overlaid confirmed/flagged/favourite badges | **Adapt style, not semantics** | Bat review needs unreviewed/reviewed/QA/finalised, not a \`favorite\` proxy for QA |
+| [\`frontend/src/components/verify/VerifyView.tsx\`](https://github.com/cameaci/Camera_Trap/blob/main/frontend/src/components/verify/VerifyView.tsx) | Rich filtered event gallery and detail modal | **Pattern only** | Imports many camera-trap APIs, taxonomy, query/state and event-specific components. Reimplement only gallery, filtering and next-unreviewed |
+| [\`frontend/src/components/verify/useLabelsProgress.ts\`](https://github.com/cameaci/Camera_Trap/blob/main/frontend/src/components/verify/useLabelsProgress.ts) | Review completion denominator, careful filter behavior | **Pattern only** | Count **all windows** correctly; no species/detection denominator |
+| [\`frontend/src/components/verify/EventCountPanel.tsx\`](https://github.com/cameaci/Camera_Trap/blob/main/frontend/src/components/verify/EventCountPanel.tsx) | Confirm count and human overrides with keyboard actions | **Pattern only** | Camera-trap MaxN/species cohorts are not emergence event counts; implement explicit nullable event count |
+| [\`frontend/src/components/verify/VideoPlayer.tsx\`](https://github.com/cameaci/Camera_Trap/blob/main/frontend/src/components/verify/VideoPlayer.tsx) | Browser video player with camera-trap detection overlays | **Pattern only** | \`.MTS\` playback/timebase support is not established by the component; build and test source-specific preview contract |
+| [\`frontend/src/pages/ExportPage.tsx\`](https://github.com/cameaci/Camera_Trap/blob/main/frontend/src/pages/ExportPage.tsx) | Consistent download actions for CSV/XLSX and other formats | **UI pattern only** | Do not import maps, export scopes or CamtrapDP from Camera_Trap |
+| [\`electron/src/main.ts\`](https://github.com/cameaci/Camera_Trap/blob/main/electron/src/main.ts) | Starts/stops FastAPI, manages Electron lifecycle, dialogs and errors | **Adapt startup lifecycle** | Its many model/setup-specific features make full copying excessive. Keep one backend, one window, safe shutdown |
+| [\`electron/src/preload.ts\`](https://github.com/cameaci/Camera_Trap/blob/main/electron/src/preload.ts) | Narrow contextBridge for selected Electron APIs | **Adapt narrow IPC** | Only file selection and necessary desktop actions, not backup/model-management features |
+| [\`backend/app/db/base.py\`](https://github.com/cameaci/Camera_Trap/blob/main/backend/app/db/base.py) | SQLite SQLAlchemy connection management, WAL and foreign keys | **Reuse DB discipline, not full ORM** | Stdlib sqlite3 plus a small schema is lighter; test atomic writes, foreign keys, schema incompatibility |
+| [\`backend/app/models/audit_log.py\`](https://github.com/cameaci/Camera_Trap/blob/main/backend/app/models/audit_log.py) | Append-only audited before/after change model | **Adapt record concept** | Small \`review_action\` table without full audit framework; never overwrite approval history |
+| [\`backend/app/core/subprocess_group.py\`](https://github.com/cameaci/Camera_Trap/blob/main/backend/app/core/subprocess_group.py) | Process-group launching for cancelable descendants | **Conditional small helper** | Use only if FFmpeg cancellation on Windows requires process-tree control; verify lifecycle integration and copied notice |
+| [\`CONVENTIONS.md\`](https://github.com/cameaci/Camera_Trap/blob/main/CONVENTIONS.md) | Fail loudly, type hints, KISS/DRY/YAGNI, local conventions | **Adopt principles** | Codified in root [AGENTS.md](../AGENTS.md); do not replicate unrelated process requirements |
+| [\`LICENSE\`](https://github.com/cameaci/Camera_Trap/blob/main/LICENSE) | MIT licence with 2026 WSP copyright and third-party notices | **Verify rights before reuse** | Do not assume Bat Innovation is already licensed MIT or publish internal project code without authorisation |
+
+**Do not copy:** full 919-entry repository tree; species taxonomy, MegaDetector, SpeciesNet, model library, pretrained weights, spatial dashboards, camera-trap observation semantics, all API routers, migrations, maps, embeddings, WebSocket manager, or existing CI pipelines by default.
+
+## External libraries: use stable primitives, not bespoke equivalents
+
+| Need | Selected primitive | Explicit scope | Rejected premature addition |
+| --- | --- | --- | --- |
+| Media inspection and preview | [FFmpeg / ffprobe](https://ffmpeg.org/) as versioned local executable | Codec probe, stream timestamps, bounded preview clips, optional orientation/deinterlace | Handwritten media parser, mandatory VLC bridge, giant full-recording transcodes |
+| Pixel operations | [OpenCV](https://github.com/opencv/opencv) and NumPy | Grayscale frame differences/background, simple morphology, quality warnings | Custom optical-flow engine, early YOLO/torch |
+| Local API/schema validation | FastAPI with built-in Pydantic ecosystem | Small set of local routes and typed request/response data | GraphQL, API gateway, distributed queue |
+| Durable reviews | Python \`sqlite3\` | Transactions, constraints, schema version, small tables | Separate DB server, heavy migration stack now |
+| UI | React + TypeScript + Vite | 1 workspace, review panels, native file selection via Electron | Whole Camera_Trap frontend, maps, global state library or form stack by default |
+| Desktop | Electron and narrow preload bridge | Windows shell/installer, loopback app and lifecycle | Python-only throwaway GUI that later needs a rewrite |
+| Simple chart/overlay | CSS/SVG/canvas built into browser | Summary thumbs, labels, optional roost polygon later | New annotation framework before clear need |
+
+### Dependency and binary licence review
+
+Before introducing each dependency or bundling FFmpeg, record exact version, package/binary URL, code and binary licence, bundled codec configuration, network behavior and distribution terms. **FFmpeg licensing can differ by build and codecs.** Camera_Trap licence text does not cover independent new dependencies. Avoid shipping model weights in v1.
+
+## How to avoid writing redundant code
+
+1. Borrow proven **UX behavior** rather than complicated pages.
+2. Keep one \`SourcePlayer\` and one source-timestamp mapper, shared by gallery and QA.
+3. Keep a single backend data model for review/edit/QA/export. The frontend never keeps a second authoritative event record.
+4. Reuse browser-standard controls for playback and the existing UI primitive layer only for components actually used.
+5. Store simple window completion and persisted jobs in SQLite, not a new process orchestration platform.
+6. Use existing FFmpeg probing/transcoding rather than implementing AVCHD handling in Python.
+7. Keep a documented **do-not-copy** list to prevent transitive dependency growth.
+
+## Reuse acceptance checks
+
+Before bringing over any file: (a) compare the current source version and its imports, (b) verify copyright, licence/notice and authorisation, (c) delete unrelated behavior, (d) make its API domain-neutral or bat-specific as appropriate, (e) add tests for video/QA semantics, and (f) verify that the resulting file set is smaller than wholesale reuse.
+
+A pattern-only decision is **not a workaround**; it is a deliberate choice to preserve behavior without importing invalid camera-trap assumptions.
