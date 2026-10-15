@@ -1,158 +1,154 @@
-# 09 - IR-first app architecture
+# 09 - IR-first application architecture
 
 Updated: 2026-10-15  
-Status: **architecture direction agreed; detailed parameters and organisational approvals pending.** No application code has been created in this repository.
+Status: **architecture direction selected; pilot thresholds, real-footage access and deployment approval remain open.** No application code has been committed.
 
-## Architecture decision
+## Decision
 
-Build a **lean, local Windows-first, IR-only reviewer** using the same overall design philosophy as [Camera_Trap](10-camera-trap-architecture-reference.md): a small Gradio interface calling straightforward Python processing modules, writing local structured outputs. **Do not build a cloud service, separate API, distributed worker system, or central database in v1.**
+Develop a **local Windows-first bat IR video reviewer** that follows the actual [Camera_Trap desktop architecture](10-camera-trap-architecture-reference.md):
 
-Our first complete workflow is **all-window motion summaries -> original-video verification -> ecological annotation/QA -> report-ready CSV**. Basic movement blobs/tracking (user's preferred A+B) can be added as an independent processing option once the summary baseline works. Roost-context rules can propose **possible emergence**, never an autonomous final emergence outcome.
+- **Electron** for the desktop window and optional Windows installer.
+- **React + TypeScript** for a responsive review UI with the same interaction patterns as Camera_Trap.
+- **FastAPI + Python** for local video processing and review/export endpoints.
+- **SQLite** for persistent projects, recording sessions, summary windows, annotations and QA records.
+- **FFmpeg / ffprobe + OpenCV + NumPy** for original video inspection and streaming motion summaries.
 
-Audio is out of scope because existing acoustic review is separate. Thermal is **explicitly out of v1**, but the app should report unsupported input modalities rather than silently process them as equivalent to active IR.
+All services run **on the user's computer**. The Python API binds to loopback, not a public network interface. No cloud hosting, external AI API or trained model is required for the initial app. First develop/test React and FastAPI locally; package with Electron once that path works. Avoid unrelated Camera_Trap features and dependencies.
 
-## What is known versus what remains open
+**First deliverable:** time-ordered summaries of **every** video window, original-video jump, human review/QA and existing-workbook-compatible CSV plus a separate technical audit export. Motion-blob detection and basic tracking are the next optional processing increment; entrance-zone rules may only propose **possible emergence**. Thermal, acoustics and species identification are excluded from v1.
 
-| Area | Agreed direction / evidence | Still to verify |
+## Confirmed direction and open parameters
+
+| Area | Current direction | Outstanding detail |
 | --- | --- | --- |
-| Deployment | **Local application** on a Windows machine; offline by design | Which specific workstation and installation restrictions are approved |
-| Users | Primary ecologist reviewer and potential separate QA reviewer; shared use may be relevant in future | Whether local sequential hand-off is enough across reviewer teams |
-| Input | Recorded active-IR video; MP4 and MTS as initial candidate formats | Real codecs, FPS, interlacing, resolution, orientation and original-speed provenance |
-| Recording unit | A **session** may contain several sequential video segments | Segment continuity, missing frames and gap conventions |
-| Time | Separate **video-relative** and **survey clock** times; allow a manually documented offset | Trustworthy offset source and treatment of changed clock/segment starts |
-| Stability | Tripod likely, but scene changes, IR light transitions and re-aiming possible | Detection thresholds and which segments require manual review |
-| Labels | Existing review spreadsheets may contain **prelabels**, not authoritative ground truth | Original-file mapping and ecological adjudication |
-| Output | Existing workbook-style event rows plus a separate technical audit export | Final column naming and survey-specific reporting template |
-| QA | Reviewer decisions and subsequent QA decisions must remain distinguishable | Final ecological sign-off owner, disagreements and allowed status changes |
-| Target | A **controlled PoC** after original-footage access, use rights and environment checks | Acceptance thresholds and scope of authorised datasets |
+| App | Single-user, local Windows desktop first | Approved workstation and installation restrictions |
+| Reviewers | Primary ecologist; second QA reviewer in the same local dataset | Whether UK/GCC transfer is needed and under what approved mechanism |
+| Modality | Active IR only; thermal deferred | Camera-specific codec/illumination variations |
+| Formats | MP4 and MTS candidates | Actual stream metadata, interlacing, speed provenance, file segmentation |
+| Session length | Potentially multiple camera recording segments | Explicit order, gaps and segment continuity |
+| Clock | Video-relative time first; separately sourced survey-clock offset | Reliable clock anchor and time conversion checks |
+| Stability | Tripod common, but movement and IR switching possible | Thresholds, reset rules, false-motion burden |
+| Existing annotations | Spreadsheet event notes may be **prelabels** | Original-file matching, final QA and permissions |
+| Review outputs | Reviewable event rows and separate audit data | Column mapping to an approved workbook template |
+| Acceptance | Event and survey-level comparison against adjudicated reference | Ecological owner, allowed misses and false alerts/hour |
 
-## Workflow
+No numeric accuracy, review-time or per-video performance target has yet been established.
 
-```text
-Local folder: one survey / camera session
-  containing one or more ordered source video segments
-            |
-            v
-  1. Ingest + ffprobe metadata
-     file hash, original timebase, rotation/interlacing, relative duration
-            |
-            v
-  2. Session timeline + video quality check
-     segment joins/gaps, camera shift, day-to-IR transition,
-     illumination reset, optional on-screen clock mask
-            |
-            v
-  3. Motion summary windows (default proposal: 30 seconds)
-     all windows kept, including those apparently inactive
-     original-time IDs and source-video navigation
-            |
-            v
-  4. Gradio review UI
-     gallery -> source clip -> label/count/note -> save
-     optional motion blobs and simple tracks
-            |
-            v
-  5. QA in the same UI
-     independent review entry -> agreement/disagreement ->
-     final ecological decision by authorised reviewer
-            |
-            v
-  6. Exports
-     (a) reporting-compatible CSV
-     (b) technical audit CSV/JSON
-```
-
-The source video is the evidence of record; a composite image is a **review aid**. Do not auto-skip quiet windows during the first validation exercises.
-
-## Minimal proposed code layout
+## End-to-end flow
 
 ```text
-app.py           # Gradio UI and callbacks
-video.py         # segment inventory, ffprobe, frame PTS, stability/illumination flags
-motion.py        # streaming background and colour motion summaries
-reviews.py       # annotations, reviewer/QA records, append-only decisions
-exports.py       # simple reporting CSV and technical audit CSV
-tests/           # small tests per module
-requirements.txt
-.gitignore
-docs/            # research and architecture Markdown
+Original active-IR camera recordings in authorised local storage
+        |
+        v
+[Import recording session]
+  one camera -> ordered original segments
+  ffprobe + source IDs / checksums
+        |
+        v
+[Time and image audit]
+  video-relative PTS, optional real-time offset
+  split-file joins/gaps, orientation / interlacing
+  camera shift and day-to-IR/lighting change flags
+        |
+        v
+[Streaming motion-summary engine]
+  configurable windows, initially 30 seconds
+  reference scene + temporal motion composite
+  output for ALL windows (including apparently empty)
+        |
+        v
+[Review workspace in React]
+  timeline/gallery -> original video/clip
+  observation + possible event + count + notes
+  next-unreviewed / QA correction
+        |
+        v
+[SQLite]
+  sessions, segments, windows, review decisions, QA history
+        |
+        v
+[Exports]
+  report-friendly CSV / XLSX-compatible columns
+  separate technical audit CSV / JSON
 ```
 
-**Five small Python files to start.** No `api/`, `services/`, `workers/`, `db/`, `models/`, `frontend/`, or cloud configuration folders by default. Split a module only when justified by actual complexity.
+The original file remains the **evidence of record**. The composite is a review aid. No automatic skipping of apparently quiet windows during initial validation.
 
-- **Gradio**, not Streamlit, is the starting UI choice to align with [Camera_Trap](10-camera-trap-architecture-reference.md).
-- **FFmpeg/ffprobe** for inspection and on-demand verification clips; **OpenCV/NumPy** for streamed image processing.
-- **Local JSON manifest plus append-only JSONL review history**, with CSV exports. **No database in v1**; introduce SQLite only if persistence, concurrency or queries require it.
-- **No PyTorch, YOLO, SpeciesNet, CVAT server, GPU requirement or model download** in v1.
-- Start using ordinary synchronous jobs with progress feedback; avoid background orchestration or scheduling infrastructure.
-- Keep output folders outside the Git repository and excluded by `.gitignore`.
+## Lean code structure
 
-## Source video and time handling
+```text
+Bat_Innovation/
+  backend/
+    app/
+      main.py            # minimal local HTTP API and job status
+      db.py              # SQLite tables and transactions
+      video.py           # ingest, ordered segments, timestamps, stability checks
+      motion.py          # bounded-memory summary processing
+      reviews.py         # observation and QA logic
+      exports.py         # two export formats
+    tests/               # focused unit/integration tests
+  frontend/
+    src/
+      App.tsx            # route / state and layout
+      components/        # VideoPlayer, SummaryGallery, ReviewPanel
+  electron/
+    src/main.ts          # starts/stops backend and desktop window
+  docs/                  # research / architecture
+```
 
-Use a **session -> segment -> window -> annotation** hierarchy.
+Keep responsibilities clear, add a new file only when it makes the existing code simpler. No `models/`, `training/`, message broker, orchestrator, authentication service, geospatial dashboard or cloud layer in v1. Do not duplicate timestamp, validation or export logic between React and Python.
 
-- A **session** is one camera's recording for a survey, not necessarily one file.
-- Each **segment** retains source path/identifier, checksum, stream metadata, recording order, and any gap/continuity status.
-- Each **window** has explicit source segment/time or a set of ranges when it spans a boundary.
-- **Video-relative times** are the primary analysis reference. A separately entered, provenance-labelled offset maps them to real-world survey time. Never infer a trustworthy absolute start timestamp from a Canon file by default.
-- Original-speed recorded footage and sped-up derivatives must not be silently interchanged; flag unknown provenance.
-- Inspect possible interlaced fields and rotated footage; handle only when actually encountered.
-- If the camera changes view or IR light mode, segment/reinitialise the background model and flag the window. Invalidate any existing roost-zone mapping until manually reconfirmed.
+## Minimal data model
 
-## Lean review and QA semantics
+| Table | Main purpose | Essential fields |
+| --- | --- | --- |
+| `session` | One camera on one survey visit | `id`, `display_name`, `camera_ref`, `clock_offset`, `offset_source` |
+| `segment` | Original video file in recording order | `id`, `session_id`, `order`, `source_path`, `hash`, `duration`, `fps`, `timebase`, `status` |
+| `window` | Every time-window summary | `id`, `session_id`, `start_s`, `end_s`, `summary_path`, `quality_flags`, `algorithm_version` |
+| `review` | Human observation and decision | `id`, `window_id`, optional `event_time`, `observation`, `activity`, `ecological_decision`, `count`, `reviewer`, `status`, `notes` |
+| `review_change` | Minimal audit trail | `id`, `review_id`, `actor`, `time`, `old_value`, `new_value`, `reason` |
 
-The UX may follow the simple tab-and-action style of Camera_Trap, but ecology review states require explicit records:
+Use source-file timestamp ranges when a summary window overlaps more than one segment. Record elapsed session time **separately** from the file's presentation timestamps and any real-world clock time. Do not assume a fixed 25 fps or infer absolute time from unreliable metadata. Source media stays outside SQLite; the DB contains paths and references, not video blobs. Quality flags are first-class but can be stored compactly.
 
-1. **Unreviewed**: summary generated, no ecological judgement made.
-2. **Reviewed**: first reviewer has recorded an observation and any count.
-3. **QA pending / QA reviewed**: another reviewer agrees, modifies or disputes the observation.
-4. **Finalised**: an authorised ecological owner has resolved relevant disagreements and approved the event / survey record.
+## Ecological review semantics
 
-Each change is appended as an immutable revision with reviewer identity or identifier, timestamp, original video reference, previous decision ID and reason. This is an **audit history**, not a full role-management product. Local users identify themselves in the UI; this does not constitute authentication or enterprise access control.
+**Observation:** bat, insect, bird, other or uncertain.  
+**Activity:** commuting, foraging, flyby, unknown.  
+**Ecological decision:** possible/confirmed emergence, re-entry, no supported emergence, precautionary emergence or uncertain, subject to an ecology-lead-approved vocabulary.  
+**Review stage:** unreviewed -> reviewed -> QA reviewed -> finalised, with explicit QA pending/disagreement when needed.
 
-**Observation** (for example bat, insect, bird, foraging, commuting or uncertain) must be distinct from **ecological decision** (emergence, re-entry, no supported emergence, precautionary emergence, uncertain). A possible event near an entrance is not final emergence evidence. Roost polygons are optional because roost features may initially be unknown or outside the frame.
+The first reviewer can amend observations and counts; QA can agree or correct; a designated ecological reviewer authorises the final conclusion. Preserve revision history rather than overwriting the record without a trace. **Reviewer display names are not secure authentication** in the local MVP.
 
-**For multiple cameras:** retain camera-specific observations and raw counts; **do not automatically deduplicate unique bats across cameras in v1**. Survey-level reconciliation is a separate human decision.
+An entrance-region annotation is optional; roost features may be unknown or outside the video. If the camera moves, any previous region is invalid until re-confirmed. An event may span multiple windows or video segments. For multiple cameras, keep observations camera-specific and leave cross-camera individual reconciliation to the ecologist. Do not automatically infer distinct bats from the number of tracks.
 
-## Minimal output contracts
+## WSP-compatible and audit exports
 
-**Manifest JSON:** session ID; ordered segment IDs/hash and metadata; window ID; segment-relative and session-relative timestamps; stability/illumination flags; parameters/version; generated summary path.
+**Ecology-facing output:** adapt to existing worksheet headings such as `video_ref`, `timestamp`, `real_time`, `observation`, `qa`, with supplementary count, uncertainty and status fields only where needed. Mapping must be checked against an authorised sample template. Do not assert that an exported row is signed off unless it is.
 
-**Review JSONL:** window/event reference; reviewer identity; observation label; ecological decision; count when supportable; notes; uncertainty; QA status; revision relation; sign-off metadata.
+**Technical audit output:** source hashes, timebase and clock-offset provenance, exact window and segment ranges, camera stability/IR mode warnings, processing version/parameters, prelabel versus reviewer/QA changes, and export version.
 
-**Reporting CSV (user-facing):** `video_ref`, `video_timestamp`, `real_time`, `observation`, `qa_status` plus optional count/notes if desired by the reporting template. **Report export contains only finalised or explicitly labelled provisional results.**
+No confidential example spreadsheet or footage is committed here.
 
-**Audit export (technical):** segment hash, time offset source, window boundaries, processing parameters, quality flags, all review revisions, any source-video jumps and export version.
+## Build only the vertical slice
 
-## Ecological and operational verification
+1. Minimal local backend/React workspace and a working original-video player.
+2. Session/segment import and `ffprobe` checks; time mapping and camera-change flags.
+3. Streaming all-window IR motion summaries; gallery/timeline links to source recording.
+4. Review, second-review correction, progress tracking and local SQLite persistence.
+5. Ecological/report CSV and separate audit export.
+6. Compare with independently adjudicated recordings **after** applicable access and approval gates.
+7. Add motion tracks, roost rules or learned detection only if they improve measured results.
 
-Evaluation must consider:
-- Event recall and **missed emergence/re-entry** on independently adjudicated footage.
-- Whether assisted review changes **survey-level roost conclusion or peak count**, not just boxes and tracks.
-- Total reviewer time (summary scanning + video rechecks + QA corrections) versus full manual review.
-- Difficult IR cases: day-to-IR switch, torch/light changes, insects near lamps, noise, camera movement, unknown roost zone and split files.
-- Union of human and app candidates, independently adjudicated; prelabels are **leads, not truth**.
-- Ecological lead defines acceptable miss rate and false-alert burden before acceptance testing.
+Develop/test using synthetic or appropriately licensed public footage at Gate 0. Use of client footage, training or pilot deployment follows documented access, security, privacy and label-adjudication checks.
 
-There is **no numeric acceptance threshold and no performance claim** at this stage.
+## Explicitly deferred
 
-## Governance and sequence
+- Central server / multi-user database and automatic UK/GCC sharing.
+- Machine-learning inference and model management.
+- Audio / Kaleidoscope Pro integration.
+- Thermal input analysis.
+- Automatic roost conclusions, cross-camera individual deduplication and automated reporting sign-off.
 
-- **Gate 0:** public documentation, clean-code scaffolding, and tests with synthetic or appropriately licensed open media.
-- **Gate 1:** original-footage access and use-right confirmation plus local environment/privacy screening.
-- **Gate 2:** verified source-file/time mapping and independently adjudicated test events.
-- **Then controlled PoC:** test with authorised originals, compare manual and summary-assisted review.
+**Design rule:** adapt the tested desktop and reviewer concepts of Camera_Trap; keep the Bat Innovation codebase much smaller. There is no reason to create extra layers until a real requirement demands them.
 
-This is intentionally **not** a production deployment design. UK/GCC shared-service hosting, identity management, central SQL storage, AI models and acoustic/thermal integration require evidence of need and additional approval.
-
-## First implementation slices
-
-1. Ingest ordered segments and print an auditable metadata/timeline report.
-2. Generate one correctly timed summary per 30-second interval, streaming memory and flagging unstable scenes.
-3. Build Gradio local gallery with preview of corresponding original-video interval.
-4. Add human observation, QA revision history and report/audit CSV exports.
-5. Benchmark before introducing extra tracking, automated filtering or trained models.
-
-## Reference
-
-[Camera_Trap architecture reference](10-camera-trap-architecture-reference.md) | [Motion-summary prior art](08-motion-summary-prior-art.md) | [Evaluation framework](05-evaluation-framework.md) | [Data governance](04-data-governance.md).
+References: [Camera_Trap architecture inspection](10-camera-trap-architecture-reference.md), [scope](01-problem-and-scope.md), [evaluation](05-evaluation-framework.md), [data governance](04-data-governance.md).
