@@ -68,7 +68,7 @@ Original IR session in approved local storage (ordered segments)
     -> stability/quality flags and timestamped image manifest
     -> ecologist gallery, original-video seek and adjudication
     -> optional candidate detection / tracking / roost-zone analysis
-    -> reviewer + QA records in local append-only log
+    -> reviewer + QA records in local SQLite with revision history
     -> reporting CSV and separate audit export
 ```
 
@@ -98,7 +98,7 @@ Select by **event recall at an acceptable false-alert burden**, not frame mAP al
 - Original-speed changes, interlacing, image rotation, broken/missing timestamps and moving clock overlays require inspection or quality flags, not blanket assumptions.
 - Exact bat flight speed, distance or species cannot reliably be inferred from one uncalibrated camera view.
 
-**Implementation architecture:** [lean local Gradio design](09-ir-first-architecture-draft.md); [Camera_Trap patterns](10-camera-trap-architecture-reference.md).
+**Implementation architecture:** [lean local Electron/React/FastAPI/SQLite design](09-ir-first-architecture-draft.md); [actual Camera_Trap desktop patterns](10-camera-trap-architecture-reference.md).
 
 ## Reproducibility requirements
 
