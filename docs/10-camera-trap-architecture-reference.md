@@ -1,71 +1,108 @@
 # 10 - Camera_Trap architecture reference
 
 Reviewed: 2026-10-15  
-Reference repository: [cameaci/Camera_Trap](https://github.com/cameaci/Camera_Trap)  
-Purpose: reuse **practical design patterns**, not the codebase or its camera-trap models.
+Reference: [cameaci/Camera_Trap](https://github.com/cameaci/Camera_Trap) (default branch: `main`)  
+Purpose: inspect the **actual current codebase** and reuse its proven application patterns without copying its size or unrelated features.
 
-## Verified repository observations
+## Correction to the previous review
 
-The GitHub repository was **public** when checked on 2026-10-15. Its default branch was `main`.
+An earlier version of this document described a root-level Gradio `app.py` and claimed that QA/QC and a top-level licence could not be verified. **That description does not match the current repository.** Direct inspection of the current GitHub tree and source shows an Electron/React/FastAPI/SQLite desktop application, explicit verification workflows, and a top-level MIT `LICENSE` carrying a WSP copyright notice. The earlier architecture recommendation based on Gradio is withdrawn.
 
-| Inspected item | What is actually present | Design consequence for Bat Innovation |
+## Verified current implementation
+
+| Layer / feature | Evidence in the public repository | Pattern relevant to Bat Innovation |
 | --- | --- | --- |
-| [app.py](https://github.com/cameaci/Camera_Trap/blob/main/app.py) | Single Gradio Blocks app with tabs for single image, batch image, folder separation and single video; processing functions are called directly from UI controls; `demo.launch(share=False)`. | Use a **small local Gradio app** with direct Python processing calls. Avoid a separate front-end, API server or cloud tier in v1. |
-| [app.py batch processing](https://github.com/cameaci/Camera_Trap/blob/main/app.py) | Batch image inference, JSON output, configurable model/threshold inputs. | Preserve explicit run parameters and structured local outputs. Video-window summaries replace camera-trap image inference. |
-| [wildlife_classifier.py](https://github.com/cameaci/Camera_Trap/blob/main/wildlife_classifier.py) and [speciesnet_adapter.py](https://github.com/cameaci/Camera_Trap/blob/main/speciesnet_adapter.py) | Optional model-specific adapters isolate inference behind a simple interface. | Keep model integration **optional**. Do not install or architect around learned detectors until they earn their place in testing. |
-| [species_postprocessing.py](https://github.com/cameaci/Camera_Trap/blob/main/species_postprocessing.py) | Small pure functions, including explicit handling of `Unknown` outputs. | Keep event labels and decisions explicit and small; uncertainty is never silently turned into a negative. |
-| [tests](https://github.com/cameaci/Camera_Trap/tree/main/tests) | Targeted tests for classifiers, adapters, preprocessing and dataset validation. | Write a few focused tests around frame/time mapping, session segments, image generation, review persistence and exports. |
-| [requirements.txt](https://github.com/cameaci/Camera_Trap/blob/main/requirements.txt) | Pinned but substantial ML/detection dependencies, Gradio and OpenCV. | **Do not inherit** the full dependency list. Start with Gradio, OpenCV, NumPy and an FFmpeg/ffprobe installation; add dependencies only when needed. |
+| Windows desktop shell | [`electron/src/main.ts`](https://github.com/cameaci/Camera_Trap/blob/main/electron/src/main.ts) and [`electron/package.json`](https://github.com/cameaci/Camera_Trap/blob/main/electron/package.json) | Electron opens the application and manages the local Python backend lifecycle; a Windows installer is built with electron-builder |
+| User interface | [`frontend/package.json`](https://github.com/cameaci/Camera_Trap/blob/main/frontend/package.json), [frontend conventions](https://github.com/cameaci/Camera_Trap/blob/main/frontend/FRONTEND_CONVENTIONS.md) | React + TypeScript + Vite, reusable UI components and consistent presentation |
+| Python backend | [`backend/app/main.py`](https://github.com/cameaci/Camera_Trap/blob/main/backend/app/main.py) | FastAPI endpoint layer calling Python application / processing functions |
+| Local persistence | [`backend/app/db/base.py`](https://github.com/cameaci/Camera_Trap/blob/main/backend/app/db/base.py) | SQLite with locally persisted project, file and verification state; Camera_Trap uses SQLAlchemy and Alembic, but Bat Innovation may start with a smaller schema |
+| Verification gallery | [`VerifyView.tsx`](https://github.com/cameaci/Camera_Trap/blob/main/frontend/src/components/verify/VerifyView.tsx), [`VerifyDetailShell.tsx`](https://github.com/cameaci/Camera_Trap/blob/main/frontend/src/components/verify/VerifyDetailShell.tsx) | Filtered cards, detail viewer, next/previous navigation and review controls |
+| Review completeness | [`useLabelsProgress.ts`](https://github.com/cameaci/Camera_Trap/blob/main/frontend/src/components/verify/useLabelsProgress.ts) | Counts verified items against the full relevant review universe. Bat Innovation must similarly account for every video summary window |
+| Human count correction | [`EventCountPanel.tsx`](https://github.com/cameaci/Camera_Trap/blob/main/frontend/src/components/verify/EventCountPanel.tsx) | Human-confirmed counts and notes, with a confirmation action. Camera-trap event counts are **not** automatically equivalent to emergence counts |
+| Exports | [`ExportPage.tsx`](https://github.com/cameaci/Camera_Trap/blob/main/frontend/src/pages/ExportPage.tsx), [export backend](https://github.com/cameaci/Camera_Trap/blob/main/backend/app/api/crud/export.py) | Local CSV/XLSX exports based on persisted user corrections |
+| Packaging / offline behavior | [User guide](https://github.com/cameaci/Camera_Trap/blob/main/wsp/docs/USER_GUIDE.md) | Installer, application data folder and local analysis after initial setup. **Do not assume every dependency is bundled or fully offline on first start** |
+| Conventions / rights | [`CONVENTIONS.md`](https://github.com/cameaci/Camera_Trap/blob/main/CONVENTIONS.md), [`LICENSE`](https://github.com/cameaci/Camera_Trap/blob/main/LICENSE) | Type hints, explicit errors, minimalism, DRY and tests; MIT licence with WSP copyright and third-party notices |
 
-### Limit of the comparison
+Both `Camera_Trap` and `Bat_Innovation` were confirmed **public** through GitHub repository metadata on 2026-10-15. The Camera_Trap licence is not automatically the licence or copyright policy for Bat Innovation. Check ownership and approval before substantial code transfer.
 
-The inspected `app.py` and repository searches **did not establish a completed manual annotation, second-reviewer or ecological QA sign-off workflow**. Therefore Bat Innovation will implement only the **minimal explicitly defined** review and QA states it needs, rather than claiming to reuse an existing complete QA system. No claim is made that the original repository contains no QA/QC anywhere outside the inspected files.
+## What to reuse
 
-The reference repository includes historical demo material, generated assets, cache files and model-weight binaries in its Git tree. **Do not reproduce that repository footprint**. Bat Innovation should ignore all raw/derived footage, images, survey data, caches and weights by default.
+**Application pattern**
 
-No clear top-level README or licence file was found in the checked tree. Reuse of third-party and reference-repository code is subject to a separate rights check. This architecture review **does not authorise code copying**.
+```text
+Electron desktop window
+          |
+React + TypeScript review interface
+          |
+FastAPI on local loopback interface
+          |
+Small Python video-processing and review functions
+          |
+Local SQLite + local derived summaries + original videos in place
+```
 
-## Reuse versus avoid
+**Specific product conventions**
 
-**Reuse as patterns**
-1. Gradio Blocks as the local operator interface.
-2. Direct and testable Python callbacks rather than a service mesh.
-3. A single input -> processing -> visualisation -> structured export workflow.
-4. Optional processing adapters with clear function contracts.
-5. Small focused tests instead of large framework infrastructure.
+- One coherent review gallery, keyboard next/previous and next-unreviewed, full-size preview, fast confirmation.
+- Persisted review status and user corrections. Report reviewed counts, not just generated detections.
+- Distinguish raw automated proposals from human decisions. Keep source media unchanged.
+- One export function used consistently by the UI and tests, with report versus audit data separated.
+- Clear error messages, typed interfaces, straightforward module boundaries, no duplicated business logic.
+- Local application data outside the source tree and a small set of targeted tests.
+- Reuse styling and UI interaction ideas; assess rights before copying concrete components or branding.
 
-**Avoid**
-1. Bringing across MegaDetector, SpeciesNet, YOLO, PyTorchWildlife, training scripts or camera-trap-specific datasets for a motion-summary MVP.
-2. Large one-file implementations as they grow; keep just a few short modules with clear responsibilities.
-3. Multiple web services, message queues, orchestration platforms or shared databases before a real multi-user requirement.
-4. Checking binary weights, recordings, generated images, `__pycache__`, exported reports or private configuration into the repository.
-5. Mistaking inference confidence thresholds for independent ecological QA sign-off.
+## What not to copy
 
-## Resulting lightweight implementation shape
+Camera_Trap has a large, mature feature set and many more files than Bat Innovation needs. Do **not** import its model catalogue, SpeciesNet / MegaDetector workflows, embedding similarity search, training code, maps, dashboards, wildlife taxonomy, model installers, cloud integrations, extensive database migrations, or giant dependency set merely because they exist.
+
+A bat NVA **recording session** is also not a camera-trap deployment, and a 30-second summary window is not automatically a bat event. Keep the bat domain model small and explicit rather than renaming camera-trap entities.
+
+## QA/QC: reuse the pattern, not the ecological conclusion
+
+The reference app demonstrably has human label confirmation, count correction, verified-progress indicators and exports that use review decisions. It does **not** by itself establish the required bat-survey **independent ecology QA / final roost sign-off policy**. Bat Innovation should use the same review interaction style, but define a small ecology-specific decision flow:
+
+1. `unreviewed`
+2. `reviewed` by the first reviewer
+3. `qa_pending` or `qa_reviewed`
+4. `finalised` by the designated ecological approver
+
+Observation, ecological decision, count and review status are separate fields. Store identity and a simple change history. A local reviewer-name field does not amount to enterprise authentication.
+
+## Lean implementation translation
+
+Mirror the **three existing application layers** with only the features needed now:
 
 ```text
 Bat_Innovation/
-  app.py                   # local Gradio interface / user callbacks
-  video.py                 # session, segments, timestamps, decode, quality flags
-  motion.py                # summary-window processing; optional blobs/tracks later
-  reviews.py               # reviewer notes, QA decisions, append-only history
-  exports.py               # report-ready CSV and separate technical audit export
-  requirements.txt
-  .gitignore
-  tests/
-    test_video.py
-    test_motion.py
-    test_reviews.py
-    test_exports.py
-  docs/                    # research, architecture and decisions
+  backend/
+    app/
+      main.py          # minimal FastAPI routes
+      video.py         # ffprobe, sessions, segment and clock mapping
+      motion.py        # streaming window summaries and quality flags
+      reviews.py       # persistence and review/QA transitions
+      exports.py       # reporting and audit CSV
+      db.py            # small SQLite schema/access
+    tests/
+  frontend/
+    src/
+      App.tsx
+      components/      # gallery, player, review panel
+  electron/
+    src/main.ts        # minimal desktop shell, when packaging
+  docs/                # research and decisions
 ```
 
-This is a **proposed code structure**, not a claim that these source files already exist. An additional module is justified only if one of these files becomes difficult to maintain.
+A single developer can build and test the processing and review layers before packaging with Electron. Start with `sqlite3` or a small SQL layer; migrate to an ORM and migrations **only if schema changes make them worthwhile**. Do not introduce Redis, queues, a central database, auth service or microservices for a single-user local app.
 
-## User experience inherited in spirit
+This is a **proposed layout**. No application source files are committed to Bat Innovation yet.
 
-Local input selector -> analysis settings -> run -> time-ordered results -> review / QA -> download exports.
+## Direct references
 
-For Bat Innovation, the central result is a **time-window motion-summary gallery tied to the original video**, not species predictions. The app should open an original-time clip for verification; tracking overlays are secondary.
+- [Camera_Trap README](https://github.com/cameaci/Camera_Trap/blob/main/README.md)
+- [Camera_Trap conventions](https://github.com/cameaci/Camera_Trap/blob/main/CONVENTIONS.md)
+- [Camera_Trap frontend conventions](https://github.com/cameaci/Camera_Trap/blob/main/frontend/FRONTEND_CONVENTIONS.md)
+- [Camera_Trap review gallery](https://github.com/cameaci/Camera_Trap/blob/main/frontend/src/components/verify/VerifyView.tsx)
+- [Camera_Trap event count editor](https://github.com/cameaci/Camera_Trap/blob/main/frontend/src/components/verify/EventCountPanel.tsx)
+- [Camera_Trap user guide](https://github.com/cameaci/Camera_Trap/blob/main/wsp/docs/USER_GUIDE.md)
 
-See [09 - IR-first architecture](09-ir-first-architecture-draft.md).
+See [09 - IR-first application architecture](09-ir-first-architecture-draft.md).
