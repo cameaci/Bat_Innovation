@@ -35,6 +35,8 @@ This is an exploratory project, **not an official WSP publication, endorsed solu
 | [09 - IR-first app architecture](docs/09-ir-first-architecture-draft.md) | Lean Electron/React/FastAPI/SQLite desktop application, recording sessions, review/QA and exports |
 | [10 - Camera_Trap reference](docs/10-camera-trap-architecture-reference.md) | Reviewed implementation patterns to reuse and avoid |
 | [Source review template](docs/source-review-template.md) | Standard format for future source assessments |
+| [Implementation plan](implementation/README.md) | Reviewed delivery sequence, technical contracts, reuse audit and tests |
+| [AGENTS.md](AGENTS.md) | Working rules for AI coding agents and contributors |
 
 ## Working principles
 
@@ -47,7 +49,7 @@ This is an exploratory project, **not an official WSP publication, endorsed solu
 
 ## Status and next step
 
-The initial source register is a **scoping review**, not a systematic or exhaustive literature review. A local, IR-first application is the selected implementation direction; app code is not yet committed. External-source links have been collected, but repository/code quality, dataset availability, licence compatibility, and empirical performance on target footage still require checks. A deeper literature and prior-art review has been requested. The [motion-summary review](docs/08-motion-summary-prior-art.md) adds public evidence for a lower-complexity, all-window summary-first MVP; the [architecture draft](docs/09-ir-first-architecture-draft.md) is provisional pending requirements answers.
+The initial source register is a **scoping review**, not a systematic or exhaustive literature review. **An implementation plan has now been reviewed and committed under [implementation/](implementation/README.md). No application source code or benchmark results have been produced.** A local, IR-first application is the selected implementation direction; app code is not yet committed. External-source links have been collected, but repository/code quality, dataset availability, licence compatibility, and empirical performance on target footage still require checks. A deeper literature and prior-art review has been requested. The [motion-summary review](docs/08-motion-summary-prior-art.md) gives the public prior art; the [architecture decision](docs/09-ir-first-architecture-draft.md) points to the authoritative [technical design](implementation/design.md) and [delivery plan](implementation/plan.md).
 
 ## Documentation conventions
 
@@ -59,7 +61,7 @@ All project documentation is written in English and stored as Markdown (`.md`). 
 
 ## App design decision
 
-Use the **actual Electron + React/TypeScript + FastAPI + SQLite desktop architecture** of [Camera_Trap](docs/10-camera-trap-architecture-reference.md), with a much smaller feature set and dependency tree. The previous Gradio reference was incorrect and has been superseded. Start with streamed time-window IR motion summaries, original video verification, review/QA records, and CSV export. Tracking is an optional next enhancement. **Thermal and acoustic analysis are outside v1.** Any controlled test on client footage requires documented access and permission checks first. See [architecture](docs/09-ir-first-architecture-draft.md).
+Use the **actual Electron + React/TypeScript + FastAPI + SQLite desktop architecture** of [Camera_Trap](docs/10-camera-trap-architecture-reference.md), with a much smaller feature set and dependency tree. The [file-level reuse audit](implementation/reuse.md) records what can be copied, adapted or used only as a design pattern after licensing checks. The previous Gradio reference was incorrect and has been superseded. Start with streamed time-window IR motion summaries, original video verification, review/QA records, and CSV export. Tracking is an optional next enhancement. **Thermal and acoustic analysis are outside v1.** Any controlled test on client footage requires documented access and permission checks first. See [architecture](docs/09-ir-first-architecture-draft.md).
 
 ## Delivery boundary
 
