@@ -8,8 +8,9 @@ Status: open research programme. Priorities are proposals, not committed WSP tas
 | ID | Deliverable | Responsible role (not assigned person) | Dependency |
 | --- | --- | --- | --- |
 | I01 | Confirm local Windows workstation, installation permissions, data folder and approved offline execution | App owner + IT | Before real-file execution |
-| I02 | Build clean Gradio/Python project skeleton matching the [Camera_Trap reference](10-camera-trap-architecture-reference.md) | Developer | Gate 0, synthetic inputs |
+| I02 | Build lean React/TypeScript + local FastAPI/SQLite project skeleton; package in Electron after a working vertical slice, following the [verified Camera_Trap reference](10-camera-trap-architecture-reference.md) | Developer | Gate 0, synthetic inputs |
 | I03 | Unit-test segmented timebase, clock-offset handling, camera movement and all-window summaries | Developer | I02 |
+| I03a | Test a source-video jump and local UI <-> API <-> SQLite write before adding tracking | Developer | I02 |
 | I04 | Produce local reviewer and QA history with reporting CSV and audit export | Developer + ecological reviewer | I02 |
 | I05 | Verify original-file format and metadata on permitted examples; treat spreadsheet labels as prelabels | Data custodian + ecological lead | Gate 1 access/permissions |
 | I06 | Identify final ecological sign-off owner, disagreeing QA reconciliation and acceptance thresholds | Ecological lead | Before benchmark |
@@ -50,12 +51,12 @@ Status: open research programme. Priorities are proposals, not committed WSP tas
 
 ## Deferred productisation questions (not blockers for Gate 0 code scaffolding)
 
-- Offline Windows workstation versus internal server deployment.
+- **Selected now:** offline local Windows workstation; assess internal shared-server deployment only if real cross-team needs justify it.
 - Support for `.MTS`, `.MP4` and camera-specific timebases.
 - Multi-camera synchronisation and duplicate-event handling.
 - Traceable evidence exports compatible with ecological reporting.
 - Dependency, model and annotation versioning.
-- Security monitoring, retention, role-based review and QA sign-off.
+- Local privacy, retention, reviewer identity and QA sign-off; enterprise multi-user authentication is deferred.
 
 ## Research deliverables
 
@@ -73,7 +74,8 @@ Status: open research programme. Priorities are proposals, not committed WSP tas
 | 2026-10-15 | Prioritise in-house, human-reviewed event triage over autonomous roost conclusions. | Technical/ecological risk framing; not an empirical result. | Pilot evidence available |
 | 2026-10-15 | Do not select a target dataset or model yet. | Provenance, permissions and target performance not established. | Data and approval gates satisfied |
 | 2026-10-15 | Prioritise **all-window IR motion summaries plus ecological review** as the first prototype, with tracking and AI as optional later stages. | Publicly documented workflows and lower initial training-data requirements; not a performance finding. | Representative IR benchmark or reviewer feedback contradicts the hypothesis |
-| 2026-10-15 | Use a **local Windows-first Gradio/Python monolith** inspired by the publicly inspected Camera_Trap app. No server, database, cloud or model-training dependency in v1. | Direct repository inspection and explicit lean-code preference. | Real multi-user or offline constraints demand change |
+| 2026-10-15 | **Superseded:** earlier Gradio/no-database recommendation was based on an incorrect inspection of Camera_Trap. | Live repo does not match that description. | Superseded by corrected design below |
+| 2026-10-15 | Use the **local Windows-first Electron + React/TypeScript + FastAPI + SQLite pattern** of Camera_Trap, with a small vertical slice, no cloud, training stack or distributed infrastructure. | Direct inspection of Electron main, frontend package, backend app, local database and verification components. | Performance, packaging or real multi-user requirements justify change |
 | 2026-10-15 | Thermal and acoustic processing are **out of v1**. | IR-first scope decision. | Separately prioritised later |
 | 2026-10-15 | Start with existing spreadsheet entries as **prelabels, not verified ground truth**. | Label provenance must be independently checked. | Final ecological adjudication establishes test labels |
 | 2026-10-15 | Conduct any client-footage PoC only **after relevant Gate 1 and Gate 2 requirements**. | Data, security and ecological evaluation prerequisites. | Permissions and benchmark are documented |
