@@ -1,6 +1,6 @@
 # Implementation
 
-Status: **reviewed implementation plan; no application code committed**. Reviewed 2026-10-15.
+Status: **Slice 0 in progress. Python/SQLite foundation committed; React/Electron integration pending**. Reviewed 2026-10-15.
 
 Build a small, local Windows desktop reviewer for **recorded active-infrared (IR) bat survey video**. Reuse the structure and review ergonomics of [Camera_Trap](https://github.com/cameaci/Camera_Trap), but not its unrelated wildlife models, platform features or entire source tree.
 
@@ -39,6 +39,12 @@ Prove reliable **video playback/seek** for original .MTS/.MP4 media, including s
 - A QA-labeled Excel row is a prelabel until its original video and decision authority are verified.
 - No WSP/client footage, extracted images, original survey metadata or review databases in this **public** repository.
 - Gate 0 synthetic/licensed-public development is possible now. Real footage feasibility needs the relevant approvals. A measured ecological benchmark additionally needs adjudicated reference events.
+
+## Current implementation status
+
+The initial backend implementation is in [backend/app/main.py](../backend/app/main.py), [backend/app/store.py](../backend/app/store.py), and [backend/tests/test_foundation.py](../backend/tests/test_foundation.py). A developer-machine run of `python -m pytest backend/tests -q` passed **6 tests**; a separate real loopback HTTP smoke test verified authenticated health (200), unauthorised sessions (401) and creation of the SQLite file. These checks used synthetic session metadata, not bat videos.
+
+The React/TypeScript UI and minimal Electron development shell are a [Codex-ready issue #1](https://github.com/cameaci/Bat_Innovation/issues/1). **The issue is prepared, but Codex execution has not been started through this chat.** Slice 0 remains incomplete until real frontend/API/database integration and Windows or Electron environment tests pass.
 
 ## Delivery order
 
