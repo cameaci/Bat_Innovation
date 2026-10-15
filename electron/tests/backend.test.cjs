@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
-const { access, mkdtemp, readdir, rm, symlink } = require('node:fs/promises');
+const { spawnSync } = require('node:child_process');
+const { access, mkdtemp, readFile, readdir, rm, symlink } = require('node:fs/promises');
 const { createServer } = require('node:net');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
@@ -171,4 +172,36 @@ test('stop during port allocation cancels startup without launching a backend', 
   assert.equal(runtime.pid, undefined);
   expectFailure(await runtime.health(), 'unavailable');
   assert.deepEqual(await readdir(dataDir), []);
+});
+
+
+test('incompatible SQLite databases fail with safe actionable messages', { timeout: 45000 }, async t => {
+  for (const scenario of ['future-schema', 'unversioned']) {
+    await t.test(scenario, async t => {
+      const dataDir = await mkdtemp(path.join(tmpdir(), 'bat-invalid-db-'));
+      const runtime = new BackendRuntime();
+      t.after(async () => {
+        await runtime.stop();
+        await rm(dataDir, { recursive: true, force: true });
+      });
+      const dbPath = path.join(dataDir, 'bat_innovation.sqlite3');
+      const prepare = scenario === 'future-schema'
+        ? "db.execute('PRAGMA user_version=99')"
+        : "db.execute('CREATE TABLE legacy (id INTEGER)')";
+      const seeded = spawnSync(python, [
+        '-c', 'import sqlite3, sys; db=sqlite3.connect(sys.argv[1]); ' +
+          prepare + '; db.commit(); db.close()', dbPath,
+      ], { cwd: repoRoot, encoding: 'utf8' });
+      assert.equal(seeded.status, 0, 'Synthetic test database must be created successfully');
+      const original = await readFile(dbPath);
+
+      const result = await runtime.start({ python, repoRoot, dataDir });
+      expectFailure(result, 'unavailable');
+      assert.match(result.error.message, /local database/i);
+      assert.match(result.error.message, /unsupported schema|unrecognised schema/i);
+      assert.doesNotMatch(result.error.message, /Traceback|File "|RuntimeError|sqlite3\.|bat-invalid-db-/i);
+      assert.equal(runtime.pid, undefined, 'A refused database must not leave a backend running');
+      assert.deepEqual(await readFile(dbPath), original, 'Refused databases must remain unchanged');
+    });
+  }
 });
