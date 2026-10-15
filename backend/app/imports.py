@@ -46,8 +46,8 @@ def source_state(row: dict) -> str:
         if current != json.loads(row["identity_json"]):
             return "changed_source"
         # File metadata may still be available when its contents are unreadable.
-        with path.open("rb"):
-            pass
+        with path.open("rb") as source:
+            source.read(1)
     except media.MediaError as error:
         return "missing_source" if error.code == "missing_source" else "unreadable_source"
     except FileNotFoundError:
