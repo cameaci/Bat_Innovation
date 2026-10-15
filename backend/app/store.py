@@ -84,7 +84,7 @@ def upgrade_media(db_path: Path) -> None:
             continuity TEXT NOT NULL DEFAULT 'unknown'
                 CHECK(continuity IN ('unknown', 'known_contiguous', 'known_gap')),
             continuity_provenance TEXT,
-            UNIQUE(session_id, position), UNIQUE(session_id, sha256)
+            UNIQUE(session_id, position), UNIQUE(source_path), UNIQUE(sha256), UNIQUE(identity_json)
         )""")
         connection.execute("""CREATE TABLE session_media (
             session_id TEXT PRIMARY KEY REFERENCES recording_session(id),
@@ -126,11 +126,11 @@ def commit_segments(db_path: Path, session_id: str, sources: list[tuple[Path, di
             raise DatabaseSchemaError("Explicit media schema upgrade is required")
         if connection.execute("SELECT 1 FROM recording_session WHERE id=?", (session_id,)).fetchone() is None:
             raise ValueError("Session does not exist")
-        existing = connection.execute("SELECT sha256, position, source_path, identity_json FROM segment WHERE session_id=?", (session_id,)).fetchall()
+        existing = connection.execute("SELECT sha256, position, source_path, identity_json, session_id FROM segment", (session_id,)).fetchall()
         hashes = {row[0] for row in existing}
         paths = {row[2] for row in existing}
         identities = {row[3] for row in existing}
-        position = max((row[1] for row in existing), default=-1) + 1
+        position = max((row[1] for row in existing if row[4] == session_id), default=-1) + 1
         for source_path, inspected in sources:
             metadata = dict(inspected)
             identity = metadata.pop("_identity")
