@@ -12,7 +12,7 @@ Reviewed: 2026-10-15. Status: **test strategy; no test results yet**. Quality re
 | Desktop smoke | Automated/manual on Windows | Electron startup/shutdown, packaged binaries, local preview, offline operation, process cancellation |
 | Ecological benchmark | Independent human adjudication | Emergence/re-entry visibility, missed events, survey-level conclusions, counts and time savings |
 
-Use ordinary \`pytest\`, minimal frontend test tooling and focused Electron smoke tests, following existing Camera_Trap choices only where they keep dependency count low. CI should run synthetic fixtures and never fetch private WSP data or model weights.
+Use ordinary `pytest`, minimal frontend test tooling and focused Electron smoke tests, following existing Camera_Trap choices only where they keep dependency count low. CI should run synthetic fixtures and never fetch private WSP data or model weights.
 
 ## Synthetic fixtures: small and deterministic
 
@@ -49,21 +49,21 @@ For playback/seek, create clearly identifiable visual marker frames at predeterm
 - re-opened session after source file moved/modified;
 - continuity status when source segments have gaps.
 
-Do not mark an \`.MTS\` input as supported merely because a synthetic \`.ts\` container decoded. Confirm representative camera originals under Gate 1. Record the supported codecs, not just extensions.
+Do not mark an `.MTS` input as supported merely because a synthetic `.ts` container decoded. Confirm representative camera originals under Gate 1. Record the supported codecs, not just extensions.
 
 ## Window coverage invariant
 
 For each segment, the union of successfully processed and **explicitly failed/flagged** interval records must account for every planned segment interval, including the final partial interval. Planned and completed counts are distinct.
 
-A processing run may be \`complete\` only if all planned windows have valid, traceable outputs and no unresolved fatal error. A window with a camera-change flag still exists and remains reviewable; a window whose image could not be produced must be shown as a failure requiring source-video review.
+A processing run may be `complete` only if all planned windows have valid, traceable outputs and no unresolved fatal error. A window with a camera-change flag still exists and remains reviewable; a window whose image could not be produced must be shown as a failure requiring source-video review.
 
-Use coverage tests rather than assuming \`duration / 30\` is an integer or that every nominal 25-fps frame exists.
+Use coverage tests rather than assuming `duration / 30` is an integer or that every nominal 25-fps frame exists.
 
 ## Human review QA tests
 
 - One window can contain zero, one or many distinct observations.
 - One observation may cite more than one original-time range; deduplicate only when an ecologist establishes one event.
-- An imported workbook row is \`prelabel\`, not \`finalised\`.
+- An imported workbook row is `prelabel`, not `finalised`.
 - Initial review and independent QA can disagree; the disagreement remains visible until a qualified final reviewer resolves it.
 - A reviewer can explicitly mark a quiet window as reviewed; an automatically empty summary cannot mark itself reviewed.
 - Review edits have an append-only audit record and survive application restart.
@@ -83,13 +83,13 @@ Primary outcome measures:
 
 For a future candidate detector also measure false alarms/hour and precision. A summary-image approach should measure **visible event coverage** and reviewer misses rather than mislabel image panels as object detections.
 
-The qualified ecological owner must set an allowable missed-event margin, confidence level and any review-time goal **before** acceptance. No numeric safety threshold is imposed by this research repository. As an illustration only, zero misses among \`n\` independent positive events gives an approximate 95% upper bound of \`3/n\`; site/session clustering and reference uncertainty invalidate a naive interpretation of that bound.
+The qualified ecological owner must set an allowable missed-event margin, confidence level and any review-time goal **before** acceptance. No numeric safety threshold is imposed by this research repository. As an illustration only, zero misses among `n` independent positive events gives an approximate 95% upper bound of `3/n`; site/session clustering and reference uncertainty invalidate a naive interpretation of that bound.
 
 ## Minimal commands expected after implementation
 
 The planned project will document and run, where relevant:
-- \`python -m pytest backend/tests\`
-- \`npm run typecheck\` and \`npm run build\` under \`frontend/\`
+- `python -m pytest backend/tests`
+- `npm run typecheck` and `npm run build` under `frontend/`
 - focused API + UI smoke tests covering one imported media session
 - Electron packaging and launch test on Windows when packaging is implemented
 
