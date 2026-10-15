@@ -104,3 +104,17 @@ Dependency installation needs approved registry/GitHub access. Application runti
 ## Limits
 
 Windows development execution, clean-machine installation, signing, installers and binary redistribution are unverified and remain in Slice 5. Packaged startup is explicitly refused until a vetted Python runtime is configured. The current Linux end-to-end harness passes `--no-sandbox` for its container launch, so its renderer-isolation checks do not verify Chromium's operating-system sandbox. Normal quit and signal cleanup can be tested; a forced operating-system kill or power loss cannot run Electron quit handlers. There is no media picker, ingestion, decoding, timeline, motion analysis, review/QA, report, species ID or cloud functionality in this change. Tests use synthetic metadata only.
+
+
+## PR #2 review refinement: safe startup diagnostics (2026-10-15)
+
+The independent code review identified a specific usability defect: Electron previously reported a generic startup error when an existing SQLite file had an unsupported schema or was unreadable. The correction keeps the implementation small and avoids brittle traceback parsing:
+
+- \`DatabaseSchemaError\` identifies unsafe/unrecognised schema versions without altering the file.
+- The Python entry point writes one fixed redacted code, \`BAT_STARTUP_ERROR:database_schema\` or \`BAT_STARTUP_ERROR:database_unreadable\`, and exits before starting the server.
+- Electron recognises only these fixed codes and its existing missing-media-tool diagnostic, then displays actionable text. It does not expose tracebacks or private paths.
+- A real \`BackendRuntime\` integration regression test seeds future-schema and unversioned SQLite databases and asserts the original file bytes remain identical and the child process exits.
+
+**Validation performed independently:** The exact GitHub Python sources (\`backend/app/main.py\`, \`backend/app/store.py\`, \`backend/app/__main__.py\`) and existing \`backend/tests/test_foundation.py\` were copied into an isolated local test directory; their Git blob SHA values matched this PR. \`python -m pytest backend/tests -q\`: **6 passed**. Three additional real \`python -m backend.app\` subprocess cases (future-schema, unversioned and corrupt SQLite) each exited with code 1, produced the expected fixed startup code, emitted no traceback or private data-directory path, and left database bytes unchanged. Six isolated Node tests for the updated diagnostic mapping also passed.
+
+**Limit:** The complete TypeScript/Vite and Electron integration test suites were **not rerun independently** for these corrections because the local environment has no installed npm/Electron dependencies and cannot fetch them. The original Codex-reported Linux test results apply to the earlier commit only. Windows execution and default Chromium OS sandbox remain unverified. These limitations must not be presented as passing tests.
