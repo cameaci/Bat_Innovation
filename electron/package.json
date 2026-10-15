@@ -1,0 +1,12 @@
+{
+  "name": "bat-innovation-desktop",
+  "version": "0.0.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "electron ."
+  },
+  "devDependencies": { "electron": "44.7.2" }
+}

@@ -4,7 +4,7 @@ Reviewed: 2026-10-15. Source: live default branch of [cameaci/Camera_Trap](https
 
 ## Reuse policy
 
-**Reuse a verified small function/component when its dependencies and semantics fit. Adapt a proven interaction pattern when direct copying imports too much code. Write bat-specific logic independently.** A public MIT repository is not automatically authority to publish WSP-owned work elsewhere: confirm ownership and preserve the source licence and attribution for any copied portions. No source code has been copied at the planning stage.
+**Reuse a verified small function/component when its dependencies and semantics fit. Adapt a proven interaction pattern when direct copying imports too much code. Write bat-specific logic independently.** A public MIT repository is not automatically authority to publish WSP-owned work elsewhere: confirm ownership and preserve the source licence and attribution for any copied portions. No source code was copied at the planning stage or for Slice 0. Its lifecycle/IPC and stack choices reuse patterns only; exact inspected source hashes and dependency versions are in the [Slice 0 audit](../docs/11-slice-0-development.md).
 
 For each candidate record: exact path and licence, transitive dependencies, external I/O, what remains applicable, necessary changes, and a minimal regression test. Prefer one maintained implementation to two diverging local forks.
 

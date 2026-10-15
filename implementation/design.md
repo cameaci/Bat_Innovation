@@ -1,6 +1,6 @@
 # Technical design
 
-Reviewed: 2026-10-15. Status: **implementation specification, not running code**.
+Reviewed: 2026-10-15. Status: **Slice 0 session UI and development shell implemented and Linux-tested; media/review sections remain specifications**.
 
 ## 1. Architecture and boundaries
 
@@ -20,7 +20,7 @@ SQLite (small schema) + local generated summary images and previews
 Original media files remain untouched in authorised local storage
 ```
 
-Use a **single application**, one local backend process and one processing job at a time in v1. Do not introduce a distributed queue, WebSocket service, multi-user auth system, cloud persistence or generic plugin platform. Run React and FastAPI in development from Slice 0. Add a **minimal Electron development shell with a native file picker in Slice 1**, because large source videos must not be uploaded through a browser file form or accepted as arbitrary paths. Build the distributable Windows installer only in Slice 5.
+Use a **single application**, one local backend process and one processing job at a time in v1. Do not introduce a distributed queue, WebSocket service, multi-user auth system, cloud persistence or generic plugin platform. Run React and FastAPI in development from Slice 0. Use the **minimal Electron development shell from Slice 0 and add a native file picker in Slice 1**, because large source videos must not be uploaded through a browser file form or accepted as arbitrary paths. Build the distributable Windows installer only in Slice 5.
 
 **Ownership:** Python owns original-media time mapping, processing and ecological record validation. React presents typed data and asks Python to save review decisions; it does not recompute time offsets or decide which data are final.
 

@@ -36,3 +36,7 @@ output/
 logs/
 previews/
 summaries/
+# Development test artifacts
+/test-results/
+/playwright-report/
+/work/
