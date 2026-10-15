@@ -60,7 +60,7 @@ No numeric tolerance, acceptance margin, allowed miss rate or false-alert burden
 - Split by **site/survey/camera session** rather than random adjacent frames, to reduce leakage.
 - Reserve an unseen holdout set for final assessment.
 - Sample difficult negatives: insects, birds, foliage, weather, lighting artefacts, commuting and ambiguous roost-adjacent motion.
-- Include varied camera models, active IR versus thermal, distances, entrances, lighting and seasons where available.
+- Include varied camera models, active-IR illumination, distances, entrances, lighting and seasons where available. **Thermal is explicitly outside the v1 benchmark** and must not be mixed into the primary IR score.
 - Audit complete selected intervals for negatives rather than assuming that blank workbooks imply no events.
 - Record class imbalance and confidence intervals; avoid presenting a small pilot as generalisable accuracy.
 
@@ -87,6 +87,10 @@ When positives are rare, zero observed misses does not establish that the miss p
 - [Evaluation of different monitoring methods at maternity roosts of greater mouse-eared bats](https://link.springer.com/article/10.1007/s10531-022-02389-7)
 - [Exeter - automated bat tracking in infrared video](https://cdn.bats.org.uk/uploads/events-training/William_Rees_NBC_Poster.pdf?v=1725643811)
 - [Near-infrared bat detection with YOLO](https://doi.org/10.3390/signals6030046)
+
+## Desktop reviewer and QA comparability
+
+The local review UI follows the [public Camera_Trap human verification interaction patterns](10-camera-trap-architecture-reference.md): a browsable gallery, next-unreviewed navigation, count correction, visible progress and persistent edits. It does **not** inherit camera-trap species-count semantics or confer authority for final bat-roost decisions. Evaluate the bat-specific reviewer and independent QA together, recording disagreements and survey-level changes. Keep output rows suitable for existing ecological spreadsheets while storing processing diagnostics separately.
 
 ## Additional baseline - Complete time-window motion-summary review
 
