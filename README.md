@@ -32,7 +32,7 @@ This is an exploratory project, **not an official WSP publication, endorsed solu
 | [06 - Research backlog](docs/06-research-backlog.md) | Open questions and priority research tasks |
 | [07 - Research log](docs/07-research-log.md) | Dated research notes and decisions |
 | [08 - Motion-summary prior art](docs/08-motion-summary-prior-art.md) | Public product comparison, time-window summaries, evidence limitations |
-| [09 - IR-first app architecture](docs/09-ir-first-architecture-draft.md) | Lean local Gradio app, processing modules, recording sessions, review/QA and exports |
+| [09 - IR-first app architecture](docs/09-ir-first-architecture-draft.md) | Lean Electron/React/FastAPI/SQLite desktop application, recording sessions, review/QA and exports |
 | [10 - Camera_Trap reference](docs/10-camera-trap-architecture-reference.md) | Reviewed implementation patterns to reuse and avoid |
 | [Source review template](docs/source-review-template.md) | Standard format for future source assessments |
 
@@ -59,7 +59,11 @@ All project documentation is written in English and stored as Markdown (`.md`). 
 
 ## App design decision
 
-Use the lean local Gradio/Python patterns of [Camera_Trap](docs/10-camera-trap-architecture-reference.md), **not** its training pipeline or large dependency tree. Start with streamed time-window IR motion summaries, original video verification, review/QA records, and CSV export. Tracking is an optional next enhancement. **Thermal and acoustic analysis are outside v1.** Any controlled test on client footage requires documented access and permission checks first. See [architecture](docs/09-ir-first-architecture-draft.md).
+Use the **actual Electron + React/TypeScript + FastAPI + SQLite desktop architecture** of [Camera_Trap](docs/10-camera-trap-architecture-reference.md), with a much smaller feature set and dependency tree. The previous Gradio reference was incorrect and has been superseded. Start with streamed time-window IR motion summaries, original video verification, review/QA records, and CSV export. Tracking is an optional next enhancement. **Thermal and acoustic analysis are outside v1.** Any controlled test on client footage requires documented access and permission checks first. See [architecture](docs/09-ir-first-architecture-draft.md).
+
+## Delivery boundary
+
+The repository holds public research, Markdown architecture and future shareable application source. Engineering with synthetic or appropriately licensed public test clips is compatible with the research stage; real client footage and a controlled pilot require the relevant access, privacy, IT and ecological checks. Existing time-stamped observations are **prelabels**, not validated ground truth. Acceptance thresholds and final ecological sign-off remain to be agreed.
 
 ## Ownership and licence
 
