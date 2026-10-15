@@ -78,3 +78,9 @@ No numeric tolerance or success threshold is set yet because frame rates, ecolog
 - [Evaluation of different monitoring methods at maternity roosts of greater mouse-eared bats](https://link.springer.com/article/10.1007/s10531-022-02389-7)
 - [Exeter - automated bat tracking in infrared video](https://cdn.bats.org.uk/uploads/events-training/William_Rees_NBC_Poster.pdf?v=1725643811)
 - [Near-infrared bat detection with YOLO](https://doi.org/10.3390/signals6030046)
+
+## Additional baseline - Complete time-window motion-summary review
+
+Before evaluating any automatic skip/triage, benchmark an **all-window summary gallery** that retains every interval and links each image to the original recording. Compare full manual review against summary-assisted review using the same adjudicated videos. Measure (1) time spent reviewing summary images, (2) time spent checking original video, (3) missed emergence/re-entry events, (4) reviewer confidence and disagreements, and (5) camera-stability/low-contrast failure cases. A motion summary is not itself a detection or a validated negative.
+
+The window size (for example, 15, 30 or 60 seconds) is an experimental parameter. Record the exact time interval and processing settings for every summary. Source-reported vendor time savings are not baseline results.
