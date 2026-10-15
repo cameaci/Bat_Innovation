@@ -168,7 +168,7 @@ def _inspect_open_source(source: BinaryIO, source_format: str,
                     warnings.append("Video rotation changes within the source.")
                 interlaced = interlaced or frame.interlaced_frame
                 last_pts = frame.pts
-                last_duration = frame.duration
+                last_duration = frame.duration or 0
                 frame_count += 1
                 if frame_count == 1 or frame_count % 100 == 0:
                     progress("decoding", frame_count)
