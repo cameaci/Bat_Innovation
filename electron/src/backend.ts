@@ -10,21 +10,15 @@ const unavailable = (message = 'Backend unavailable. Reopen the app after checki
   ({ ok: false, error: { code: 'unavailable', message } }) as const;
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-/** Recognise known startup failures without forwarding Python tracebacks or private paths. */
+/** Read only known, redacted startup codes from the Python process. */
 function safeStartupFailure(output: string): string | undefined {
   const mediaTool = output.match(/Required media tool is unavailable: (ffmpeg|ffprobe)\b/);
   if (mediaTool) return 'Required media tool is unavailable: ' + mediaTool[1] + '. Install it on PATH and reopen the app.';
-  if (/Unsupported database schema version \d+; expected \d+/.test(output)) {
+  if (output.includes('BAT_STARTUP_ERROR:database_schema')) {
     return 'The local database has an unsupported schema version. Open it with a compatible app version or restore a supported backup. The database was not changed.';
   }
-  if (output.includes('Existing unversioned database cannot be initialised safely')) {
-    return 'The local database has an unrecognised schema. Restore a supported backup; the existing database was not changed.';
-  }
-  if (/sqlite3\.(?:DatabaseError|OperationalError): (?:file is not a database|database disk image is malformed)/.test(output)) {
-    return 'The local database cannot be read safely. Preserve it and restore a known-good backup.';
-  }
-  if (output.includes('sqlite3.OperationalError: unable to open database file')) {
-    return 'The local database could not be opened. Check the application data directory and its permissions.';
+  if (output.includes('BAT_STARTUP_ERROR:database_unreadable')) {
+    return 'The local database could not be read. Preserve the original file and check its storage permissions or restore a known-good backup.';
   }
   return undefined;
 }
