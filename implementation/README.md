@@ -1,6 +1,6 @@
 # Implementation
 
-Status: **Slice 0 in progress. Python/SQLite foundation committed; React/Electron integration pending**. Reviewed 2026-10-15.
+Status: **Slice 0 UI and Electron development shell verified on Linux; Windows and ownership checks remain open**. Reviewed 2026-10-15.
 
 Build a small, local Windows desktop reviewer for **recorded active-infrared (IR) bat survey video**. Reuse the structure and review ergonomics of [Camera_Trap](https://github.com/cameaci/Camera_Trap), but not its unrelated wildlife models, platform features or entire source tree.
 
@@ -44,7 +44,7 @@ Prove reliable **video playback/seek** for original .MTS/.MP4 media, including s
 
 The initial backend implementation is in [backend/app/main.py](../backend/app/main.py), [backend/app/store.py](../backend/app/store.py), and [backend/tests/test_foundation.py](../backend/tests/test_foundation.py). A developer-machine run of `python -m pytest backend/tests -q` passed **6 tests**; a separate real loopback HTTP smoke test verified authenticated health (200), unauthorised sessions (401) and creation of the SQLite file. These checks used synthetic session metadata, not bat videos.
 
-The React/TypeScript UI and minimal Electron development shell are a [Codex-ready issue #1](https://github.com/cameaci/Bat_Innovation/issues/1). **The issue is prepared, but Codex execution has not been started through this chat.** Slice 0 remains incomplete until real frontend/API/database integration and Windows or Electron environment tests pass.
+The React/TypeScript UI and minimal Electron development shell now use the real backend through a restricted main-process API bridge. Live tests cover session creation, reload/reopening persistence, rejected tokens, backend failures and child-process cleanup. See [setup, source reuse and limits](../docs/11-slice-0-development.md) and [recorded validation](../docs/07-research-log.md). Windows development and packaging checks remain open; no video feature or ecological result is claimed.
 
 ## Delivery order
 

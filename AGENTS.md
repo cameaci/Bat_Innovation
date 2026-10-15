@@ -50,4 +50,4 @@ These instructions apply to all work in this repository. Read [implementation/RE
 
 A slice is done only if its source/derived outputs are traceable, failure behavior is explicit, source files remain untouched, negative cases are tested, the user can see what happened, and added complexity is justified. A passing demo is not proof of bat-event recall or suitability for ecological reporting.
 
-**Current status: Slice 0 partial. Python/SQLite backend and synthetic tests are committed. React/Electron user interface, video support and an installed app have not been delivered. See [Codex handoff issue #1](https://github.com/cameaci/Bat_Innovation/issues/1).**
+**Current status: Slice 0 UI and Electron development shell are verified on Linux against the existing Python/SQLite backend. Windows, project ownership/publication and packaging checks remain open. Video support and an installed app have not been delivered. See [development notes](docs/11-slice-0-development.md) and [plan](implementation/plan.md).**

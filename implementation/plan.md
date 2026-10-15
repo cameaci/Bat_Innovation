@@ -1,6 +1,6 @@
 # Implementation plan
 
-Reviewed 2026-10-15. Status: **Slice 0 partly implemented; subsequent slices not started**. This is a dependency-ordered sequence, not a promise of dates. The application is built in **small vertical slices**, each delivering observable behavior and tests. No workarounds or speculative infrastructure.
+Reviewed 2026-10-15. Status: **Slice 0 UI and development shell verified on Linux; Windows and ownership checks remain open. Subsequent slices not started**. This is a dependency-ordered sequence, not a promise of dates. The application is built in **small vertical slices**, each delivering observable behavior and tests. No workarounds or speculative infrastructure.
 
 ## Principles of execution
 
@@ -12,26 +12,27 @@ Reviewed 2026-10-15. Status: **Slice 0 partly implemented; subsequent slices not
 
 ## Slice 0 - Foundation and reality checks
 
-**Progress (2026-10-15):** The original local Python/FastAPI/SQLite foundation has been committed on `main`. Six pytest checks passed and a separate live HTTP loopback smoke test returned 200 for authenticated health and 401 for unauthenticated access. This does not demonstrate a working React or Electron UI. [Codex handoff #1](https://github.com/cameaci/Bat_Innovation/issues/1) specifies the remaining UI and desktop development shell work; it has not been launched automatically.
+**Progress (2026-10-15):** The existing Python/FastAPI/SQLite backend is retained unchanged. React and the minimal Electron development shell now exercise authenticated health, session creation and persistence across reload/reopening against the real backend. Linux verification passed 6 Python tests, strict TypeScript checks, Vite build, 13 backend/shell integration assertions and 3 Electron end-to-end tests. See [development and reuse notes](../docs/11-slice-0-development.md) and [research log](../docs/07-research-log.md). Windows execution, packaging and project ownership/publication decisions remain unverified.
 
 - [x] Create original Python FastAPI startup with explicit data directory and per-launch token requirement, plus a local session API.
 - [x] Create SQLite v1 session schema and refuse unknown/unversioned databases without silent migration.
 - [x] Add local-data `.gitignore` exclusions and backend dependency pins.
 - [x] Run six Python tests and real loopback HTTP smoke test on the available Linux development environment.
-- [ ] Integrate React and Electron, exercise persistent sessions and validate Windows development/packaging assumptions.
+- [x] Integrate React and Electron and exercise persistent sessions on Linux.
+- [ ] Validate Windows development and packaging assumptions.
 
 **Goal:** make the codebase reliably runnable with the selected stack before feature work.
 
 - [ ] Confirm ownership/publication and reuse conditions for Camera_Trap components and planned source code.
 - [ ] Verify compatible Windows Python, Node and Electron versions, plus local packaging policy. Pin versions and lock dependencies.
-- [ ] Create the minimal `backend/`, `frontend/`, and eventually `electron/` layout from [design.md](design.md); avoid importing the full Camera_Trap app.
-- [ ] Stand up one FastAPI `/health` endpoint and a minimal React interface that displays actual backend readiness.
+- [x] Create the minimal `backend/`, `frontend/`, and `electron/` layout from [design.md](design.md); avoid importing the full Camera_Trap app.
+- [x] Use the existing FastAPI `/api/health` endpoint and a minimal React interface that displays actual backend readiness.
 - [x] Add a small SQLite schema/version check and an app-specific local user-data folder; generated/private data must be gitignored.
-- [ ] Verify local-only behavior: no unapproved network calls, explicit error on missing FFmpeg or configuration.
-- [ ] Add a narrow integration smoke test covering React -> local API -> SQLite read/write.
-- [ ] Document actual third-party and binary licences; confirm code-copy notices before committing copied portions.
+- [x] Verify Slice 0 local API/IPC restrictions and explicit failures for missing configuration or media prerequisites. Renderer connections and popups are blocked; no runtime downloader is added.
+- [x] Add real React -> narrow Electron IPC -> local API -> SQLite tests, including reload/reopen, rejected token, unavailable backend and cleanup.
+- [x] Document exact dependency licences and Electron binary notice obligations. Reference reuse is pattern only; no source code was copied. Binary redistribution review remains in Slice 5.
 
-**Exit:** clean install and typecheck/tests pass on the development machine; app connects to a single local backend; an explicit failing dependency displays a useful error. No model downloads or hidden external calls.
+**Exit:** clean install and typecheck/tests pass on the development machine; app connects to a single local backend; an explicit failing dependency displays a useful error. No model downloads or hidden external calls. **Linux functional exit verified.** Windows checks and ownership/publication decisions above remain open; this is not a packaged or production-ready video reviewer.
 
 ## Slice 1 - Source-video fidelity spike (first technical risk)
 
@@ -40,7 +41,7 @@ Reviewed 2026-10-15. Status: **Slice 0 partly implemented; subsequent slices not
 - [ ] Create tiny synthetic CFR and variable-timebase media; at least one AVCHD/MTS-like transport-stream sample and one MP4 sample. Synthetic .ts output does not prove every camera-specific .MTS works.
 - [ ] Compare simple FFmpeg decoding and [PyAV](https://github.com/PyAV-Org/PyAV) for access to actual decoded frame PTS. **Preferred investigation:** PyAV gives direct frame timestamps and may eliminate brittle frame-number mapping. Verify Windows wheel, Python version, package/bundled-FFmpeg licences and measured decoding performance before deciding; use only **one authoritative decoder path** in the eventual engine.
 - [ ] Implement `ffprobe` metadata extraction, codec identity, field/interlace flags, rotation and detected stream timebase; reject unsupported or malformed streams clearly.
-- [ ] Implement a minimal Electron development shell and **native source-file selector**. Do not simulate large-video import by pushing complete files through a browser upload or accepting arbitrary filesystem paths over HTTP.
+- [ ] Extend the Slice 0 Electron development shell with a **native source-file selector**. Do not simulate large-video import by pushing complete files through a browser upload or accepting arbitrary filesystem paths over HTTP.
 - [ ] Import **ordered source segments** into a recording session. Record a checksum, exact sequence and explicit `contiguous / gap / unknown` status. Do not assume filenames prove continuity.
 - [ ] Map source PTS -> segment elapsed -> optional session position -> optional anchored real-world survey clock, with visible provenance and uncertainty.
 - [ ] Implement original-media verification with a working player. Compare direct browser playback versus **on-demand FFmpeg preview clips** for non-browser-compatible codecs. Choose by an actual seek-accuracy and start/end-boundary test, not extension.

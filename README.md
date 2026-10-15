@@ -1,12 +1,12 @@
 # Bat Innovation
 
-**Research and documentation for an in-house, human-reviewed bat emergence video analysis workflow.**
+**Research and a local development foundation for a human-reviewed bat emergence video workflow.**
 
-Status: **Gate 0 implementation in progress; local Python/SQLite foundation committed, desktop UI pending**. Last reviewed: **2026-10-15**.
+Status: **Gate 0; React/Electron session foundation verified on Linux, Windows and media work pending**. Last reviewed: **2026-10-15**.
 
 ## Purpose
 
-This public repository documents research **and the planned source code** for a lean local application to support human review of recorded **active infrared (IR)** bat emergence footage. The intended use case is to investigate a potential **WSP-operated, in-house** workflow that reduces manual video review while retaining ecological oversight and an auditable trail.
+This public repository contains research **and the initial source code** for a lean local application to support human review of recorded **active infrared (IR)** bat emergence footage. The intended use case is to investigate a potential **WSP-operated, in-house** workflow that reduces manual video review while retaining ecological oversight and an auditable trail.
 
 This is an exploratory project, **not an official WSP publication, endorsed solution, or approved use of client data**. No model, dataset, workflow, or research-use permission has yet been validated for WSP deployment.
 
@@ -34,6 +34,7 @@ This is an exploratory project, **not an official WSP publication, endorsed solu
 | [08 - Motion-summary prior art](docs/08-motion-summary-prior-art.md) | Public product comparison, time-window summaries, evidence limitations |
 | [09 - IR-first app architecture](docs/09-ir-first-architecture-draft.md) | Lean Electron/React/FastAPI/SQLite desktop application, recording sessions, review/QA and exports |
 | [10 - Camera_Trap reference](docs/10-camera-trap-architecture-reference.md) | Reviewed implementation patterns to reuse and avoid |
+| [11 - Slice 0 development shell](docs/11-slice-0-development.md) | Setup, API-origin decision, source reuse, dependency licences and limits |
 | [Source review template](docs/source-review-template.md) | Standard format for future source assessments |
 | [Implementation plan](implementation/README.md) | Reviewed delivery sequence, technical contracts, reuse audit and tests |
 | [AGENTS.md](AGENTS.md) | Working rules for AI coding agents and contributors |
@@ -49,7 +50,9 @@ This is an exploratory project, **not an official WSP publication, endorsed solu
 
 ## Status and next step
 
-The initial source register is a **scoping review**, not a systematic or exhaustive literature review. The backend now has a local authenticated FastAPI entry point, SQLite session persistence and six passing foundation tests on a development machine. **No usable desktop video reviewer or ecological performance result exists yet.** **An implementation plan has now been reviewed and committed under [implementation/](implementation/README.md). No application source code or benchmark results have been produced.** A local, IR-first application is the selected implementation direction; app code is not yet committed. External-source links have been collected, but repository/code quality, dataset availability, licence compatibility, and empirical performance on target footage still require checks. A deeper literature and prior-art review has been requested. The [motion-summary review](docs/08-motion-summary-prior-art.md) gives the public prior art; the [architecture decision](docs/09-ir-first-architecture-draft.md) points to the authoritative [technical design](implementation/design.md) and [delivery plan](implementation/plan.md).
+The minimal React/TypeScript UI and Electron development shell now display actual backend readiness and create/list synthetic sessions in the existing SQLite database. Tests verify persistence across reload and full application reopening, fresh per-launch credentials, explicit failure states and backend cleanup. Start with the [development instructions](docs/11-slice-0-development.md); results and decisions are in the [research log](docs/07-research-log.md).
+
+This is a foundation for the [planned workflow](implementation/plan.md). Video import, playback, motion summaries, ecological review, exports and Windows packaging are unfinished. No usable desktop video reviewer or ecological performance result is claimed. The source register remains a scoping review, and ownership/publication rights, approved footage and ecological evaluation remain open.
 
 ## Documentation conventions
 
@@ -65,7 +68,7 @@ Use the **actual Electron + React/TypeScript + FastAPI + SQLite desktop architec
 
 ## Delivery boundary
 
-The repository holds public research, Markdown architecture and future shareable application source. Engineering with synthetic or appropriately licensed public test clips is compatible with the research stage; real client footage and a controlled pilot require the relevant access, privacy, IT and ecological checks. Existing time-stamped observations are **prelabels**, not validated ground truth. Acceptance thresholds and final ecological sign-off remain to be agreed.
+The repository holds public research, Markdown architecture and initial shareable application source. Engineering with synthetic or appropriately licensed public test clips is compatible with the research stage; real client footage and a controlled pilot require the relevant access, privacy, IT and ecological checks. Existing time-stamped observations are **prelabels**, not validated ground truth. Acceptance thresholds and final ecological sign-off remain to be agreed.
 
 ## Ownership and licence
 

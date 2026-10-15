@@ -1,6 +1,6 @@
 # Testing and ecological evaluation
 
-Reviewed: 2026-10-15. Status: **test strategy; no test results yet**. Quality requirements are part of implementation, not a later add-on.
+Reviewed: 2026-10-15. Status: **Slice 0 synthetic session tests pass on Linux; media and ecological tests below remain planned**. Quality requirements are part of implementation, not a later add-on.
 
 ## Testing layers
 
@@ -85,12 +85,20 @@ For a future candidate detector also measure false alarms/hour and precision. A 
 
 The qualified ecological owner must set an allowable missed-event margin, confidence level and any review-time goal **before** acceptance. No numeric safety threshold is imposed by this research repository. As an illustration only, zero misses among `n` independent positive events gives an approximate 95% upper bound of `3/n`; site/session clustering and reference uncertainty invalidate a naive interpretation of that bound.
 
-## Minimal commands expected after implementation
+## Slice 0 commands and evidence
 
-The planned project will document and run, where relevant:
-- `python -m pytest backend/tests`
-- `npm run typecheck` and `npm run build` under `frontend/`
-- focused API + UI smoke tests covering one imported media session
-- Electron packaging and launch test on Windows when packaging is implemented
+Run from the repository root with the backend Python environment selected:
 
-These commands are **planned**, not evidence of a presently working test suite. Each completed task must record which commands actually ran and any skipped checks, with an explanation.
+```sh
+python -m pytest backend/tests -q
+npm run typecheck
+npm run build
+npm test
+npm run test:e2e
+```
+
+The root lockfile pins workspace dependencies. `npm run typecheck` includes React, Electron and Playwright test TypeScript. `npm test` builds, then runs Node's real backend integration suite. `npm run test:e2e` builds, then exercises the real Electron/React/API/SQLite path. No API responses are mocked.
+
+On the Linux development host, 6 Python tests, strict TypeScript checks, Vite build, 13 Node integration assertions and 3 Electron tests passed after a clean npm install. The end-to-end tests check live readiness, create/list, persistence after reload and reopening, token regeneration, terminated/missing backend errors, narrow bridge behavior and backend process cleanup. The Node suite additionally tests real HTTP 401 responses and filesystem/configuration boundaries. See [setup and limits](../docs/11-slice-0-development.md) and [command outcomes](../docs/07-research-log.md).
+
+Electron tests currently use Linux `/proc` and `ps`, and launch with `--no-sandbox` inside the test container. Windows execution and Chromium's operating-system sandbox are unverified. Imported media, packaging, offline clean-machine Windows behavior and ecological benchmarks remain later-slice checks.
