@@ -23,6 +23,16 @@ Status: open research programme. Priorities are proposals, not committed WSP tas
 | R09 | Can an ecologist use candidate clips to save review time? | Timed blinded or counterbalanced review sessions | Time-savings estimate with missed-event audit |
 | R10 | What failure modes dominate across camera types and sites? | Stratified error review | Documented error taxonomy and mitigation backlog |
 
+## Priority 1A - Motion-summary-first MVP
+
+| ID | Question / task | Evidence required | Completion condition |
+| --- | --- | --- | --- |
+| R11 | Can an all-window 30-second motion-summary gallery make sparse IR emergence review faster without missed events? | Approved representative IR videos, adjudicated events, timed ecologist reviews | Measured event recall and total review effort versus full manual review |
+| R12 | Which temporal encoding, motion thresholds and window sizes preserve faint, fast IR bat flights? | Controlled parameter sweep on validated positives and hard negatives | Documented visibility/false-motion trade-offs across 15, 30 and 60 seconds |
+| R13 | How do minor tripod shifts, camera re-aiming and illumination changes affect summaries? | Stability tests and flagged original intervals | Explicit failure/quality flags and recovery policy |
+| R14 | Which local review functions provide the greatest practical benefit? | User workflow testing: gallery, zoom, original-video seek, labels, QA, CSV | Usable reviewer with traceable and complete window coverage |
+| R15 | What is the local CPU processing speed and memory footprint for representative MP4/MTS footage? | Approved workstation, original-format video and profiler | Repeatable throughput and resource measurements |
+
 ## Priority 2 - Productisation questions
 
 - Offline Windows workstation versus internal server deployment.
@@ -47,3 +57,4 @@ Status: open research programme. Priorities are proposals, not committed WSP tas
 | 2026-10-15 | Use public Markdown repository for non-confidential research and documentation. | Repository visibility confirmed public. | Visibility/governance changes |
 | 2026-10-15 | Prioritise in-house, human-reviewed event triage over autonomous roost conclusions. | Technical/ecological risk framing; not an empirical result. | Pilot evidence available |
 | 2026-10-15 | Do not select a target dataset or model yet. | Provenance, permissions and target performance not established. | Data and approval gates satisfied |
+| 2026-10-15 | Prioritise **all-window IR motion summaries plus ecological review** as the first prototype, with tracking and AI as optional later stages. | Publicly documented workflows and lower initial training-data requirements; not a performance finding. | Representative IR benchmark or reviewer feedback contradicts the hypothesis |
