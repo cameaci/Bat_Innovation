@@ -1,0 +1,67 @@
+# 04 - Data governance, access and deployment controls
+
+Last reviewed: 2026-10-15  
+Status: proposed research safeguards, not a legal or WSP policy determination.
+
+## Public repository classification
+
+The GitHub repository `cameaci/Bat_Innovation` was verified as **public** on 2026-10-15. Treat all committed Markdown as publicly accessible. It is not an authorised storage location for WSP or client confidential material.
+
+**Do not commit:** original or derived client videos; images, crops or screenshots from client surveys; private spreadsheets; survey coordinates; internal paths; project identifiers; names of clients or confidential sites; contracts; credentials; internal-only policies; model weights trained on restricted data; sensitive ecological locations; or unapproved dataset extracts.
+
+Public papers, public URLs, general methods, generic templates and clearly labelled non-confidential design proposals are appropriate.
+
+## Distinct approvals required
+
+1. **Access:** authorised access to original footage and related records.
+2. **Provenance:** confirmation of project, survey date, camera, file identity, frame rate, resolution, recording timebase and any transformations.
+3. **Ecological QA:** approved event definitions, label authority and final reviewer sign-off.
+4. **Research-use rights:** written confirmation that the proposed processing, training, testing, retention and sharing are permitted by the relevant contracts and data owners.
+5. **IT/security:** approval of the execution environment, software dependencies, network behaviour, storage and access controls.
+6. **External data/software licences:** independent review of dataset terms, source-code licences, model-weight licences and third-party services.
+
+Approval to **view or analyse for project delivery** does not by itself prove permission to **train a reusable AI model**. Similarly, code being open source does not grant rights over footage or model weights.
+
+## Suggested internal data register (store privately, not here)
+
+| Field | Purpose |
+| --- | --- |
+| Internal dataset ID | Pseudonymous stable identifier |
+| Data owner and custodian | Accountability |
+| Project and contract clearance reference | Documented reuse scope |
+| Camera/survey metadata | Modality, dates, location and equipment |
+| Original file identity and checksum | Traceability |
+| Original-speed and timestamp evidence | Timing validity |
+| QA authority and adjudication record | Label provenance |
+| Permitted operations | Review, model training, inference, retention, export |
+| Environment and access permissions | Security |
+| Retention/deletion obligations | Lifecycle control |
+
+## Processing restrictions
+
+- Run sensitive experiments only in a WSP-approved environment after the above gates are met.
+- Prefer offline execution, controlled storage, least-privilege access and dependency pinning.
+- Disable unapproved telemetry and automatic uploads; verify whether tools download model weights or send diagnostics.
+- Do not use public hosted annotation, AI, storage or video services for client data without explicit approval.
+- Separate development examples from customer data; use synthetic or suitably licensed public material for open demonstrations.
+- Do not publish benchmark examples, model weights or outputs that may expose restricted survey content.
+
+## Release gates
+
+**Gate 0 - Public research:** public literature and public repositories only; allowed in this repository.
+
+**Gate 1 - Internal feasibility:** documented source access, metadata, reuse permission, IT approval and QA authority.
+
+**Gate 2 - Experimental dataset:** validated original-file mapping, adjudicated labels, representative positive/negative sampling, defined retention and access controls.
+
+**Gate 3 - Pilot:** locked benchmark, predefined metrics, ecological acceptance criteria, legal/security review and rollback process.
+
+**Gate 4 - Operational deployment:** repeatable QA, monitoring for missed events and drift, incident response, model/change control, and approved reporting practice.
+
+Current documented status: **Gate 0 only**. This is not a claim that WSP lacks approvals elsewhere; they have not been established in this public research record.
+
+## Useful public references
+
+- [Bat Conservation Trust - NVA technical guide](https://www.bats.org.uk/resources/guidance-for-professionals/bat-emergence-surveys-with-night-vision-aids-a-technical-guide)
+- [CVAT Community self-hosting and licence notes](https://github.com/cvat-ai/cvat)
+- [MegaDetector model-specific licences](https://github.com/microsoft/MegaDetector/blob/main/docs/model_zoo.md)
