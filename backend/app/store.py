@@ -126,7 +126,7 @@ def commit_segments(db_path: Path, session_id: str, sources: list[tuple[Path, di
             raise DatabaseSchemaError("Explicit media schema upgrade is required")
         if connection.execute("SELECT 1 FROM recording_session WHERE id=?", (session_id,)).fetchone() is None:
             raise ValueError("Session does not exist")
-        existing = connection.execute("SELECT sha256, position, source_path, identity_json, session_id FROM segment", (session_id,)).fetchall()
+        existing = connection.execute("SELECT sha256, position, source_path, identity_json, session_id FROM segment").fetchall()
         hashes = {row[0] for row in existing}
         paths = {row[2] for row in existing}
         identities = {row[3] for row in existing}
