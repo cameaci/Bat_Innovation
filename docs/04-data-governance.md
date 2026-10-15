@@ -9,7 +9,7 @@ The GitHub repositories `cameaci/Bat_Innovation` **and** `cameaci/Camera_Trap` w
 
 **Do not commit:** original or derived client videos; images, crops or screenshots from client surveys; private spreadsheets; survey coordinates; internal paths; project identifiers; names of clients or confidential sites; contracts; credentials; internal-only policies; model weights trained on restricted data; sensitive ecological locations; or unapproved dataset extracts.
 
-Public papers, public URLs, general methods, generic templates and clearly labelled non-confidential design proposals are appropriate. **Non-public vendor demonstrations, meeting transcripts, pricing, screenshots and inferred proprietary internals must not be reproduced in this public repository without permission.** Publicly documented capabilities may be linked and independently summarised.
+Public papers, public URLs, general methods, generic templates and clearly labelled non-confidential design proposals are appropriate. The referenced Camera_Trap repository is also publicly accessible and contains an MIT licence with a WSP copyright notice; any substantial reuse remains subject to internal ownership, publication and dependency-rights checks. **Non-public vendor demonstrations, meeting transcripts, pricing, screenshots and inferred proprietary internals must not be reproduced in this public repository without permission.** Publicly documented capabilities may be linked and independently summarised.
 
 ## Distinct approvals required
 
@@ -71,4 +71,4 @@ Current documented status: **Gate 0 only**. This is not a claim that WSP lacks a
 
 ## Practical boundary for a lean prototype
 
-A public repository may contain source code and generic synthetic tests; the executable can still run **locally and offline**. Client footage, time-sync material that may show people/phones, derived summaries, reviewer names, local paths, JSONL logs and exports must remain in authorised storage and be excluded from Git. The initial local Gradio UI is **not** an authentication system. Real footage testing follows the applicable gates; internal policy implementation details belong in private organisational records.
+A public repository may contain source code and generic synthetic tests; the executable can still run **locally and offline**. Client footage, time-sync material that may show people/phones, derived summaries, reviewer names, local paths, JSONL logs and exports must remain in authorised storage and be excluded from Git. The initial local Electron/React UI is **not** an authentication system. FastAPI must listen on loopback only; do not expose local projects or videos on a network port. Real footage testing follows the applicable gates; internal policy implementation details belong in private organisational records.
