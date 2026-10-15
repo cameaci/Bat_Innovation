@@ -9,7 +9,7 @@ The GitHub repository `cameaci/Bat_Innovation` was verified as **public** on 202
 
 **Do not commit:** original or derived client videos; images, crops or screenshots from client surveys; private spreadsheets; survey coordinates; internal paths; project identifiers; names of clients or confidential sites; contracts; credentials; internal-only policies; model weights trained on restricted data; sensitive ecological locations; or unapproved dataset extracts.
 
-Public papers, public URLs, general methods, generic templates and clearly labelled non-confidential design proposals are appropriate.
+Public papers, public URLs, general methods, generic templates and clearly labelled non-confidential design proposals are appropriate. **Non-public vendor demonstrations, meeting transcripts, pricing, screenshots and inferred proprietary internals must not be reproduced in this public repository without permission.** Publicly documented capabilities may be linked and independently summarised.
 
 ## Distinct approvals required
 
