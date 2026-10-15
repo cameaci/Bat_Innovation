@@ -56,7 +56,7 @@ export interface MediaSegment {
   position: number;
   continuity: Continuity;
   continuity_provenance: string | null;
-  source_state: 'ready' | 'missing_source' | 'changed_source';
+  source_state: 'ready' | 'missing_source' | 'unreadable_source' | 'changed_source';
   metadata: MediaMetadata;
 }
 
