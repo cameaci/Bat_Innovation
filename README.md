@@ -14,7 +14,7 @@ This is an exploratory project, **not an official WSP publication, endorsed solu
 
 1. Can a local or WSP-approved environment identify candidate bat activity in infrared/night-vision recordings?
 2. Can trajectories and roost context help distinguish emergence, re-entry, commuting, insects, birds, and uncertain events?
-3. Can ecologists review short candidate clips instead of entire recordings without missing important events?
+3. Can ecologists review a complete set of timestamped motion-summary windows, then inspect original video only where necessary, without missing important events?
 4. Which tools, algorithms, datasets, and licences are suitable for an internally operated solution?
 5. What evidence, governance approvals, and validation results are required before a pilot?
 
@@ -31,6 +31,8 @@ This is an exploratory project, **not an official WSP publication, endorsed solu
 | [05 - Evaluation framework](docs/05-evaluation-framework.md) | Label policy, split strategy, metrics and ecological QA |
 | [06 - Research backlog](docs/06-research-backlog.md) | Open questions and priority research tasks |
 | [07 - Research log](docs/07-research-log.md) | Dated research notes and decisions |
+| [08 - Motion-summary prior art](docs/08-motion-summary-prior-art.md) | Public product comparison, time-window summaries, evidence limitations |
+| [09 - IR-first architecture draft](docs/09-ir-first-architecture-draft.md) | Provisional in-house motion-summary-first pipeline, data contracts and review UI |
 | [Source review template](docs/source-review-template.md) | Standard format for future source assessments |
 
 ## Working principles
@@ -44,7 +46,7 @@ This is an exploratory project, **not an official WSP publication, endorsed solu
 
 ## Status and next step
 
-The initial source register is a **scoping review**, not a systematic or exhaustive literature review. External-source links have been collected, but repository/code quality, dataset availability, licence compatibility, and empirical performance on target footage still require checks. A deeper literature and prior-art review is queued.
+The initial source register is a **scoping review**, not a systematic or exhaustive literature review. External-source links have been collected, but repository/code quality, dataset availability, licence compatibility, and empirical performance on target footage still require checks. A deeper literature and prior-art review has been requested. The [motion-summary review](docs/08-motion-summary-prior-art.md) adds public evidence for a lower-complexity, all-window summary-first MVP; the [architecture draft](docs/09-ir-first-architecture-draft.md) is provisional pending requirements answers.
 
 ## Documentation conventions
 
