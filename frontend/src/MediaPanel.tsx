@@ -39,9 +39,9 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
   const disabled = busy !== null || importing;
 
   useEffect(() => {
-    onBusyChange?.(disabled);
+    onBusyChange?.(disabled || dirty);
     return () => onBusyChange?.(false);
-  }, [disabled, onBusyChange]);
+  }, [disabled, dirty, onBusyChange]);
 
   function replace(value: MediaSession) {
     setMedia(value);
@@ -63,6 +63,7 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
   }
 
   async function refresh() {
+    if (dirty) { setError('Save or discard timeline edits before refreshing.'); return; }
     setBusy('loading'); setError(''); setNotice('');
     const value = await request(api => api.getMedia(session.id));
     if (value) { replace(value); setJob(value.active_import?.state === 'running' ? value.active_import : null); }
@@ -115,6 +116,7 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
   }
 
   async function choose() {
+    if (dirty) { setError('Save or discard timeline edits before importing.'); return; }
     setBusy('picker'); setError(''); setNotice('');
     const value = await request(api => api.chooseMedia(session.id));
     if (value !== undefined) {
@@ -175,8 +177,8 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
     <p><strong>{session.display_name}</strong> · Camera: {session.camera_ref}</p>
     <p className="detail">Inspect original MP4 or MTS segments. Source timestamps and exact rational seconds are authoritative. Original-speed provenance is unverified.</p>
     <div className="media-actions">
-      <button type="button" onClick={() => void refresh()} disabled={disabled}>Refresh media</button>
-      {media?.schema_version === 2 && <button type="button" onClick={() => void choose()} disabled={disabled}>Choose original videos</button>}
+      <button type="button" onClick={() => void refresh()} disabled={disabled || dirty}>Refresh media</button>
+      {media?.schema_version === 2 && <button type="button" onClick={() => void choose()} disabled={disabled || dirty}>Choose original videos</button>}
     </div>
     {error && <div className="error" role="alert"><strong>Media operation failed</strong><p>{error}</p></div>}
     {notice && <p className="notice" role="status">{notice}</p>}
@@ -195,7 +197,7 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
         <article aria-label={`Segment ${index + 1}: ${segment.metadata.filename}`}>
           <h3>{index + 1}. {segment.metadata.filename}</h3>
           <p className="detail">{segment.source_state === 'ready' ? 'Source identity unchanged since import.' : `Source state: ${segment.source_state}`}</p>
-          {segment.source_state !== 'ready' && <p role="alert" className="source-warning">{segment.source_state === 'missing_source' ? 'Original source is missing. Restore it to its selected location and refresh.' : 'Original source changed. Restore the unchanged original and refresh; stored timestamps do not verify this changed file.'}</p>}
+          {segment.source_state !== 'ready' && <p role="alert" className="source-warning">{segment.source_state === 'missing_source' ? 'Original source is missing. Restore it to its selected location and refresh.' : segment.source_state === 'unreadable_source' ? 'Original source exists but cannot be read. Check file permissions or storage access and refresh.' : 'Original source changed. Restore the unchanged original and refresh; stored timestamps do not verify this changed file.'}</p>}
           <div className="media-actions">
             <button type="button" disabled={disabled || index === 0} onClick={() => move(index, -1)}>Move up</button>
             <button type="button" disabled={disabled || index === segments.length - 1} onClick={() => move(index, 1)}>Move down</button>
@@ -229,7 +231,7 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
         <label htmlFor="anchor-provenance">Clock anchor provenance</label>
         <input id="anchor-provenance" value={anchorProvenance} maxLength={500} disabled={!anchorSegment || disabled} onChange={event => { setAnchorProvenance(event.target.value); setDirty(true); }} />
       </fieldset>}
-      {segments.length > 0 && <button type="submit" disabled={disabled || !dirty}>{busy === 'saving' ? 'Saving...' : 'Save order'}</button>}
+      {segments.length > 0 && <><button type="submit" disabled={disabled || !dirty}>{busy === 'saving' ? 'Saving...' : 'Save timeline'}</button>{dirty && <button type="button" disabled={disabled} onClick={() => { if (media) replace(media); setError(''); setNotice('Unsaved timeline changes discarded.'); }}>Discard unsaved changes</button>}</>}
     </form>}
   </section>;
 }
