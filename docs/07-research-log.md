@@ -1,5 +1,51 @@
 # 07 - Research log
 
+## 2026-10-15 - Slice 1A native media import and decoded-PTS gate
+
+**Scope and baseline:** Implemented [issue #3](https://github.com/cameaci/Bat_Innovation/issues/3) from merged Slice 0 `main` at `d8e8d2f`. This adds original-file identity, exact timestamp inspection and ordered per-camera segments. Playback/seek, preview/transcoding, summaries, motion detection, tracking, AI and reporting remain excluded.
+
+**Decoder decision before UI:** Compared system FFmpeg 7.1.5 against PyAV 19.0.1 using generated H.264 CFR MP4, MPEG-2 transport stream with `.mts` suffix and genuinely irregular H.264 MP4. One FFmpeg invocation paired `showinfo` integer PTS/timebase with raw decoded YUV output using `-copyts` and passthrough timing; no ffprobe frame list or frame-count/FPS mapping was used. All 22 decoded pixel planes and exact rational source times matched PyAV, and original SHA256 values stayed unchanged. Choose **PyAV as the sole production pixel/PTS decoder**: it returns pixels, integer PTS and rational timebase together, avoiding CLI log parsing and separately drained raw-data/metadata pipes. No NumPy or second decode pipeline was added. Full source timestamps remain in the unchanged original; SQLite stores exact first/last/end boundaries, rates and source identity, not a large in-memory/per-frame manifest.
+
+| Generated fixture | Source PTS and timebase | Verified source/elapsed boundaries |
+| --- | --- | --- |
+| CFR MP4, 8 frames | `0,512,...,3584` at `1/12800` | source `0..7/25` s; final-frame duration `1/25`, decoded elapsed end `8/25` s |
+| MPEG-TS `.mts`, 8 frames | `129600,133200,...,154800` at `1/90000` | source `36/25..43/25` s; elapsed starts at zero, decoded elapsed end `8/25` s; 1.44 s is a stream origin, never a survey clock |
+| Irregular MP4, 6 frames | `0,512,1536,2048,2560,3584` at `1/12800` | source `0,1/25,3/25,4/25,5/25,7/25` s; average rate `75/4` and base rate `25` cannot replace these timestamps |
+| Short final MP4, 3 frames | `0,512,1024` at `1/12800` | last frame starts at `2/25` s; final end `3/25` s |
+
+The spike's one-run decode observations were 2-5 ms for PyAV versus 78-93 ms for CLI launch+decode, only on tiny fixtures; these are not performance benchmarks. **Technical import/PTS gate: GO.** Representative Canon XA, Sony AX53 and Nightfox originals and Windows execution remain unverified. No preview/seek gate is passed by this work.
+
+**Review and implementation:** Five-role review required original PTS and pixels from the same decoder, no inferred continuity/clock, strict ID-only IPC, atomic persistence and a minimal worker. Electron's native picker accepts only a session ID from React, owns the selected paths and sends them to a fixed token-authenticated backend endpoint. React receives public metadata and opaque IDs only. Exact argument/field checks reject path injection. Source paths and filesystem identity stay private; raw decoder and validation input text do not cross the boundary. Native-dialog failures return a fixed actionable message without forwarding private exception text. Camera_Trap's verified native-dialog/lifecycle and persistence discipline were used as patterns only; no source code was copied.
+
+MP4/MPEG-TS demuxers are selected before probing, with local protocol whitelists and MOV external references disabled; a disguised HLS fixture makes zero network requests. Files are opened read-only. SHA256 reads 1 MiB chunks, decode streams one frame at a time, and both expose progress/cancellation. Source descriptor/path identity is checked before and after hashing/decoding and again across the complete batch. Missing, changed, corrupt/truncated, unavailable-codec and unknown/nonmonotonic-timing cases fail explicitly. Reported duration, decoded last-frame start and source end are distinct; unavailable final-frame duration yields unknown end rather than a guessed FPS interval. Interlaced-frame presence is inspected; field order remains explicitly unknown where PyAV does not expose it.
+
+Existing schema 1 databases stay schema 1 on startup. **Upgrade media storage** is the explicit UI action for the transactional schema 1 -> 2 transition; existing sessions and other review tables remain untouched. Failed DDL rolls back. Batches commit only after every source passes; failure/cancellation adds no partial records. One in-process worker retains bounded progress records, and a running job can be rediscovered after renderer reload. Progress jobs are not durable across backend restart; incomplete batches are not committed. On reopening, identity checks compare saved size/mtime/ctime/device/inode, while the imported SHA256 remains immutable; this is not a new full content rehash.
+
+Users can confirm ordering, leave continuity unknown or record a known gap/contiguity with provenance. Reordering resets relationship claims in the UI. No global continuous session timeline is synthesized. The optional clock anchor requires an explicit ISO timestamp with timezone and provenance, and is pinned to an immutable segment ID/first decoded PTS. Without it, real-world time stays unknown. Independent review caught numeric-string-to-epoch coercion in API validation; regression tests now require explicit ISO clock evidence. Original recording speed remains unverified and visible.
+
+**Dependency and binary evidence:** Added only `av==19.0.1`, requiring Python >=3.12. [Exact PyPI metadata](https://pypi.org/pypi/av/19.0.1/json) confirms Linux and Windows x64/ARM64 wheels; Windows wheel availability is not execution evidence. PyAV [code licence](https://github.com/PyAV-Org/PyAV/blob/v19.0.1/LICENSE.txt) is BSD-3-Clause, blob `9db1661e7d701c7fd262ed77efc2acc3831e41a2`. The Linux wheel's PyPI SHA256 is `1bea5b6134209305199bce7627ac3d33964de2cf2b09c77d08e7f67cf8bd4170`; the inspected Windows x64 wheel SHA256 is `906fc3db09288319a75ea23ffefb59961c7dbe0d1c074601507a89de7d8593d8`.
+
+The wheels' FFmpeg libraries self-report LGPL-3-or-later, but the inspected Windows wheel includes x264/x265 DLLs with separately verified GPL-2-or-later source terms. The [vendor FFmpeg patch](https://github.com/PyAV-Org/pyav-ffmpeg/blob/9.0.2-1/patches/ffmpeg.patch), blob `17db076523aab138f0545ade7683360b1b1b99ad`, changes configure licence classification; it does not establish new codec terms. Exact [x264 source notice](https://github.com/mirror/x264/blob/b35605ace3ddf7c1a5d67a2eb553f034aef41d55/x264.h) and [x265 4.3 notice](https://github.com/Multicorewareinc/x265/blob/4.3/source/x265.h) were checked. Do not describe the whole wheel as BSD/LGPL or cleared for redistribution. **Binary redistribution remains uncleared pending licence/composition review or a vetted build.** This source-only development change ships no wheels, codec libraries, FFmpeg executable or installer. The host Debian FFmpeg CLI is a GPL-enabled test prerequisite, not the production decoder or a bundled binary.
+
+**Validation actually run:** Debian 13 Linux x64, Python 3.12.14, Node 24.19.0/npm 11.9.0, PyAV 19.0.1 (bundled FFmpeg libraries), host FFmpeg/ffprobe 7.1.5, React/DOM 19.2.9, TypeScript 5.9.3, Vite 7.3.7, Electron 44.7.2 and Playwright 1.64.1. Existing npm lockfile pins are unchanged; the only added direct dependency is pinned in Python requirements. All commands exited 0:
+
+| Exact command | Observed result |
+| --- | --- |
+| `/workspace/work/bat-venv/bin/python -m pip install --cache-dir /workspace/work/pip-cache -r backend/requirements-dev.txt` | Requirements installed/satisfied including `av==19.0.1` |
+| `/workspace/work/bat-venv/bin/python -m pytest backend/tests -q` | **34 passed, 1 warning in 2.91s**, including all 6 existing foundation tests |
+| `npm run typecheck` | React, Electron and Playwright TypeScript passed |
+| `BAT_PYTHON=/workspace/work/bat-venv/bin/python npm test` | Vite build and Electron `tsc` passed; **16 Node tests passed**, 0 failed/skipped |
+| `DISPLAY=:99 BAT_PYTHON=/workspace/work/bat-venv/bin/python npm run test:e2e` | Vite built 31 modules in 940ms; Electron `tsc` passed; **5 Electron tests passed (11.5s)** |
+| `git diff --check` | Passed |
+
+All binaries were generated under temporary directories outside the repository. Tests compare paired decoded pixels and exact PTS, first/last/end boundaries, short final segments and audio-stream metadata; exercise real API/SQLite upgrade/reopen/reorder and null/explicit clock anchors; verify unknown continuity and documented gaps; reject unknown codecs, corrupt/truncated/missing/changed sources and arbitrary path payloads; check cancel/shutdown, atomic batches and migration rollback. Electron tests exercise picker IPC -> real local API -> PyAV -> SQLite -> React and reject extra picker path arguments. **Only the native OS dialog return is substituted in automation**; no backend/media/API response is mocked. The native OS file-picker interaction itself has not been manually validated. Originals stay byte-identical after import and reorder. Final process inspection found **zero** running `python -m backend.app` processes.
+
+Independent source review found no unresolved blocking issue after the clock coercion fix. The Python warning is the existing upstream Starlette/AnyIO deprecation; Playwright also reports inherited colour-environment settings. Neither was suppressed or counted as a failed test.
+
+**Limits and next gate:** Tests use Linux `/proc` and `ps`, Xvfb and test-only `--no-sandbox`; they do not validate Chromium's OS sandbox. Windows install/runtime, native Windows picker, all binary redistribution and production installers remain unverified. Synthetic MPEG-TS is not evidence of camera-specific AVCHD support. No representative original recording, WSP/client data or ecological benchmark was used. Field order, original-speed provenance and missing timing metadata remain explicit unknowns. Playback/preview/exact seeking remains the next Slice 1 increment and must pass before motion summaries. One source-only PR linked to issue #3 is proposed for independent review; no merge, release or deployment is authorised by this implementation.
+
+---
+
 ## 2026-10-15 - Synthetic video PTS spike for Slice 1A
 
 **Scope:** Small locally generated synthetic media only, with FFmpeg/ffprobe 7.1.5. No project/client footage was accessed.

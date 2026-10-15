@@ -62,6 +62,9 @@ test('real backend persists sessions across runtime restart and rejects unauthor
 
   expectFailure(await first.createSession({ display_name: '   ', camera_ref: 'Synthetic camera' }), 'invalid');
   expectFailure(await first.createSession({ display_name: 'x'.repeat(121), camera_ref: 'Synthetic camera' }), 'invalid');
+  expectFailure(await first.createSession({
+    display_name: 'Synthetic path injection', camera_ref: 'Synthetic camera', source_path: '/not-selected/synthetic.mp4',
+  }), 'invalid');
   const created = await first.createSession({ display_name: '  Synthetic persistence survey  ', camera_ref: '  Synthetic camera A  ' });
   assert.equal(created.ok, true);
   assert.equal(created.value.display_name, 'Synthetic persistence survey');

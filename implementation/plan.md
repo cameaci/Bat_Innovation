@@ -1,6 +1,6 @@
 # Implementation plan
 
-Reviewed 2026-10-15. Status: **Slice 0 UI and development shell verified on Linux; Windows and ownership checks remain open. Subsequent slices not started**. This is a dependency-ordered sequence, not a promise of dates. The application is built in **small vertical slices**, each delivering observable behavior and tests. No workarounds or speculative infrastructure.
+Reviewed 2026-10-15. Status: **Slice 0 and Slice 1A media import verified on Linux. Slice 1 playback, Windows and ownership checks remain open**. This is a dependency-ordered sequence, not a promise of dates. The application is built in **small vertical slices**, each delivering observable behavior and tests. No workarounds or speculative infrastructure.
 
 ## Principles of execution
 
@@ -36,21 +36,26 @@ Reviewed 2026-10-15. Status: **Slice 0 UI and development shell verified on Linu
 
 ## Slice 1 - Source-video fidelity spike (first technical risk)
 
-**Pre-implementation evidence:** Synthetic FFprobe checks confirmed nonzero `.mts` stream PTS origin (1.44 s) and irregular MP4 frame timestamps. These are **not** tests on original camera footage. See the [research log](../docs/07-research-log.md) and the narrowly scoped [Codex Slice 1A task](https://github.com/cameaci/Bat_Innovation/issues/3). No Slice 1 implementation is claimed yet.
+**Slice 1A progress (2026-10-15):** [Issue #3](https://github.com/cameaci/Bat_Innovation/issues/3) implements native import and metadata/PTS inspection against the merged Slice 0 app. PyAV 19.0.1 is the sole production decoder after exact decoded-pixel/PTS comparison with FFmpeg on three generated fixtures. Existing databases require the explicit UI action for the transactional schema 1 -> 2 transition. Imported sources remain untouched; full batches, exact timestamp boundaries, explicit segment order, continuity and optional clock provenance persist in SQLite. Cancellation and progress are visible. See the [research log](../docs/07-research-log.md) for actual commands, licensing evidence and unverified Windows/runtime behavior. No playback/seek or summary feature is claimed.
 
 **Goal:** accurate original-video seeking and segmented session import, not a decorative UI.
 
-- [ ] Create tiny synthetic CFR and variable-timebase media; at least one AVCHD/MTS-like transport-stream sample and one MP4 sample. Synthetic .ts output does not prove every camera-specific .MTS works.
-- [ ] Compare simple FFmpeg decoding and [PyAV](https://github.com/PyAV-Org/PyAV) for access to actual decoded frame PTS. **Preferred investigation:** PyAV gives direct frame timestamps and may eliminate brittle frame-number mapping. Verify Windows wheel, Python version, package/bundled-FFmpeg licences and measured decoding performance before deciding; use only **one authoritative decoder path** in the eventual engine.
-- [ ] Implement `ffprobe` metadata extraction, codec identity, field/interlace flags, rotation and detected stream timebase; reject unsupported or malformed streams clearly.
-- [ ] Extend the Slice 0 Electron development shell with a **native source-file selector**. Do not simulate large-video import by pushing complete files through a browser upload or accepting arbitrary filesystem paths over HTTP.
-- [ ] Import **ordered source segments** into a recording session. Record a checksum, exact sequence and explicit `contiguous / gap / unknown` status. Do not assume filenames prove continuity.
-- [ ] Map source PTS -> segment elapsed -> optional session position -> optional anchored real-world survey clock, with visible provenance and uncertainty.
+- [x] Create tiny synthetic CFR and variable-timebase media; at least one AVCHD/MTS-like transport-stream sample and one MP4 sample. Synthetic .ts output does not prove every camera-specific .MTS works.
+- [x] Compare FFmpeg decoded pixels/PTS with PyAV using the same generated CFR, nonzero-origin MTS and irregular MP4 frames. Choose PyAV 19.0.1 for one authoritative decode/PTS path; no nominal-FPS timeline or second ffprobe frame pipeline.
+- [x] Verify Python >=3.12 and actual Windows wheel availability; inspect code and bundled codec licence evidence. **Windows execution and binary redistribution remain unverified**, with concrete bundled-codec concerns recorded below and in the research log.
+- [x] Inspect container, streams, codec, decoded boundaries, exact timebases/rates, dimensions, rotation and interlaced-frame flags through PyAV. Field order remains explicitly unknown where the API does not expose it; unsupported/malformed sources fail clearly.
+- [x] Extend the Slice 0 Electron development shell with a **native source-file selector**. Do not simulate large-video import by pushing complete files through a browser upload or accepting arbitrary filesystem paths over HTTP.
+- [x] Import **ordered source segments** into a recording session. Record a checksum, exact sequence and explicit `contiguous / gap / unknown` status. Do not assume filenames prove continuity.
+- [x] Preserve exact source PTS and segment-relative elapsed boundaries, plus a separate optional UTC anchor bound to a segment ID and its first decoded PTS with provenance. Unknown continuity never creates global session elapsed time or an invented clock.
+- [x] Add an explicit, tested schema 1 -> 2 transition that preserves existing sessions and review tables, rolls back failures and never upgrades silently on startup.
+- [ ] Implement source-time navigation and event/session-clock mapping after the playback/seek increment is verified.
 - [ ] Implement original-media verification with a working player. Compare direct browser playback versus **on-demand FFmpeg preview clips** for non-browser-compatible codecs. Choose by an actual seek-accuracy and start/end-boundary test, not extension.
 - [ ] Preserve original-speed provenance and flag derivatives of unknown speed.
-- [ ] Validate cancellation, missing source, corrupt stream, gap at a boundary and unavailable codec.
+- [x] Validate import cancellation, missing/changed sources, corrupt/truncated streams, unavailable codecs, unknown/nonmonotonic PTS, explicit gap provenance and short final segments. Playback-specific boundary validation remains in the next increment.
 
 **Exit:** a user can select and inspect multi-part media, click a source timestamp and see the correct source content in the local UI. Clip start and duration are asserted against known synthetic marker frames; original sources are unchanged. Unsupported input yields a clear error.
+
+**Slice 1A limit:** technical import/PTS gate passed on synthetic Linux media. PyAV code is BSD-3-Clause, but the exact wheels bundle separately licensed FFmpeg/codecs; the Windows wheel contains GPL-licensed x264/x265 despite an LGPL FFmpeg self-report. Binary redistribution is uncleared. No representative Canon XA, Sony AX53 or Nightfox original was examined.
 
 **Stop condition:** if accurate preview seeking cannot be demonstrated, resolve the media design before motion-image work.
 
