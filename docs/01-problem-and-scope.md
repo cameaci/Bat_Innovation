@@ -5,11 +5,11 @@ Status: research hypothesis, not an approved deployment specification.
 
 ## Problem statement
 
-Recorded infrared (IR) and thermal night-vision-aid (NVA) surveys can require lengthy manual review to identify rare, short-duration bat events. A useful in-house tool would reduce time spent reviewing irrelevant footage while preserving evidence for ecological interpretation. This is an intended use case, not a measured claim about WSP's current review times.
+Recorded active-infrared (IR) night-vision-aid (NVA) surveys can require lengthy manual review to identify rare, short-duration bat events. A useful in-house tool would reduce time spent reviewing irrelevant footage while preserving evidence for ecological interpretation. This is an intended use case, not a measured claim about WSP's current review times.
 
 ## Proposed Phase 1 objective
 
-Build and evaluate an **ecologist-assisted candidate-event review workflow** for existing recorded NVA footage. The preferred initial output is a **time-ordered summary image for every video window**, including apparently quiet windows, with a direct link to the original video. Candidate-event intervals and evidence clips are optional enhancements. The tool must not issue autonomous ecological conclusions.
+Build and evaluate an **ecologist-assisted, IR-first review workflow** for existing recordings, beginning with a complete motion-summary gallery and source-video review. The preferred initial output is a **time-ordered summary image for every video window**, including apparently quiet windows, with a direct link to the original video. Candidate-event intervals and evidence clips are optional enhancements. The tool must not issue autonomous ecological conclusions.
 
 ## Terms
 
@@ -19,18 +19,20 @@ Build and evaluate an **ecologist-assisted candidate-event review workflow** for
 - **Emergence:** an ecologist-supported interpretation of a bat exiting a roost feature.
 - **Re-entry:** an ecologist-supported interpretation of a bat entering a roost feature.
 - **Commuting:** flight through the scene without evidence of emergence or re-entry.
+- **Foraging:** activity characterised by feeding-related movement; may coexist with a bat observation, but does not establish roost emergence.
+- **Precautionary decision:** a reviewer conservatively records possible roost use despite uncertain evidence; it is not the same as confirmed emergence.
 - **False alert:** a flagged interval that does not meet the target event definition after adjudication.
 - **Unlabelled interval:** an interval that has not been systematically reviewed; **not** a verified negative.
 
-These are provisional project terms. A qualified ecological lead must approve the operational event ontology.
+These are provisional project terms. A qualified ecological lead must approve the operational event ontology. **Observed activity** and **ecological decision** must be recorded in separate fields. A known roost polygon is optional; a feature may be unknown or off-camera.
 
 ## In scope
 
-1. Local video ingestion and technical metadata checks.
-2. Motion-based candidate generation and optional learned object detection.
-3. Temporal grouping and object tracking.
+1. Local IR recording-session ingestion (including split segments) and technical metadata checks.
+2. Complete timestamped motion-summary windows, camera stability and day-to-IR/illumination change checks.
+3. Optional motion blobs and object tracking, after the baseline summary gallery works.
 4. Event review with original timestamps, clips and traceable file identifiers.
-5. Human QA, uncertainty recording and review-effort measurement.
+5. Explicit reviewer and QA decisions, uncertainty recording, and review-effort measurement.
 6. Technical comparison of algorithms under a common evaluation protocol.
 
 ## Out of scope for the first phase
@@ -39,7 +41,7 @@ These are provisional project terms. A qualified ecological lead must approve th
 - Species-level identification from video alone.
 - Substitution for a suitably qualified bat ecologist.
 - Uploading client videos to unapproved external services.
-- Acoustic identification, thermal radiometry or 3-D flight reconstruction as required features.
+- Acoustic identification, **all thermal video support in v1**, thermal radiometry or 3-D flight reconstruction as required features.
 
 ## Hypothesised processing workflow
 
@@ -56,7 +58,7 @@ These are provisional project terms. A qualified ecological lead must approve th
 
 - Tiny, fast-moving bats, motion blur and missed frames.
 - Insects near the lens, birds, foliage, rain and illumination changes.
-- Camera shake, compressed footage, changed playback speed and time offsets.
+- Camera shake/repositioning, day-to-IR switching, changing illumination, on-screen timestamp motion, rotated/interlaced video, split recordings, compressed footage, changed playback speed and time offsets.
 - Multiple bats, occlusion, crossing trajectories and repeated detections.
 - Domain shift between active IR, thermal, camera models and roost geometry.
 - Sparse positive events and falsely assumed negative intervals.
@@ -74,3 +76,9 @@ Prefer an offline or WSP-approved internal execution environment. Architecture c
 ## Motion-summary-first MVP decision
 
 Publicly documented bat video review workflows demonstrate a simpler initial product: a complete gallery of timestamped motion-summary images with original-video navigation and ecologist annotations. This is now the **preferred prototype order** for predominantly IR recordings, with tracking and AI classification as optional later features. See [public prior art](08-motion-summary-prior-art.md) and [provisional architecture](09-ir-first-architecture-draft.md). Camera stability must be assessed per recording, even for tripod-mounted cameras.
+
+## Operational review modes
+
+The workflow must accommodate **attended and unattended** cameras. For attended footage, observer notes may be cross-checked; for unattended footage, a complete review and explicit QA strategy matter more. Pre-existing spreadsheet annotations may serve as **prelabels for locating candidate events**, but they are not automatically verified ground truth.
+
+A qualified ecological owner must define the acceptable miss rate and decide final event and survey conclusions. No threshold is invented in this document. Follow the minimal [local app architecture](09-ir-first-architecture-draft.md).
