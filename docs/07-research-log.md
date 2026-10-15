@@ -1,5 +1,19 @@
 # 07 - Research log
 
+## 2026-10-15 - Independent local tests with no GitHub Actions quota
+
+**Background:** The GitHub Actions quota was reported exhausted, so the temporary Slice 1 checks workflow was changed from push/PR triggers to manual `workflow_dispatch` only. No further hosted CI is required for this independent recheck.
+
+**Exact source matching:** Retrieved the current PR `backend/app/store.py` and `backend/tests/media_fixtures.py` through the GitHub connector, reproduced them in an isolated local directory, and verified exact Git blob SHA matches: `7e9ca29a2b508515c87a0dc6b9d6ff615a3a206c` and `0f815e91ca19ecd4e29944a3b6a84fca99baeee1`. The dependency-free `source_state` / `identity_info` function bodies were also compared with GitHub text fingerprints before extraction-based tests.
+
+**Executed locally:** Python 3.13.5, FFmpeg 7.1.5, stdlib SQLite. `python -m pytest tests -q` on a separate, synthetic-only validation harness: **24 passed in 0.68s**. Coverage was (a) 13 real store tests for schema upgrade, rollback, cross-session duplicate identity/path/hash, transaction atomicity and timeline/clock provenance; (b) 7 real filesystem error classifications through exact extracted functions; and (c) 4 FFprobe tests with repository-exact generated MP4/MTS fixtures validating source PTS and irregular intervals.
+
+**Boundary:** This was **not** a full run of `python -m pytest backend/tests -q`. The available local environment has no PyAV 19.0.1 and no network access to install it. Electron, React, Playwright and Vite dependencies are also absent, so full TypeScript, Node and Electron suites were not independently rerun. The earlier GitHub CI failure had six import test failures due to one stale SQLite binding; that binding was corrected in `1a864547...`. No post-fix full PyAV/import test result is claimed.
+
+**Decision:** Keep PR #4 unmerged until the full PyAV import and Electron integration suites can be exercised in an environment with their exact dependencies. Do not silently treat the 24 focused tests as a replacement for the required acceptance gate. Original camera media, Windows, the Chromium OS sandbox, and PyAV/FFmpeg wheel redistribution also remain unverified.
+
+---
+
 ## 2026-10-15 - PR #4 independent review and focused corrections
 
 **Status:** Source-level refinements committed on the open Slice 1A PR branch; **not merged**. This entry records code changes, not new passing full-suite test results.
