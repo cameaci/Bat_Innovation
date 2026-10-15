@@ -9,22 +9,25 @@ Use **events and review intervals** as the primary units, with frame-level detec
 
 A ground-truth event should include a unique event ID, original video hash/reference, start and end time or frame range, camera, final event class, reviewer identity, adjudication status, confidence/uncertainty and a link to the original footage in approved storage.
 
-## Provisional six-class ontology
+## Provisional observation and ecological-decision ontology
 
-| Class | Proposed interpretation | Requirement |
+Keep **what was seen** separate from **what an ecologist concludes**. A single six-class model is too restrictive for practical IR emergence review.
+
+| Field | Examples | Rules |
 | --- | --- | --- |
-| Emergence | Bat exiting a roost feature | Direction and roost-context evidence; ecological approval |
-| Re-entry | Bat entering a roost feature | Direction and roost-context evidence; ecological approval |
-| Commuting | Bat moving through the field of view without supported roost interaction | Bat identity and movement supported |
-| Insect | Movement attributable to an insect | Reviewer-supported identification |
-| Bird | Movement attributable to a bird | Reviewer-supported identification |
-| Uncertain / other | Evidence insufficient for a final class | Retain uncertainty; do not force a positive or negative label |
+| Observation | bat, insect, bird, other moving object, uncertain | Describes the visual evidence, not roost use |
+| Activity | commuting, foraging, flight past feature, unknown | Optional; may coexist with other observations |
+| Ecological decision | emergence, re-entry, no supported emergence, precautionary emergence, uncertain | Must have a reviewer and supporting evidence |
+| Count | non-negative integer or unknown | Never assume number of tracks equals number of individuals |
+| Status | prelabel, reviewed, QA pending, QA reviewed, finalised | Approval level is independent of class |
+| Quality flag | camera shift, IR-mode change, low contrast, timebase uncertain | Keep uncertainty visible through export |
 
-This taxonomy is **provisional**. The ecological lead must confirm class definitions and whether additional classes such as foraging are required. Multiple individuals and events in one clip must be represented explicitly, not inferred from row counts.
+A known roost entrance polygon is **optional**: the feature may be unknown or outside the frame. A **precautionary emergence** is an explicit conservative decision, not an automatically confirmed emergence. Definitions and export mappings require sign-off by a qualified ecological lead.
 
 ## Ground-truth policy
 
-- Distinguish original observer labels, QA comments, and **signed-off final adjudication**.
+- Distinguish original observer labels, QA comments, and **signed-off final adjudication**. Existing annotated spreadsheets are **prelabels** until the original video and final review are checked.
+- Treat human review as an **imperfect reference**: adjudicate the union of original reviewer, QA and app-suggested events using an independent qualified reviewer for the benchmark.
 - Record all reviewer disagreements and resolution chronology.
 - Do not count keyword matches as verified events.
 - Do not treat missing annotations or unobserved intervals as negative.
@@ -41,6 +44,8 @@ This taxonomy is **provisional**. The ecological lead must confirm class definit
 4. **Review time per original video hour:** measured analyst time including adjudication and corrections.
 5. **Missed emergence/re-entry count:** report explicitly, with severity and confidence.
 6. **Traceability:** percentage of alerts with reproducible original-file, time and evidence links.
+7. **Survey-level conclusion agreement:** compare feature/roost presence interpretation and survey outcome between full review and app-assisted review.
+8. **Count agreement:** compare supported peak counts and explicitly flag uncertain or multi-bat events.
 
 Secondary measures: frame-level precision/recall, detection mAP (where boxes exist), track fragmentation/ID switches, timestamp error, processing throughput and compute cost.
 
@@ -48,7 +53,7 @@ Secondary measures: frame-level precision/recall, detection mAP (where boxes exi
 
 An algorithmic alert matches a ground-truth event only if it overlaps the adjudicated time interval or falls within a **pre-registered** tolerance. Count each ground-truth event at most once. Deduplicate overlapping alerts before computing precision and false-alert burden. Pre-register rules for multi-bat events, uncertainty and clips spanning multiple cameras.
 
-No numeric tolerance or success threshold is set yet because frame rates, ecological requirements and baseline review performance are unverified.
+No numeric tolerance, acceptance margin, allowed miss rate or false-alert burden is set yet. These must be approved by a qualified ecological owner **before acceptance testing**.
 
 ## Split and sampling strategy
 
@@ -72,6 +77,10 @@ No numeric tolerance or success threshold is set yet because frame rates, ecolog
 | Failure analysis | Difficult negatives, missed positives and site/camera drift |
 | Limitations | Unreviewed intervals, uncertainties and generalisability |
 | Decision | Continue, revise, or stop with named reviewer sign-off |
+
+## Safety of a small rare-event pilot
+
+When positives are rare, zero observed misses does not establish that the miss probability is zero. As a rough illustration, with zero misses in `n` independent positive events, the approximate upper 95% bound on the miss rate is `3/n`. This is an **illustration, not a fixed dataset target**: survey/site clustering, imperfect reference labels and unequal difficulty complicate real inference. Report confidence intervals and never claim production-ready sensitivity from a handful of positives. A defensible future framing is **non-inferiority to a carefully adjudicated manual baseline on ecological outcomes plus review-time improvement**, with the margin pre-agreed.
 
 ## References
 
