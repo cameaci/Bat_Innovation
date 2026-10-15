@@ -36,6 +36,7 @@ For each candidate record: exact path and licence, transitive dependencies, exte
 | Need | Selected primitive | Explicit scope | Rejected premature addition |
 | --- | --- | --- | --- |
 | Media inspection and preview | [FFmpeg / ffprobe](https://ffmpeg.org/) as versioned local executable | Codec probe, stream timestamps, bounded preview clips, optional orientation/deinterlace | Handwritten media parser, mandatory VLC bridge, giant full-recording transcodes |
+| Frame decoding with original PTS | [PyAV](https://github.com/PyAV-Org/PyAV) **candidate**, inspect [licence](https://github.com/PyAV-Org/PyAV/blob/master/LICENSE.txt) | Direct access to decoded frames, presentation timestamps and timebases if Windows package/licensing spike succeeds | Custom timestamp parsing and dual unsynchronised decode pipelines |
 | Pixel operations | [OpenCV](https://github.com/opencv/opencv) and NumPy | Grayscale frame differences/background, simple morphology, quality warnings | Custom optical-flow engine, early YOLO/torch |
 | Local API/schema validation | FastAPI with built-in Pydantic ecosystem | Small set of local routes and typed request/response data | GraphQL, API gateway, distributed queue |
 | Durable reviews | Python \`sqlite3\` | Transactions, constraints, schema version, small tables | Separate DB server, heavy migration stack now |
@@ -45,7 +46,7 @@ For each candidate record: exact path and licence, transitive dependencies, exte
 
 ### Dependency and binary licence review
 
-Before introducing each dependency or bundling FFmpeg, record exact version, package/binary URL, code and binary licence, bundled codec configuration, network behavior and distribution terms. **FFmpeg licensing can differ by build and codecs.** Camera_Trap licence text does not cover independent new dependencies. Avoid shipping model weights in v1.
+Before introducing each dependency or bundling FFmpeg, record exact version, package/binary URL, code and binary licence, bundled codec configuration, network behavior and distribution terms. **FFmpeg licensing can differ by build and codecs. PyAV is published under a BSD-style licence, while its binary wheels may bundle FFmpeg with separate terms.** Verify exact versions and packaged binaries. Camera_Trap licence text does not cover independent new dependencies. Avoid shipping model weights in v1.
 
 ## How to avoid writing redundant code
 
