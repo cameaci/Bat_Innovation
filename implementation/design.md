@@ -4,7 +4,7 @@ Reviewed: 2026-10-15. Status: **implementation specification, not running code**
 
 ## 1. Architecture and boundaries
 
-\`\`\`text
+```text
 Electron shell (Windows, production packaging)
   native select-files / select-folder; start and stop local backend
      |
@@ -18,7 +18,7 @@ Python: ingest/time -> video preview -> motion summary -> review/export
 SQLite (small schema) + local generated summary images and previews
      |
 Original media files remain untouched in authorised local storage
-\`\`\`
+```
 
 Use a **single application**, one local backend process and one processing job at a time in v1. Do not introduce a distributed queue, WebSocket service, multi-user auth system, cloud persistence or generic plugin platform. Run React and FastAPI in development from Slice 0. Add a **minimal Electron development shell with a native file picker in Slice 1**, because large source videos must not be uploaded through a browser file form or accepted as arbitrary paths. Build the distributable Windows installer only in Slice 5.
 
@@ -26,7 +26,7 @@ Use a **single application**, one local backend process and one processing job a
 
 ## 2. Minimal code layout
 
-\`\`\`text
+```text
 backend/
   app/
     main.py                 # FastAPI wiring, request validation, health, media ID routes
@@ -51,9 +51,9 @@ electron/
 implementation/
 docs/
 AGENTS.md
-\`\`\`
+```
 
-This tree is an **upper bound to start**, not a minimum number of files to create immediately. Add test files and UI helpers as features are built. One responsibility per module; factor when a source file becomes hard to understand, not pre-emptively. Avoid \`crud/\`, \`routers/\`, \`services/\`, \`models/\` and frontend state frameworks until use justifies them.
+This tree is an **upper bound to start**, not a minimum number of files to create immediately. Add test files and UI helpers as features are built. One responsibility per module; factor when a source file becomes hard to understand, not pre-emptively. Avoid `crud/`, `routers/`, `services/`, `models/` and frontend state frameworks until use justifies them.
 
 Use the reference repo only as a **pattern library** for API boundaries, desktop startup, validation, gallery navigation, status and export. See [reuse.md](reuse.md).
 
@@ -64,16 +64,16 @@ Use the reference repo only as a **pattern library** for API boundaries, desktop
 **Recording session:** one camera on one survey visit. It contains an explicitly ordered list of original **segments** (e.g. independently recorded clips). Each segment has a source-file ID, path stored **only locally**, checksum, video stream metadata, orientation, field order/interlacing and source PTS timebase.
 
 - Do **not** concatenate files and assume contiguous recording. A session may contain gaps, clock discontinuities, camera moves or multiple start/stop events. The user must be able to confirm order and continuity or leave them **unknown**.
-- Windowing is **per original segment**, initially 30 seconds (configuration is versioned). The final shorter window of a segment still receives an image. No silent loss of boundary frames. Each window links to an exact \`segment_id\` and \`[start_pts, end_pts)\` coverage in that segment.
+- Windowing is **per original segment**, initially 30 seconds (configuration is versioned). The final shorter window of a segment still receives an image. No silent loss of boundary frames. Each window links to an exact `segment_id` and `[start_pts, end_pts)` coverage in that segment.
 - Keep four concepts distinct: **source PTS**, segment-relative elapsed time, optional session-relative position (only when continuity is defensible), and optional absolute survey time from a user-provided, provenance-labelled clock anchor.
-- Never map time solely via \`frame_index / nominal_fps\`; use source timestamps when available. If timestamp integrity cannot be established, mark the segment **timebase_unverified** and block claims of exact event clock time.
+- Never map time solely via `frame_index / nominal_fps`; use source timestamps when available. If timestamp integrity cannot be established, mark the segment **timebase_unverified** and block claims of exact event clock time.
 - Recording speed is an explicit source-provenance field: original, confirmed derivative, unknown. Do not label accelerated export time as original survey time.
 - Camera repositioning or illumination-mode changes create a **quality discontinuity**, not a new biological event. Invalidate any region drawn for the prior view, and flag windows around the transition.
 - Existing Excel timestamp annotations are *prelabels*. They can be imported later only with authorisation and checked source linkage; they must never set an automatic final event state.
 
 ### Source-video playback decision (must pass early)
 
-Modern Chromium players are not guaranteed to decode \`.MTS\`/AVCHD. Two implementation paths are legitimate and must be tested:
+Modern Chromium players are not guaranteed to decode `.MTS`/AVCHD. Two implementation paths are legitimate and must be tested:
 
 1. **Direct local playback** of verified browser-compatible streams.
 2. **On-demand local preview transcode** using an approved FFmpeg build for unsupported streams. Produce bounded clips and map their start/end back to the original stream PTS. Preserve the original untouched.
@@ -98,22 +98,22 @@ Prefer path 1 where it works and path 2 where a verified preview is required. A 
 
 ## 5. SQLite domain model (minimum viable persistence)
 
-Use Python standard-library \`sqlite3\` initially, foreign keys enabled, transactions for each operation and a schema version checked on startup. Do not silently reinterpret an incompatible DB. Introduce SQLAlchemy/Alembic only if evolving schema makes the additional dependencies worthwhile.
+Use Python standard-library `sqlite3` initially, foreign keys enabled, transactions for each operation and a schema version checked on startup. Do not silently reinterpret an incompatible DB. Introduce SQLAlchemy/Alembic only if evolving schema makes the additional dependencies worthwhile.
 
 | Entity | Purpose | Required invariant |
 | --- | --- | --- |
-| \`session\` | One camera visit, display name and optional clock anchor | Source/clock provenance remains explicit |
-| \`segment\` | One original file, metadata, checksum, sequence, continuity flag | Original segment identity never overwritten |
-| \`processing_run\` | Parameters, algorithm version, started/completed/failed, error and progress | Partial/cancelled runs cannot claim completeness |
-| \`summary_window\` | Segment ID, source PTS interval, image path, run ID, quality flags and status | All source frames accounted for; one complete output per planned window |
-| \`observation\` | Zero-to-many recorded events, source time span(s), class, activity, count/uncertainty | Window does not equal event; count can be unknown |
-| \`review_action\` | Append-only reviewer/QA decisions, before/after or revision reference | Original prelabels and independently signed decisions remain distinguishable |
+| `session` | One camera visit, display name and optional clock anchor | Source/clock provenance remains explicit |
+| `segment` | One original file, metadata, checksum, sequence, continuity flag | Original segment identity never overwritten |
+| `processing_run` | Parameters, algorithm version, started/completed/failed, error and progress | Partial/cancelled runs cannot claim completeness |
+| `summary_window` | Segment ID, source PTS interval, image path, run ID, quality flags and status | All source frames accounted for; one complete output per planned window |
+| `observation` | Zero-to-many recorded events, source time span(s), class, activity, count/uncertainty | Window does not equal event; count can be unknown |
+| `review_action` | Append-only reviewer/QA decisions, before/after or revision reference | Original prelabels and independently signed decisions remain distinguishable |
 
 Use SQLite for final state *and* append-only review history. No JSON file as a competing source of truth. The current observation/summary status is a derived projection from durable review records or a transactionally updated field; never write two conflicting sources.
 
 An event may be reviewed across window boundaries; store its **source segment/time spans**, not just a gallery tile timestamp. Cross-segment interpretation is allowed only when continuity and corresponding source spans are explicitly established; otherwise flag it for a human rather than assigning a fictitious global timestamp.
 
-**Review stages:** \`unreviewed\`, \`reviewed\`, \`qa_pending\`, \`qa_reviewed\`, \`finalised\`, with a visible disagreement/uncertainty flag. Finalisation requires a designated ecological decision maker, not merely the first review click. Local identity attribution is not enterprise authentication.
+**Review stages:** `unreviewed`, `reviewed`, `qa_pending`, `qa_reviewed`, `finalised`, with a visible disagreement/uncertainty flag. Finalisation requires a designated ecological decision maker, not merely the first review click. Local identity attribution is not enterprise authentication.
 
 **Annotation fields:** visual category (bat/insect/bird/other/uncertain), optional activity (commuting/foraging/etc.), ecological decision (possible/confirmed emergence, re-entry, no supported emergence, precautionary, uncertain), count or unknown, original source time, notes, reviewer/QA attribution and provenance. Terms remain provisional until ecologist sign-off.
 
@@ -123,25 +123,25 @@ Proposed route families, not a promise of final endpoint naming:
 
 | Operation | Example | Scope |
 | --- | --- | --- |
-| Check runtime health | \`GET /health\` | Backend ready, FFmpeg availability |
-| Create/import session | \`POST /sessions\` | Validate selected source IDs and ordered segments |
-| Fetch media audit | \`GET /sessions/{id}\` | Metadata, continuity/time warnings |
-| Launch summary run | \`POST /sessions/{id}/summarise\` | One local job, persisted parameters |
-| Poll progress | \`GET /runs/{id}\` | Planned/completed windows and failures |
-| List windows | \`GET /sessions/{id}/windows\` | Time-ordered, **including quiet windows** |
-| Get image/preview | \`GET /media/{id}/summary\`, \`POST /media/{id}/preview\` | Only allowlisted source IDs, bounded clips |
-| Review / QA | \`POST /windows/{id}/reviews\`, \`POST /observations/{id}/reviews\` | Validated stage transitions, audit |
-| Export | \`GET /sessions/{id}/exports/{kind}\` | Report CSV or audit CSV, explicit provisional state |
+| Check runtime health | `GET /health` | Backend ready, FFmpeg availability |
+| Create/import session | `POST /sessions` | Validate selected source IDs and ordered segments |
+| Fetch media audit | `GET /sessions/{id}` | Metadata, continuity/time warnings |
+| Launch summary run | `POST /sessions/{id}/summarise` | One local job, persisted parameters |
+| Poll progress | `GET /runs/{id}` | Planned/completed windows and failures |
+| List windows | `GET /sessions/{id}/windows` | Time-ordered, **including quiet windows** |
+| Get image/preview | `GET /media/{id}/summary`, `POST /media/{id}/preview` | Only allowlisted source IDs, bounded clips |
+| Review / QA | `POST /windows/{id}/reviews`, `POST /observations/{id}/reviews` | Validated stage transitions, audit |
+| Export | `GET /sessions/{id}/exports/{kind}` | Report CSV or audit CSV, explicit provisional state |
 
 Use typed Pydantic requests/responses and a small TypeScript API client. Prefer short polling for processing progress over WebSockets. A single in-process job worker is acceptable for responsiveness; the **job state and completed windows persist** in SQLite, enabling detectable interrupted runs and safe restart.
 
 ## 7. Local security and filesystem rules
 
-- Electron loads the expected local origin only, has \`nodeIntegration=false\`, \`contextIsolation=true\`, a narrow preload bridge and no unrestricted shell/file access exposed to React.
-- Backend binds to \`127.0.0.1\`. Restrict origins and require a **random per-launch local token** for application API access; pass it only via the trusted Electron startup/preload boundary in packaged mode. Development mode uses an explicit local-only equivalent and never disables checks in production. Do not call this enterprise user authentication.
+- Electron loads the expected local origin only, has `nodeIntegration=false`, `contextIsolation=true`, a narrow preload bridge and no unrestricted shell/file access exposed to React.
+- Backend binds to `127.0.0.1`. Restrict origins and require a **random per-launch local token** for application API access; pass it only via the trusted Electron startup/preload boundary in packaged mode. Development mode uses an explicit local-only equivalent and never disables checks in production. Do not call this enterprise user authentication.
 - Native file selection grants the backend access to **allowlisted file IDs**, not arbitrary user-controlled query paths. Validate that segment files still exist and match expected identity before reading.
-- Start FFmpeg as a structured argument array without \`shell=True\`. Confirm bundled binary version/codec support and licence; handle timeout, cancellation and process cleanup.
-- Keep \`SQLite\`, logs, private media manifests, derived images and preview clips in an app-specific authorised local data directory, never this public Git tree.
+- Start FFmpeg as a structured argument array without `shell=True`. Confirm bundled binary version/codec support and licence; handle timeout, cancellation and process cleanup.
+- Keep `SQLite`, logs, private media manifests, derived images and preview clips in an app-specific authorised local data directory, never this public Git tree.
 - No outbound telemetry, automated model download or external video upload. Record errors locally without leaking sensitive paths in shared diagnostics.
 - Back up the SQLite database and preserve original video references. A missing source file must show an actionable error, not mark prior evidence invalid silently.
 
