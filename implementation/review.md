@@ -6,7 +6,7 @@ Reviewed 2026-10-15. This records **design review and decisions before code**, n
 
 | Question | Alternatives weighed | Finding and refinement |
 | --- | --- | --- |
-| What stack minimises total work? | New Gradio/Streamlit app; directly fork Camera_Trap; small Camera_Trap-style local desktop | **Choose small Electron/React/FastAPI/SQLite**. A second UI stack would require a rewrite; a full fork imports a very large unrelated dependency and feature surface |
+| What stack minimises total work? | New Gradio/Streamlit app; directly fork Camera_Trap; small Camera_Trap-style local desktop | **Choose small Electron/React/FastAPI/SQLite**. A second UI stack would require a rewrite; a full fork imports a very large unrelated dependency and feature surface. Use a minimal Electron *development shell* in the media spike to select large original files safely, while deferring Windows installer packaging |
 | How much Camera_Trap should be reused? | Copy full files; copy isolated helpers; adopt UX patterns | **Use bounded helpers where permitted**, especially download/shortcut/viewer shell. Prefer pattern-only for deeply coupled VerifyView and EventCountPanel |
 | How should local data persist? | Flat JSON/JSONL; SQLite stdlib; complete SQLAlchemy/Alembic stack | **Choose SQLite stdlib with transactions and schema version**. Review history is relational; flat files risk concurrent/incomplete edits, while a mature ORM/migration stack is premature |
 | How many services? | Separate UI server, worker, DB and message queue; single local API/backend | **One local Python process**, at most one persisted processing job. Polling rather than WebSockets. Electron only manages lifecycle and native dialogs |
@@ -39,7 +39,7 @@ Reviewed 2026-10-15. This records **design review and decisions before code**, n
 | App says complete after a frame decode failure | Track planned, completed and failed windows; atomic image output and durable run status |
 | The reviewer sees the wrong point after seeking | PTS-aware clip mapping with marked preview source and explicit unsupported-error states |
 | React directly opens any path passed in a URL | Native file chooser -> backend allowlisted source ID -> constrained preview endpoint |
-| Web page can reach an unrestricted local API | Loopback binding, restricted origins, narrow preload IPC and per-launch token where feasible |
+| Web page can reach an unrestricted local API | Loopback binding, restricted origins, narrow preload IPC and a required per-launch token |
 | A prior reviewer overwrites a conflicting QA decision | Append-only review actions, explicit revision conflicts and no silent finalisation |
 | Internal recordings or coordinates leak into Git | Public source only, local app data, ignore generated files and verify commits before push |
 | App works only on a development machine | Clean Windows install, bundled/vetted media runtime, startup and offline test |
