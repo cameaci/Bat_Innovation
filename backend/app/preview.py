@@ -100,6 +100,9 @@ class PreviewJobs:
                 self._thread = Thread(target=self._run, args=(job_id, source_pts, cancelled), daemon=True)
                 self._thread.start()
             except Exception:
+                # Thread.start() can fail before a native thread is launched.
+                # close() must never attempt to join an unstarted Thread.
+                self._thread = None
                 self._activity_lock.release()
                 if "job_id" in locals():
                     for records in (self._jobs, self._sources, self._cancel):
