@@ -1,5 +1,29 @@
 # 07 - Research log
 
+## 2026-10-16 - PR #4 full local validation after review corrections
+
+**Source and scope:** Fetched `codex/slice-1-media-import` and fast-forwarded to `574c340d92696bf387333d89f44cae164fdcaeef`. Read the PR review and subsequent corrections before testing. Read-only backend and frontend reviews found no further blocking defect. All four required suites passed on that exact application/test tree, so no implementation changes or dependencies were needed. This entry supersedes the pending full-suite recheck recorded below; earlier results remain historical.
+
+**Environment:** Debian 13 Linux x64, Python 3.12.14, PyAV 19.0.1, host FFmpeg/ffprobe 7.1.5, Node 24.19.0/npm 11.9.0, TypeScript 5.9.3, Vite 7.3.7, Electron 44.7.2 and Playwright 1.64.1. Used the existing pinned requirements and npm lockfile. Activated `/workspace/work/bat-venv/bin/activate`; set `BAT_PYTHON=/workspace/work/bat-venv/bin/python` and `DISPLAY=:99`, with a local Xvfb display for Electron. No GitHub Actions or hosted CI was invoked; the existing workflow remains manual-only.
+
+| Exact command from repository root | Observed result |
+| --- | --- |
+| `python -m pytest backend/tests -q` | **37 passed, 1 warning in 2.73s**; exit 0 |
+| `npm run typecheck` | React, Electron and test TypeScript passed; exit 0 |
+| `npm test` | Vite build and Electron `tsc` passed; **16 Node tests passed**, 0 failed/cancelled/skipped/todo, 2203.100904ms; exit 0 |
+| `npm run test:e2e` | Vite build (31 modules) and Electron `tsc` passed; **5 Electron tests passed (11.3s)**; exit 0 |
+| `git diff --check` | Passed |
+
+**Review regressions exercised:** Real PyAV frames still match paired FFmpeg pixels and exact rational original PTS on generated CFR MP4, nonzero-origin MTS and irregular MP4. A real decoded short recording with only its final-frame duration replaced by `None` retains the last PTS and leaves the end unknown. Tests cover explicit SQLite migration/rollback, cross-session duplicate-source rejection and global SQLite uniqueness, missing versus unreadable originals, and unsaved reorder/clock edits blocking refresh/import/navigation until save or explicit discard. Permission errors and unavailable duration are deliberately injected negative conditions, not successful media responses.
+
+Electron tests exercise native-selection IPC -> real authenticated backend -> PyAV -> SQLite -> React, reopen persistence, explicit import failure, token rejection/backend loss, startup failure and shutdown. Only the native OS dialog return is substituted in automation; no successful backend/media/API result is mocked. Post-suite process inspection found **zero** running `python -m backend.app` processes. The Python warning is the existing Starlette/AnyIO deprecation; Playwright reports inherited `NO_COLOR`/`FORCE_COLOR` settings. Neither warning was suppressed.
+
+**Repository audit:** All 22 PR files are source, tests, pinned requirements, relevant documentation or the existing manual workflow. No media, screenshots, databases, credentials, environment files, generated outputs or binaries are tracked. Local command logs and generated build/test outputs remain ignored. This follow-up changes documentation only; no application rewrite, new dependency, Slice 1B or issue #5 work was started. PR #4 remains unmerged for independent review.
+
+**Remaining limits:** Windows execution, native Windows picker, representative camera-original/AVCHD compatibility, production packaging and PyAV/FFmpeg binary redistribution remain unverified. Linux automation uses `/proc`, `ps`, Xvfb and test-only `--no-sandbox`; physical file-picker interaction and Chromium's OS sandbox are not validated. Synthetic media does not establish camera compatibility or ecological performance. Original-speed provenance and field order remain unknown where unavailable; no playback/seek capability is claimed. The wheel licensing/composition concerns below remain open.
+
+---
+
 ## 2026-10-15 - Independent local tests with no GitHub Actions quota
 
 **Background:** The GitHub Actions quota was reported exhausted, so the temporary Slice 1 checks workflow was changed from push/PR triggers to manual `workflow_dispatch` only. No further hosted CI is required for this independent recheck.

@@ -1,6 +1,6 @@
 # Implementation plan
 
-Reviewed 2026-10-15. Status: **Slice 0 and Slice 1A media import verified on Linux. Slice 1 playback, Windows and ownership checks remain open**. This is a dependency-ordered sequence, not a promise of dates. The application is built in **small vertical slices**, each delivering observable behavior and tests. No workarounds or speculative infrastructure.
+Reviewed 2026-10-16. Status: **Slice 0 and Slice 1A media import verified on Linux. Slice 1 playback, Windows and ownership checks remain open**. This is a dependency-ordered sequence, not a promise of dates. The application is built in **small vertical slices**, each delivering observable behavior and tests. No workarounds or speculative infrastructure.
 
 ## Principles of execution
 
@@ -37,6 +37,8 @@ Reviewed 2026-10-15. Status: **Slice 0 and Slice 1A media import verified on Lin
 ## Slice 1 - Source-video fidelity spike (first technical risk)
 
 **Slice 1A progress (2026-10-15):** [Issue #3](https://github.com/cameaci/Bat_Innovation/issues/3) implements native import and metadata/PTS inspection against the merged Slice 0 app. PyAV 19.0.1 is the sole production decoder after exact decoded-pixel/PTS comparison with FFmpeg on three generated fixtures. Existing databases require the explicit UI action for the transactional schema 1 -> 2 transition. Imported sources remain untouched; full batches, exact timestamp boundaries, explicit segment order, continuity and optional clock provenance persist in SQLite. Cancellation and progress are visible. See the [research log](../docs/07-research-log.md) for actual commands, licensing evidence and unverified Windows/runtime behavior. No playback/seek or summary feature is claimed.
+
+**Review revalidation (2026-10-16):** At `574c340`, all four required suites passed locally after the PR #4 corrections: 37 Python tests, strict TypeScript, 16 Node tests and 5 Electron E2E tests. Global source uniqueness, unreadable-source classification, unsaved timeline protection and unknown final-frame duration are covered. No further application fix was needed; GitHub Actions was not used. PR #4 remains unmerged for independent review. Slice 1B and issue #5 have not started; the unchecked gates below remain open.
 
 **Goal:** accurate original-video seeking and segmented session import, not a decorative UI.
 
