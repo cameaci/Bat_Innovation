@@ -1,6 +1,6 @@
 # Technical design
 
-Reviewed: 2026-10-15. Status: **Slice 0 session UI and development shell implemented and Linux-tested; media/review sections remain specifications**.
+Reviewed: 2026-10-16. Status: **Slice 0, Slice 1A import and the Slice 1B preview candidate are Linux-tested; motion/review/export sections remain specifications**.
 
 ## 1. Architecture and boundaries
 
@@ -79,6 +79,10 @@ Modern Chromium players are not guaranteed to decode `.MTS`/AVCHD. Two implement
 2. **On-demand local preview transcode** using an approved FFmpeg build for unsupported streams. Produce bounded clips and map their start/end back to the original stream PTS. Preserve the original untouched.
 
 Prefer path 1 where it works and path 2 where a verified preview is required. A transcoded preview is a supported media feature, **not a silent fallback**: the UI states its source and timing; failures surface explicitly. Test seek error across the clip, segment starts/ends, interlacing and orientation. Do not use a filename extension alone as proof of codec support. Do not depend on VLC or full-video conversion to make core playback work.
+
+**Slice 1B decision (2026-10-16):** The measured Electron 44 candidate uses one bounded PyAV/FFmpeg-library VP9/WebM preview path for all imported sources. Native MPEG-2 MTS failed to load and native irregular-MP4 seeking showed the preceding marker. PyAV seeks with a uniform two-second pre-roll to a prior keyframe, then decodes forward to the first source PTS at or after the requested integer PTS. Requests outside the imported first/last decoded PTS are rejected. Interior display intervals use consecutive decoded PTS, not potentially overlapping frame durations; only the final EOF frame uses its known duration. A bounded per-frame ledger keeps exact original PTS/elapsed values separate from millisecond display time. React identifies displayed frames through `requestVideoFrameCallback`, not frame-number/FPS arithmetic.
+
+Preview generation runs in one disposable Linux process with hard CPU/memory/file limits and a parent-owned wall deadline. Imports and previews share one atomic processing reservation. One managed clip is retained outside the repository; replacement, cancellation, startup and shutdown remove generated files. Status and content revalidate source identity/readability. Electron fetches only a fixed authenticated content route and transfers capped bytes over narrow IPC; React uses a revoked-on-replacement Blob URL with `media-src blob:` and `connect-src 'none'`. Windows hard limits and all binary packaging remain unverified; unsupported platforms fail explicitly. Full caps, fidelity limits and test evidence are recorded in the research log.
 
 ## 4. Motion-summary algorithm contract
 

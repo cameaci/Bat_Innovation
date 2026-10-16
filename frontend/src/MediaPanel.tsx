@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { ApiResult, BatAPI, Continuity, ImportJob, MediaMetadata, MediaSegment, MediaSession, Rational, RecordingSession, SaveMedia } from '../../electron/src/contracts';
 import { getAPI } from './api';
+import { SourcePreview } from './SourcePreview';
 
 const unavailable = 'The local backend is unavailable. Retry, or close and reopen the desktop app.';
 const rational = (value: Rational | null) => value ? `${value.num}/${value.den}` : 'Unknown';
@@ -35,8 +36,9 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [selectedPreview, setSelectedPreview] = useState<MediaSegment | null>(null);
   const importing = job?.state === 'running';
-  const disabled = busy !== null || importing;
+  const disabled = busy !== null || importing || selectedPreview !== null;
 
   useEffect(() => {
     onBusyChange?.(disabled || dirty);
@@ -150,6 +152,16 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
     setDirty(true);
   }
 
+  function closePreview() {
+    const id = selectedPreview?.id;
+    setSelectedPreview(null);
+    if (id) requestAnimationFrame(() => {
+      const row = document.getElementById(`segment-${id}`);
+      row?.focus();
+      row?.scrollIntoView({ block: 'nearest' });
+    });
+  }
+
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(''); setNotice('');
     if (segments.some(segment => segment.continuity !== 'unknown' && !segment.continuity_provenance?.trim())) {
@@ -194,11 +206,12 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
     {media?.schema_version === 2 && <form className="media-form" onSubmit={event => void save(event)}>
       <p className="detail">Continuity describes the relationship to the previous segment. Filenames and file times do not prove continuity. No global continuous timeline is inferred.</p>
       {segments.length === 0 ? <p>No source segments imported.</p> : <ol className="segment-list">{segments.map((segment, index) => <li key={segment.id}>
-        <article aria-label={`Segment ${index + 1}: ${segment.metadata.filename}`}>
+        <article id={`segment-${segment.id}`} tabIndex={-1} aria-label={`Segment ${index + 1}: ${segment.metadata.filename}`}>
           <h3>{index + 1}. {segment.metadata.filename}</h3>
           <p className="detail">{segment.source_state === 'ready' ? 'Source identity unchanged since import.' : `Source state: ${segment.source_state}`}</p>
           {segment.source_state !== 'ready' && <p role="alert" className="source-warning">{segment.source_state === 'missing_source' ? 'Original source is missing. Restore it to its selected location and refresh.' : segment.source_state === 'unreadable_source' ? 'Original source exists but cannot be read. Check file permissions or storage access and refresh.' : 'Original source changed. Restore the unchanged original and refresh; stored timestamps do not verify this changed file.'}</p>}
           <div className="media-actions">
+            <button type="button" disabled={disabled || dirty || segment.source_state !== 'ready'} onClick={() => setSelectedPreview(segment)}>Preview source</button>
             <button type="button" disabled={disabled || index === 0} onClick={() => move(index, -1)}>Move up</button>
             <button type="button" disabled={disabled || index === segments.length - 1} onClick={() => move(index, 1)}>Move down</button>
           </div>
@@ -233,5 +246,6 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
       </fieldset>}
       {segments.length > 0 && <><button type="submit" disabled={disabled || !dirty}>{busy === 'saving' ? 'Saving...' : 'Save timeline'}</button>{dirty && <button type="button" disabled={disabled} onClick={() => { if (media) replace(media); setError(''); setNotice('Unsaved timeline changes discarded.'); }}>Discard unsaved changes</button>}</>}
     </form>}
+    {selectedPreview && <SourcePreview key={selectedPreview.id} segment={selectedPreview} clockAnchor={media?.clock_anchor ?? null} onClose={closePreview} />}
   </section>;
 }

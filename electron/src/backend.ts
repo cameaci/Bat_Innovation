@@ -4,7 +4,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import type { ApiResult, Health, ImportJob, MediaSession, NewSession, RecordingSession, SaveMedia } from './contracts';
+import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia } from './contracts';
 
 const unavailable = (message = 'Backend unavailable. Reopen the app after checking Python, ffmpeg and ffprobe.') =>
   ({ ok: false, error: { code: 'unavailable', message } }) as const;
@@ -15,6 +15,14 @@ export const invalid = (message = 'Invalid application request.') => ({ ok: fals
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const exactKeys = (value: Record<string, unknown>, keys: string[]) => Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 const provenance = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0 && value.length <= 500;
+
+export const MAX_PREVIEW_BYTES = 8 * 1024 * 1024;
+export function isPreviewRequest(input: unknown): input is PreviewRequest {
+  if (!object(input) || !exactKeys(input, ['segment_id', 'source_pts']) || !isUUID(input.segment_id) ||
+      typeof input.source_pts !== 'string' || !/^-?\d{1,19}$/.test(input.source_pts)) return false;
+  const pts = BigInt(input.source_pts);
+  return pts >= -(2n ** 63n) && pts < 2n ** 63n;
+}
 
 export function isSaveMedia(input: unknown): input is SaveMedia {
   if (!object(input) || !exactKeys(input, ['segment_ids', 'continuity', 'clock_anchor']) ||
@@ -43,20 +51,31 @@ const mediaErrors: Record<string, string> = {
   invalid_sources: 'Choose readable local .MTS or .MP4 original files using the native picker.',
   invalid_timeline: 'Check segment order, continuity evidence and the optional UTC clock anchor.',
   duplicate_source: 'A selected source is already imported. Choose different original files.',
-  cancelled: 'Import cancelled. No partial import was saved.',
+  cancelled: 'Media operation cancelled. No partial output was kept.',
   missing_source: 'A source file is missing. Restore the selected original file and refresh media.',
   unreadable_metadata: 'Media metadata could not be read. Check the original file and supported format.',
   unsupported_codec: 'This media codec or container is unsupported. Choose a supported .MTS or .MP4 original.',
   decode_failed: 'The original could not be decoded. Check that the file is complete and supported.',
-  unknown_timing: 'Reliable decoded presentation timestamps are unavailable. This source cannot be imported.',
+  unknown_timing: 'Reliable source timing or frame boundaries are unavailable. Exact source-time processing is blocked.',
   changed_source: 'A source file changed since import. Restore the original file before using its metadata.',
   import_failed: 'Media import failed. Check the original files and local storage, then retry.',
+  unreadable_source: 'The original exists but cannot be read. Check its storage access and permissions.',
+  segment_missing: 'This source segment is unavailable. Refresh the session media.',
+  outside_source: 'Choose a source PTS from the first through the last decoded frame. The segment end has no new frame.',
+  unseekable_source: 'A reliable bounded seek could not reach this source frame. This recording is not supported for preview.',
+  preview_busy: 'A preview is running. Wait for it or cancel it before starting another media operation.',
+  preview_missing: 'This preview expired or was replaced. Request a new preview from the saved segment.',
+  preview_not_ready: 'This preview has no complete content. Wait for it or request a new preview.',
+  preview_limits_unavailable: 'Preview resource limits are not available on this platform. Windows preview execution remains unverified.',
+  preview_limit: 'This preview exceeds the time, frame, memory, dimensions or byte limit. Choose another source time or supported recording.',
+  preview_failed: 'Preview generation failed. Check the original recording and local storage before retrying.',
 };
 function mediaFailure(code: unknown) {
   return typeof code === 'string' && Object.hasOwn(mediaErrors, code) ? { code, message: mediaErrors[code] } : { code: 'backend', message: 'Media request failed. Refresh media and check the selected originals.' };
 }
 type ApiRoute = '/api/health' | '/api/sessions' | '/api/media/upgrade' | '/api/media/import' |
-  `/api/sessions/${string}/media` | `/api/media/import/${string}` | `/api/media/import/${string}/cancel`;
+  `/api/sessions/${string}/media` | `/api/media/import/${string}` | `/api/media/import/${string}/cancel` |
+  '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
 
 /** Read only known, redacted startup codes from the Python process. */
 function safeStartupFailure(output: string): string | undefined {
@@ -73,6 +92,7 @@ function safeStartupFailure(output: string): string | undefined {
 
 /** Fixed routes only. This client lives in the main process, never in React. */
 export class BackendClient {
+  private readingPreview = false;
   constructor(private readonly port: number, private readonly token: string) {}
 
   private call<T>(path: ApiRoute, method: 'GET' | 'POST' | 'PUT' = 'GET', input?: unknown): Promise<ApiResult<T>> {
@@ -158,6 +178,57 @@ export class BackendClient {
     const result = await this.call<ImportJob>(route, method, input);
     if (result.ok && result.value.error) result.value.error = mediaFailure(result.value.error.code);
     return result;
+  }
+
+  startPreview(input: PreviewRequest): Promise<ApiResult<PreviewJob>> {
+    return isPreviewRequest(input) ? this.previewJob('/api/media/preview', 'POST', input) : Promise.resolve(invalid('Select a segment ID and an integer source PTS only.'));
+  }
+  previewStatus(jobID: string): Promise<ApiResult<PreviewJob>> {
+    return isUUID(jobID) ? this.previewJob(`/api/media/preview/${jobID}`) : Promise.resolve(invalid());
+  }
+  cancelPreview(jobID: string): Promise<ApiResult<PreviewJob>> {
+    return isUUID(jobID) ? this.previewJob(`/api/media/preview/${jobID}/cancel`, 'POST') : Promise.resolve(invalid());
+  }
+  private async previewJob(route: ApiRoute, method: 'GET' | 'POST' = 'GET', input?: unknown): Promise<ApiResult<PreviewJob>> {
+    const result = await this.call<PreviewJob>(route, method, input);
+    if (result.ok && result.value.error) result.value.error = mediaFailure(result.value.error.code);
+    return result;
+  }
+  // A separate fixed binary route, capped before buffering or crossing IPC. No general HTTP bridge.
+  previewContent(jobID: string): Promise<ApiResult<{ bytes: Uint8Array }>> {
+    if (!isUUID(jobID)) return Promise.resolve(invalid());
+    if (this.readingPreview) return Promise.resolve({ ok: false, error: mediaFailure('preview_busy') });
+    this.readingPreview = true;
+    return new Promise<ApiResult<{ bytes: Uint8Array }>>(resolve => {
+      const req = request({ hostname: '127.0.0.1', port: this.port,
+        path: `/api/media/preview/${jobID}/content`, headers: { 'X-Bat-Token': this.token } }, res => {
+        const chunks: Buffer[] = [];
+        let size = 0;
+        const limit = res.statusCode === 200 ? MAX_PREVIEW_BYTES : 4096;
+        if (Number(res.headers['content-length']) > limit) res.destroy(new Error('Response too large'));
+        res.on('data', (chunk: Buffer) => {
+          size += chunk.length;
+          if (size > limit) res.destroy(new Error('Response too large'));
+          else chunks.push(chunk);
+        });
+        res.on('error', () => resolve(unavailable('Preview content could not be read within its byte or time limit.')));
+        res.on('end', () => {
+          if (res.statusCode === 401) {
+            resolve({ ok: false, error: { code: 'unauthorized', message: 'Backend token rejected. Close and reopen the app.' } });
+          } else if (res.statusCode === 200 && size > 0 && res.headers['content-type'] === 'video/webm') {
+            resolve({ ok: true, value: { bytes: new Uint8Array(Buffer.concat(chunks, size)) } });
+          } else {
+            let failure = mediaFailure(undefined);
+            try { failure = mediaFailure(JSON.parse(Buffer.concat(chunks).toString('utf8')).detail?.code); } catch { /* Fixed safe failure. */ }
+            resolve({ ok: false, error: failure });
+          }
+        });
+      });
+      const deadline = setTimeout(() => req.destroy(new Error('Preview read timed out')), 3000);
+      req.on('close', () => clearTimeout(deadline));
+      req.on('error', () => resolve(unavailable()));
+      req.end();
+    }).finally(() => { this.readingPreview = false; });
   }
 }
 
@@ -275,6 +346,10 @@ export class BackendRuntime {
   importSelectedMedia(sessionID: string, paths: string[]): Promise<ApiResult<ImportJob>> { return this.ready(client => client.importSelectedMedia(sessionID, paths)); }
   importStatus(jobID: string): Promise<ApiResult<ImportJob>> { return this.ready(client => client.importStatus(jobID)); }
   cancelImport(jobID: string): Promise<ApiResult<ImportJob>> { return this.ready(client => client.cancelImport(jobID)); }
+  startPreview(input: PreviewRequest): Promise<ApiResult<PreviewJob>> { return this.ready(client => client.startPreview(input)); }
+  previewStatus(jobID: string): Promise<ApiResult<PreviewJob>> { return this.ready(client => client.previewStatus(jobID)); }
+  cancelPreview(jobID: string): Promise<ApiResult<PreviewJob>> { return this.ready(client => client.cancelPreview(jobID)); }
+  previewContent(jobID: string): Promise<ApiResult<{ bytes: Uint8Array }>> { return this.ready(client => client.previewContent(jobID)); }
 
   stop(): Promise<void> {
     this.stopped = true;

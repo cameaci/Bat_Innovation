@@ -86,6 +86,40 @@ export interface ImportJob {
   error: { code: string; message: string } | null;
 }
 
+export interface PreviewRequest { segment_id: string; source_pts: string }
+export interface PreviewFrame {
+  source_pts: string;
+  source_time: Rational;
+  elapsed: Rational;
+  preview_ms: number;
+}
+export interface PreviewManifest {
+  segment_id: string;
+  source_sha256: string;
+  requested_pts: string;
+  actual_pts: string;
+  time_base: Rational;
+  seek_error: Rational;
+  source_start: Rational;
+  source_last: Rational;
+  source_end: Rational;
+  elapsed_start: Rational;
+  elapsed_end: Rational;
+  preview_duration_ms: number;
+  width: number;
+  height: number;
+  frames: PreviewFrame[];
+  warnings: string[];
+}
+export interface PreviewJob {
+  id: string;
+  segment_id: string;
+  state: 'running' | 'ready' | 'failed' | 'cancelled';
+  phase: string;
+  error: { code: string; message: string } | null;
+  manifest: PreviewManifest | null;
+}
+
 export interface BatAPI {
   health(): Promise<ApiResult<Health>>;
   listSessions(): Promise<ApiResult<RecordingSession[]>>;
@@ -96,4 +130,8 @@ export interface BatAPI {
   importStatus(jobID: string): Promise<ApiResult<ImportJob>>;
   cancelImport(jobID: string): Promise<ApiResult<ImportJob>>;
   saveMedia(sessionID: string, input: SaveMedia): Promise<ApiResult<MediaSession>>;
+  startPreview(input: PreviewRequest): Promise<ApiResult<PreviewJob>>;
+  previewStatus(jobID: string): Promise<ApiResult<PreviewJob>>;
+  cancelPreview(jobID: string): Promise<ApiResult<PreviewJob>>;
+  previewContent(jobID: string): Promise<ApiResult<{ bytes: Uint8Array }>>;
 }

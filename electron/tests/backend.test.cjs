@@ -2,10 +2,11 @@ const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const { access, mkdtemp, readFile, readdir, rm, symlink } = require('node:fs/promises');
 const { createServer } = require('node:net');
+const { createServer: httpServer } = require('node:http');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
-const { BackendClient, BackendRuntime } = require('../dist/backend.js');
+const { BackendClient, BackendRuntime, MAX_PREVIEW_BYTES } = require('../dist/backend.js');
 
 const repoRoot = path.resolve(__dirname, '../..');
 const python = process.env.BAT_PYTHON || 'python';
@@ -87,6 +88,68 @@ test('real backend persists sessions across runtime restart and rejects unauthor
   await reopened.stop();
   expectExited(reopenedPid);
   assert.equal(reopened.pid, undefined);
+});
+
+test('preview bridge rejects paths, invalid timestamps and unauthenticated requests against the real backend', { timeout: 20000 }, async t => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'bat-preview-contract-'));
+  const runtime = new BackendRuntime();
+  t.after(async () => { await runtime.stop(); await rm(dataDir, { recursive: true, force: true }); });
+  const port = await availablePort();
+  assert.equal((await runtime.start({ python, repoRoot, dataDir, port })).ok, true);
+  assert.equal((await runtime.upgradeMedia()).ok, true);
+  const id = '00000000-0000-4000-8000-000000000000';
+  for (const input of [
+    { segment_id: id, source_pts: '0', path: '/not-selected/synthetic.mp4' },
+    { segment_id: id, source_pts: 0 },
+    { segment_id: id, source_pts: '1.5' },
+    { segment_id: id, source_pts: '1e3' },
+    { segment_id: id, source_pts: '9223372036854775808' },
+    { segment_id: id, source_pts: '-9223372036854775809' },
+    { segment_id: 'file:///not-selected/synthetic.mp4', source_pts: '0' },
+  ]) expectFailure(await runtime.startPreview(input), 'invalid');
+  expectFailure(await runtime.previewContent('../not-selected'), 'invalid');
+  expectFailure(await runtime.previewStatus('http://example.invalid'), 'invalid');
+  expectFailure(await runtime.startPreview({ segment_id: id, source_pts: '0' }), 'segment_missing');
+  const unauthorized = new BackendClient(port, 'deliberately-incorrect-synthetic-token');
+  expectFailure(await unauthorized.startPreview({ segment_id: id, source_pts: '0' }), 'unauthorized');
+  expectFailure(await unauthorized.previewStatus(id), 'unauthorized');
+  expectFailure(await unauthorized.cancelPreview(id), 'unauthorized');
+  expectFailure(await unauthorized.previewContent(id), 'unauthorized');
+});
+
+test('binary preview transport refuses oversized responses before accepting media bytes', { timeout: 10000 }, async t => {
+  // Deliberately invalid upstream responses test the byte boundary, never successful decoding.
+  for (const declaredLength of [true, false]) {
+    await t.test(declaredLength ? 'oversized Content-Length' : 'oversized chunked body', async () => {
+      const server = httpServer((_request, response) => {
+        response.writeHead(200, { 'Content-Type': 'video/webm', ...(declaredLength ? { 'Content-Length': MAX_PREVIEW_BYTES + 1 } : {}) });
+        response.end(Buffer.alloc(MAX_PREVIEW_BYTES + 1));
+      });
+      await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+      try {
+        const client = new BackendClient(server.address().port, 'synthetic-transport-test-token-only');
+        expectFailure(await client.previewContent('00000000-0000-4000-8000-000000000000'), 'unavailable');
+      } finally { await new Promise(resolve => server.close(resolve)); }
+    });
+  }
+});
+
+test('binary preview transport admits only one in-flight content response', { timeout: 10000 }, async () => {
+  let received;
+  const arrived = new Promise(resolve => { received = resolve; });
+  let requests = 0;
+  const server = httpServer((_request, response) => { requests += 1; received(response); });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const client = new BackendClient(server.address().port, 'synthetic-transport-test-token-only');
+    const first = client.previewContent('00000000-0000-4000-8000-000000000000');
+    const response = await arrived;
+    expectFailure(await client.previewContent('00000000-0000-4000-8000-000000000001'), 'preview_busy');
+    assert.equal(requests, 1);
+    response.writeHead(409, { 'Content-Type': 'application/json' });
+    response.end(JSON.stringify({ detail: { code: 'preview_not_ready' } }));
+    expectFailure(await first, 'preview_not_ready');
+  } finally { await new Promise(resolve => server.close(resolve)); }
 });
 
 test('invalid startup configuration is rejected before launching a backend', { timeout: 15000 }, async t => {

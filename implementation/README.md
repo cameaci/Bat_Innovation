@@ -1,6 +1,6 @@
 # Implementation
 
-Status: **Slice 0 UI and Electron development shell verified on Linux; Windows and ownership checks remain open**. Reviewed 2026-10-15.
+Status: **Slice 0, Slice 1A import and the Slice 1B preview candidate verified on synthetic Linux media; independent review, Windows and ownership gates remain open**. Reviewed 2026-10-16.
 
 Build a small, local Windows desktop reviewer for **recorded active-infrared (IR) bat survey video**. Reuse the structure and review ergonomics of [Camera_Trap](https://github.com/cameaci/Camera_Trap), but not its unrelated wildlife models, platform features or entire source tree.
 
@@ -42,12 +42,12 @@ Prove reliable **video playback/seek** for original .MTS/.MP4 media, including s
 
 ## Current implementation status
 
-The initial backend implementation is in [backend/app/main.py](../backend/app/main.py), [backend/app/store.py](../backend/app/store.py), and [backend/tests/test_foundation.py](../backend/tests/test_foundation.py). A developer-machine run of `python -m pytest backend/tests -q` passed **6 tests**; a separate real loopback HTTP smoke test verified authenticated health (200), unauthorised sessions (401) and creation of the SQLite file. These checks used synthetic session metadata, not bat videos.
+The backend retains FastAPI and SQLite with authenticated loopback routes. Slice 0 and Slice 1A import are merged. The Slice 1B candidate adds bounded, explicitly derived source previews with exact original PTS mapping; the technical playback gate passed generated MP4/MTS marker tests in Electron on Linux. No motion-summary or ecological result is claimed.
 
-The React/TypeScript UI and minimal Electron development shell now use the real backend through a restricted main-process API bridge. Live tests cover session creation, reload/reopening persistence, rejected tokens, backend failures and child-process cleanup. See [setup, source reuse and limits](../docs/11-slice-0-development.md) and [recorded validation](../docs/07-research-log.md). Windows development and packaging checks remain open; no video feature or ecological result is claimed.
+The React/TypeScript UI uses the real backend through a restricted Electron bridge. Local validation passed 76 Python tests, strict TypeScript, 21 Node checks and 9 Electron tests, including visual marker seeking, persistence, explicit failures and worker cleanup. See [recorded validation and limits](../docs/07-research-log.md). Windows preview process limits are not implemented; Windows runtime, camera-original compatibility and binary redistribution/packaging remain unverified. The candidate awaits independent review.
 
 ## Delivery order
 
 **Media proof -> summary engine -> reviewer/QA -> exports -> Windows package -> approved-data evaluation.**
 
-Read [plan.md](plan.md) for entry/exit criteria. Do not treat any unfinished stage as complete. There are no measured results yet.
+Read [plan.md](plan.md) for entry/exit criteria. Do not treat technical synthetic-media checks as ecological validation or mark unfinished gates complete.

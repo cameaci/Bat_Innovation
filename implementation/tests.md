@@ -1,6 +1,6 @@
 # Testing and ecological evaluation
 
-Reviewed: 2026-10-15. Status: **Slice 0 synthetic session tests pass on Linux; media and ecological tests below remain planned**. Quality requirements are part of implementation, not a later add-on.
+Reviewed: 2026-10-16. Status: **Slice 0, Slice 1A and the Slice 1B candidate pass synthetic Linux tests; motion-summary, ecological and Windows acceptance remains planned**. Quality requirements are part of implementation, not a later add-on.
 
 ## Testing layers
 
@@ -101,4 +101,4 @@ The root lockfile pins workspace dependencies. `npm run typecheck` includes Reac
 
 On the Linux development host, 6 Python tests, strict TypeScript checks, Vite build, 13 Node integration assertions and 3 Electron tests passed after a clean npm install. The end-to-end tests check live readiness, create/list, persistence after reload and reopening, token regeneration, terminated/missing backend errors, narrow bridge behavior and backend process cleanup. The Node suite additionally tests real HTTP 401 responses and filesystem/configuration boundaries. See [setup and limits](../docs/11-slice-0-development.md) and [command outcomes](../docs/07-research-log.md).
 
-Electron tests currently use Linux `/proc` and `ps`, and launch with `--no-sandbox` inside the test container. Windows execution and Chromium's operating-system sandbox are unverified. Imported media, packaging, offline clean-machine Windows behavior and ecological benchmarks remain later-slice checks.
+The current candidate passed 76 Python tests, strict TypeScript, 21 Node checks and 9 Electron tests locally. Preview tests generate exact-PTS-labelled MP4/MTS markers in temporary directories, verify visible frames and rational source mapping, exercise non-millisecond display quantisation, real resource limits, cancellation/reaping and cleanup, and test stale/unreadable originals and unknown final timing. See the [research log](../docs/07-research-log.md) for exact commands and boundaries. Electron uses Linux `/proc`, `ps`, Xvfb and test-only `--no-sandbox`. The real permission E2E requires an unprivileged user; root-safe permission injection is covered in Python. Windows execution, Chromium's OS sandbox, physical picker interaction, representative camera originals, packaging and ecological benchmarks remain unverified.

@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { BackendRuntime, invalid, isExternalDataDirectory, isSaveMedia, isUUID } from './backend';
+import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSaveMedia, isUUID, MAX_PREVIEW_BYTES } from './backend';
 import type { NewSession } from './contracts';
 
 const UI_URL = 'app://bat/index.html';
@@ -63,7 +63,7 @@ async function open(): Promise<void> {
       const content = readFileSync(join(repoRoot, 'frontend/dist', url.pathname));
       return new Response(content, { headers: {
         'Content-Type': url.pathname.endsWith('.js') ? 'text/javascript' : url.pathname.endsWith('.css') ? 'text/css' : 'text/html',
-        'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'",
+        'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; media-src blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'",
         'X-Content-Type-Options': 'nosniff',
       } });
     } catch { return new Response('Built UI missing. Run npm run build.', { status: 404 }); }
@@ -71,7 +71,8 @@ async function open(): Promise<void> {
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   session.defaultSession.setPermissionCheckHandler(() => false);
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
-    callback({ cancel: !details.url.startsWith('app://bat/') });
+    const previewBlob = details.resourceType === 'media' && /^blob:app:\/\/bat\/[0-9a-f-]+$/.test(details.url);
+    callback({ cancel: !details.url.startsWith('app://bat/') && !previewBlob });
   });
   session.defaultSession.on('will-download', (event) => event.preventDefault());
   Menu.setApplicationMenu(null);
@@ -94,6 +95,14 @@ async function open(): Promise<void> {
   handle('bat:import-status', 1, ([id]) => isUUID(id) ? backend.importStatus(id) : invalid('Select a valid import ID.'));
   handle('bat:cancel-import', 1, ([id]) => isUUID(id) ? backend.cancelImport(id) : invalid('Select a valid import ID.'));
   handle('bat:save-media', 2, ([id, input]) => isUUID(id) && isSaveMedia(input) ? backend.saveMedia(id, input) : invalid('Use only selected segment IDs, continuity evidence and an optional UTC clock anchor.'));
+  handle('bat:start-preview', 1, ([input]) => isPreviewRequest(input) ? backend.startPreview(input) : invalid('Select a segment ID and an integer source PTS only.'));
+  handle('bat:preview-status', 1, ([id]) => isUUID(id) ? backend.previewStatus(id) : invalid('Select a valid preview ID.'));
+  handle('bat:cancel-preview', 1, ([id]) => isUUID(id) ? backend.cancelPreview(id) : invalid('Select a valid preview ID.'));
+  handle('bat:preview-content', 1, async ([id]) => {
+    if (!isUUID(id)) return invalid('Select a valid preview ID.');
+    const result = await backend.previewContent(id);
+    return result.ok && result.value.bytes.byteLength > MAX_PREVIEW_BYTES ? invalid('Preview content exceeds its byte limit.') : result;
+  });
   handle('bat:choose-media', 1, async ([id]) => {
     if (!isUUID(id)) return invalid('Select a valid session ID.');
     const media = await backend.getMedia(id);
