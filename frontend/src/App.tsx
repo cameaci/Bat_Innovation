@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { ApiResult, Health, RecordingSession } from '../../electron/src/contracts';
 import { getAPI } from './api';
+import { MediaPanel } from './MediaPanel';
 
 type Failure = Extract<ApiResult<never>, { ok: false }>['error'];
 
@@ -25,6 +26,8 @@ export function App() {
   const [notice, setNotice] = useState('');
   const [displayName, setDisplayName] = useState('Synthetic survey');
   const [cameraRef, setCameraRef] = useState('Test camera');
+  const [selected, setSelected] = useState<RecordingSession | null>(null);
+  const [mediaBusy, setMediaBusy] = useState(false);
 
   async function refresh() {
     setBusy('loading');
@@ -101,9 +104,9 @@ export function App() {
   return (
     <main>
       <header>
-        <p className="eyebrow">Local development foundation</p>
+        <p className="eyebrow">Local original-media inspection</p>
         <h1>Bat Innovation</h1>
-        <p>Create synthetic recording sessions and confirm local persistence. Video import and review are not implemented yet.</p>
+        <p>Create recording sessions and inspect original .MTS / .MP4 segments locally. Video playback and review are not implemented yet.</p>
       </header>
 
       <section aria-labelledby="backend-heading" className="status-panel">
@@ -112,7 +115,7 @@ export function App() {
           <p role="status">{busy === 'loading' ? 'Checking backend readiness...' : health ? 'Backend ready' : 'Backend not ready'}</p>
           {health && <p className="detail">SQLite storage ready. FFmpeg and ffprobe available.</p>}
         </div>
-        <button type="button" onClick={() => void refresh()} disabled={busy !== null}>
+        <button type="button" onClick={() => void refresh()} disabled={busy !== null || mediaBusy}>
           {busy === 'loading' ? 'Checking...' : 'Refresh / retry'}
         </button>
       </section>
@@ -140,18 +143,20 @@ export function App() {
         {sessions === null ? <p>Saved sessions have not been loaded.</p> : sessions.length === 0 ? <p>No sessions saved yet.</p> : (
           <div className="table-scroll">
             <table>
-              <thead><tr><th scope="col">Display name</th><th scope="col">Camera reference</th><th scope="col">Created (UTC)</th></tr></thead>
+              <thead><tr><th scope="col">Display name</th><th scope="col">Camera reference</th><th scope="col">Created (UTC)</th><th scope="col">Original media</th></tr></thead>
               <tbody>{sessions.map(session => (
                 <tr key={session.id}>
                   <td>{session.display_name}</td>
                   <td>{session.camera_ref}</td>
                   <td><time dateTime={session.created_at_utc}>{session.created_at_utc}</time></td>
+                  <td><button type="button" disabled={mediaBusy || busy !== null} aria-pressed={selected?.id === session.id} onClick={() => setSelected(session)}>Inspect media</button></td>
                 </tr>
               ))}</tbody>
             </table>
           </div>
         )}
       </section>
+      {selected && <MediaPanel key={selected.id} session={selected} onBusyChange={setMediaBusy} />}
     </main>
   );
 }

@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { BackendRuntime, isExternalDataDirectory } from './backend';
+import { BackendRuntime, invalid, isExternalDataDirectory, isSaveMedia, isUUID } from './backend';
 import type { NewSession } from './contracts';
 
 const UI_URL = 'app://bat/index.html';
@@ -31,6 +31,13 @@ function trusted(event: IpcMainInvokeEvent): void {
   if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== UI_URL) {
     throw new Error('IPC is restricted to the application main frame.');
   }
+}
+
+function handle(channel: string, argumentCount: number, action: (args: unknown[]) => unknown): void {
+  ipcMain.handle(channel, (event, ...args: unknown[]) => {
+    trusted(event);
+    return args.length === argumentCount ? action(args) : invalid('Unexpected application arguments.');
+  });
 }
 
 async function open(): Promise<void> {
@@ -70,7 +77,7 @@ async function open(): Promise<void> {
   Menu.setApplicationMenu(null);
   window = new BrowserWindow({
     width: 1000, height: 760, minWidth: 640, minHeight: 500,
-    title: 'Bat Innovation - foundation',
+    title: 'Bat Innovation - original media inspection',
     webPreferences: { preload: join(__dirname, 'preload.js'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, webviewTag: false, spellcheck: false },
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -79,9 +86,30 @@ async function open(): Promise<void> {
   window.webContents.on('will-redirect', (event) => event.preventDefault());
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
   window.on('closed', () => { window = undefined; });
-  ipcMain.handle('bat:health', (event) => { trusted(event); return backend.health(); });
-  ipcMain.handle('bat:list-sessions', (event) => { trusted(event); return backend.listSessions(); });
-  ipcMain.handle('bat:create-session', (event, input: NewSession) => { trusted(event); return backend.createSession(input); });
+  handle('bat:health', 0, () => backend.health());
+  handle('bat:list-sessions', 0, () => backend.listSessions());
+  handle('bat:create-session', 1, ([input]) => backend.createSession(input as NewSession));
+  handle('bat:get-media', 1, ([id]) => isUUID(id) ? backend.getMedia(id) : invalid('Select a valid session ID.'));
+  handle('bat:upgrade-media', 0, () => backend.upgradeMedia());
+  handle('bat:import-status', 1, ([id]) => isUUID(id) ? backend.importStatus(id) : invalid('Select a valid import ID.'));
+  handle('bat:cancel-import', 1, ([id]) => isUUID(id) ? backend.cancelImport(id) : invalid('Select a valid import ID.'));
+  handle('bat:save-media', 2, ([id, input]) => isUUID(id) && isSaveMedia(input) ? backend.saveMedia(id, input) : invalid('Use only selected segment IDs, continuity evidence and an optional UTC clock anchor.'));
+  handle('bat:choose-media', 1, async ([id]) => {
+    if (!isUUID(id)) return invalid('Select a valid session ID.');
+    const media = await backend.getMedia(id);
+    if (!media.ok) return media;
+    if (media.value.schema_version !== 2) return { ok: false, error: { code: 'schema_upgrade_required', message: 'Use Upgrade media storage before choosing original videos.' } };
+    const owner = window;
+    if (!owner || owner.isDestroyed()) return invalid('The application window is closed.');
+    const selected = await dialog.showOpenDialog(owner, {
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'Video originals', extensions: ['mts', 'mp4'] }],
+    }).catch(() => null);
+    if (!selected) return { ok: false, error: { code: 'picker_failed', message: 'The native file picker could not open. Check desktop permissions and reopen the app.' } };
+    if (selected.canceled || selected.filePaths.length === 0) return { ok: true, value: null };
+    // Raw native selections remain in this trusted closure and the authenticated local backend.
+    return backend.importSelectedMedia(id, selected.filePaths);
+  });
   void backend.start({
     repoRoot, dataDir, python: process.env.BAT_PYTHON ?? 'python',
     port: process.env.BAT_API_PORT === undefined ? undefined : Number(process.env.BAT_API_PORT),

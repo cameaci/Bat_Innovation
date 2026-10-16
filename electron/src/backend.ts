@@ -4,11 +4,59 @@ import { existsSync, realpathSync } from 'node:fs';
 import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import type { ApiResult, Health, NewSession, RecordingSession } from './contracts';
+import type { ApiResult, Health, ImportJob, MediaSession, NewSession, RecordingSession, SaveMedia } from './contracts';
 
 const unavailable = (message = 'Backend unavailable. Reopen the app after checking Python, ffmpeg and ffprobe.') =>
   ({ ok: false, error: { code: 'unavailable', message } }) as const;
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+export const isUUID = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+export const invalid = (message = 'Invalid application request.') => ({ ok: false, error: { code: 'invalid', message } }) as const;
+const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+const exactKeys = (value: Record<string, unknown>, keys: string[]) => Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
+const provenance = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0 && value.length <= 500;
+
+export function isSaveMedia(input: unknown): input is SaveMedia {
+  if (!object(input) || !exactKeys(input, ['segment_ids', 'continuity', 'clock_anchor']) ||
+    !Array.isArray(input.segment_ids) || !input.segment_ids.every(isUUID) || new Set(input.segment_ids).size !== input.segment_ids.length ||
+    !Array.isArray(input.continuity) || input.continuity.length !== input.segment_ids.length) return false;
+  const segmentIDs = input.segment_ids as string[];
+  if (!input.continuity.every((row: unknown) => object(row) && exactKeys(row, ['segment_id', 'status', 'provenance']) &&
+    isUUID(row.segment_id) && segmentIDs.includes(row.segment_id) && ['unknown', 'known_contiguous', 'known_gap'].includes(String(row.status)) &&
+    (row.status === 'unknown' ? row.provenance === null : provenance(row.provenance)))) return false;
+  if (new Set(input.continuity.map(row => row.segment_id)).size !== segmentIDs.length) return false;
+  const first = input.continuity.find(row => row.segment_id === segmentIDs[0]);
+  if (first && first.status !== 'unknown') return false;
+  const anchor = input.clock_anchor;
+  return anchor === null || (object(anchor) && exactKeys(anchor, ['segment_id', 'utc', 'provenance']) &&
+    isUUID(anchor.segment_id) && segmentIDs.includes(anchor.segment_id) && provenance(anchor.provenance) &&
+    typeof anchor.utc === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|\+00:00)$/.test(anchor.utc) && Number.isFinite(Date.parse(anchor.utc)));
+}
+
+// Only known error codes cross the desktop boundary; arbitrary response text never does.
+const mediaErrors: Record<string, string> = {
+  schema_upgrade_required: 'Media storage needs an explicit upgrade. Use Upgrade media storage before importing.',
+  schema_upgrade_failed: 'Media storage could not be upgraded. Close the app and check the local database before retrying.',
+  session_missing: 'This session no longer exists. Refresh the session list.',
+  job_missing: 'This import is no longer available. Refresh the session media.',
+  import_busy: 'A media import is already running. Wait for it or cancel it before importing again.',
+  invalid_sources: 'Choose readable local .MTS or .MP4 original files using the native picker.',
+  invalid_timeline: 'Check segment order, continuity evidence and the optional UTC clock anchor.',
+  duplicate_source: 'A selected source is already imported. Choose different original files.',
+  cancelled: 'Import cancelled. No partial import was saved.',
+  missing_source: 'A source file is missing. Restore the selected original file and refresh media.',
+  unreadable_metadata: 'Media metadata could not be read. Check the original file and supported format.',
+  unsupported_codec: 'This media codec or container is unsupported. Choose a supported .MTS or .MP4 original.',
+  decode_failed: 'The original could not be decoded. Check that the file is complete and supported.',
+  unknown_timing: 'Reliable decoded presentation timestamps are unavailable. This source cannot be imported.',
+  changed_source: 'A source file changed since import. Restore the original file before using its metadata.',
+  import_failed: 'Media import failed. Check the original files and local storage, then retry.',
+};
+function mediaFailure(code: unknown) {
+  return typeof code === 'string' && Object.hasOwn(mediaErrors, code) ? { code, message: mediaErrors[code] } : { code: 'backend', message: 'Media request failed. Refresh media and check the selected originals.' };
+}
+type ApiRoute = '/api/health' | '/api/sessions' | '/api/media/upgrade' | '/api/media/import' |
+  `/api/sessions/${string}/media` | `/api/media/import/${string}` | `/api/media/import/${string}/cancel`;
 
 /** Read only known, redacted startup codes from the Python process. */
 function safeStartupFailure(output: string): string | undefined {
@@ -27,29 +75,16 @@ function safeStartupFailure(output: string): string | undefined {
 export class BackendClient {
   constructor(private readonly port: number, private readonly token: string) {}
 
-  private call<T>(path: '/api/health' | '/api/sessions', input?: NewSession): Promise<ApiResult<T>> {
+  private call<T>(path: ApiRoute, method: 'GET' | 'POST' | 'PUT' = 'GET', input?: unknown): Promise<ApiResult<T>> {
     return new Promise((resolve) => {
       const body = input === undefined ? undefined : JSON.stringify(input);
       const req = request({
         hostname: '127.0.0.1', port: this.port, path,
-        method: body === undefined ? 'GET' : 'POST',
+        method,
         headers: { 'X-Bat-Token': this.token, ...(body === undefined ? {} : {
           'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body),
         }) },
       }, (res) => {
-        if (res.statusCode === 401) {
-          res.resume();
-          resolve({ ok: false, error: { code: 'unauthorized', message: 'Backend token rejected. Close and reopen the app.' } });
-          return;
-        }
-        if (res.statusCode !== 200 && res.statusCode !== 201) {
-          res.resume();
-          resolve({ ok: false, error: {
-            code: res.statusCode === 422 ? 'invalid' : 'backend',
-            message: res.statusCode === 422 ? 'Display name and camera reference must contain 1-120 characters.' : `Backend request failed (HTTP ${res.statusCode}).`,
-          } });
-          return;
-        }
         let data = '';
         res.setEncoding('utf8');
         res.on('data', (chunk: string) => {
@@ -58,6 +93,21 @@ export class BackendClient {
         });
         res.on('error', () => resolve(unavailable()));
         res.on('end', () => {
+          if (res.statusCode === 401) {
+            resolve({ ok: false, error: { code: 'unauthorized', message: 'Backend token rejected. Close and reopen the app.' } });
+            return;
+          }
+          if (res.statusCode !== 200 && res.statusCode !== 201 && res.statusCode !== 202) {
+            let failure = { code: res.statusCode === 422 ? 'invalid' : 'backend', message: res.statusCode === 422 ? 'The submitted fields are invalid. Check the form and try again.' : `Backend request failed (HTTP ${res.statusCode}).` };
+            try {
+              const parsed: unknown = JSON.parse(data);
+              if (object(parsed) && object(parsed.detail) && typeof parsed.detail.code === 'string' && Object.hasOwn(mediaErrors, parsed.detail.code)) {
+                failure = mediaFailure(parsed.detail.code);
+              }
+            } catch { /* Use a fixed message when the response is not recognised. */ }
+            resolve({ ok: false, error: failure });
+            return;
+          }
           try { resolve({ ok: true, value: JSON.parse(data) as T }); }
           catch { resolve({ ok: false, error: { code: 'backend', message: 'Backend returned an invalid response.' } }); }
         });
@@ -84,7 +134,30 @@ export class BackendClient {
       Object.keys(input).some((key) => key !== 'display_name' && key !== 'camera_ref')) {
       return Promise.resolve({ ok: false, error: { code: 'invalid', message: 'Provide only a display name and camera reference, each 1-120 characters.' } });
     }
-    return this.call('/api/sessions', { display_name: input.display_name.trim(), camera_ref: input.camera_ref.trim() });
+    return this.call('/api/sessions', 'POST', { display_name: input.display_name.trim(), camera_ref: input.camera_ref.trim() });
+  }
+  getMedia(sessionID: string): Promise<ApiResult<MediaSession>> {
+    return isUUID(sessionID) ? this.call(`/api/sessions/${sessionID}/media`) : Promise.resolve(invalid());
+  }
+  upgradeMedia(): Promise<ApiResult<{ schema_version: 2 }>> { return this.call('/api/media/upgrade', 'POST'); }
+  saveMedia(sessionID: string, input: SaveMedia): Promise<ApiResult<MediaSession>> {
+    return isUUID(sessionID) && isSaveMedia(input) ? this.call(`/api/sessions/${sessionID}/media`, 'PUT', input) : Promise.resolve(invalid('Use only selected segment IDs, continuity evidence and an optional UTC clock anchor.'));
+  }
+  // Called only by the main process after a native selection. Never exposed in BatAPI.
+  importSelectedMedia(sessionID: string, paths: string[]): Promise<ApiResult<ImportJob>> {
+    return isUUID(sessionID) && Array.isArray(paths) && paths.length > 0 && paths.every(path => typeof path === 'string' && isAbsolute(path)) ?
+      this.job('/api/media/import', 'POST', { session_id: sessionID, paths }) : Promise.resolve(invalid());
+  }
+  importStatus(jobID: string): Promise<ApiResult<ImportJob>> {
+    return isUUID(jobID) ? this.job(`/api/media/import/${jobID}`) : Promise.resolve(invalid());
+  }
+  cancelImport(jobID: string): Promise<ApiResult<ImportJob>> {
+    return isUUID(jobID) ? this.job(`/api/media/import/${jobID}/cancel`, 'POST') : Promise.resolve(invalid());
+  }
+  private async job(route: ApiRoute, method: 'GET' | 'POST' = 'GET', input?: unknown): Promise<ApiResult<ImportJob>> {
+    const result = await this.call<ImportJob>(route, method, input);
+    if (result.ok && result.value.error) result.value.error = mediaFailure(result.value.error.code);
+    return result;
   }
 }
 
@@ -192,6 +265,16 @@ export class BackendRuntime {
     const health = await this.health();
     return health.ok && this.client ? this.client.createSession(input) : health as ApiResult<RecordingSession>;
   }
+  private async ready<T>(operation: (client: BackendClient) => Promise<ApiResult<T>>): Promise<ApiResult<T>> {
+    const health = await this.health();
+    return health.ok && this.client ? operation(this.client) : health as ApiResult<T>;
+  }
+  getMedia(sessionID: string): Promise<ApiResult<MediaSession>> { return this.ready(client => client.getMedia(sessionID)); }
+  upgradeMedia(): Promise<ApiResult<{ schema_version: 2 }>> { return this.ready(client => client.upgradeMedia()); }
+  saveMedia(sessionID: string, input: SaveMedia): Promise<ApiResult<MediaSession>> { return this.ready(client => client.saveMedia(sessionID, input)); }
+  importSelectedMedia(sessionID: string, paths: string[]): Promise<ApiResult<ImportJob>> { return this.ready(client => client.importSelectedMedia(sessionID, paths)); }
+  importStatus(jobID: string): Promise<ApiResult<ImportJob>> { return this.ready(client => client.importStatus(jobID)); }
+  cancelImport(jobID: string): Promise<ApiResult<ImportJob>> { return this.ready(client => client.cancelImport(jobID)); }
 
   stop(): Promise<void> {
     this.stopped = true;

@@ -1,0 +1,41 @@
+name: Slice 1 media checks
+
+# Optional manual verification only; GitHub-hosted runner quota currently unavailable.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install OS media and display prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg xvfb libnss3 libatk-bridge2.0-0 libgtk-3-0 libasound2t64
+          ffmpeg -hide_banner -encoders | grep libx264
+      - name: Install pinned Python dependencies
+        run: python -m pip install -r backend/requirements-dev.txt
+      - name: Install locked Node dependencies and Electron runtime
+        run: |
+          npm ci
+          npm run setup:electron
+      - name: Python source and database tests
+        run: python -m pytest backend/tests -q
+      - name: Strict TypeScript
+        run: npm run typecheck
+      - name: Node lifecycle and integration tests
+        run: npm test
+      - name: Electron end-to-end tests (synthetic originals only)
+        run: xvfb-run -a npm run test:e2e
