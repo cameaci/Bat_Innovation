@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from _thread import LockType
 from pathlib import Path
 from threading import Event, Lock, Thread
 from uuid import uuid4
@@ -43,11 +44,11 @@ def source_state(row: dict) -> str:
     path = Path(row["source_path"])
     try:
         current = media.identity_info(path)
-        if current != json.loads(row["identity_json"]):
-            return "changed_source"
         # File metadata may still be available when its contents are unreadable.
         with path.open("rb") as source:
             source.read(1)
+        if current != json.loads(row["identity_json"]):
+            return "changed_source"
     except media.MediaError as error:
         return "missing_source" if error.code == "missing_source" else "unreadable_source"
     except FileNotFoundError:
@@ -58,30 +59,41 @@ def source_state(row: dict) -> str:
 
 
 class ImportJobs:
-    def __init__(self, db_path: Path, data_dir: Path):
+    def __init__(self, db_path: Path, data_dir: Path, activity_lock: LockType | None = None):
         self.db_path, self.data_dir = db_path, data_dir
         self._lock = Lock()
         self._jobs: dict[str, dict] = {}
         self._cancel: dict[str, Event] = {}
         self._thread: Thread | None = None
         self._closed = False
+        self._activity_lock = activity_lock if activity_lock is not None else Lock()
 
     def start(self, session_id: str, paths: list[str]) -> dict:
         sources = selected_sources(paths, self.data_dir)
         with self._lock:
             if self._closed or any(job["state"] == "running" for job in self._jobs.values()):
                 raise ImportErrorResponse("import_busy", "Another import is running. Wait for it or cancel it.", 409)
-            # Retain only the last eight jobs, never an unbounded history of private metadata.
-            while len(self._jobs) >= 8:
-                oldest = next(iter(self._jobs))
-                self._jobs.pop(oldest)
-                self._cancel.pop(oldest)
-            job_id, cancelled = str(uuid4()), Event()
-            job = {"id": job_id, "session_id": session_id, "state": "running", "phase": "queued",
-                   "filename": None, "files_done": 0, "files_total": len(sources), "progress_value": 0, "error": None}
-            self._jobs[job_id], self._cancel[job_id] = job, cancelled
-            self._thread = Thread(target=self._run, args=(job_id, session_id, sources, cancelled), daemon=True)
-            self._thread.start()
+            if not self._activity_lock.acquire(blocking=False):
+                raise ImportErrorResponse("preview_busy", "A preview is running. Wait for it or cancel it before importing.", 409)
+            job_id = None
+            try:
+                # Retain only the last eight jobs, never an unbounded history of private metadata.
+                while len(self._jobs) >= 8:
+                    oldest = next(iter(self._jobs))
+                    self._jobs.pop(oldest)
+                    self._cancel.pop(oldest)
+                job_id, cancelled = str(uuid4()), Event()
+                job = {"id": job_id, "session_id": session_id, "state": "running", "phase": "queued",
+                       "filename": None, "files_done": 0, "files_total": len(sources), "progress_value": 0, "error": None}
+                self._jobs[job_id], self._cancel[job_id] = job, cancelled
+                self._thread = Thread(target=self._run, args=(job_id, session_id, sources, cancelled), daemon=True)
+                self._thread.start()
+            except Exception:
+                self._thread = None
+                self._jobs.pop(job_id, None)
+                self._cancel.pop(job_id, None)
+                self._activity_lock.release()
+                raise ImportErrorResponse("import_failed", "The import worker could not start. Retry after checking local resources.", 500) from None
             return dict(job)
 
     def get(self, job_id: str) -> dict:
@@ -117,6 +129,8 @@ class ImportJobs:
             with self._lock:
                 self._jobs[job_id].update(phase=phase, progress_value=value)
 
+        outcome = {"state": "failed", "phase": "failed", "error": {
+            "code": "import_failed", "message": "Import failed. No sources were added. Check source access and retry."}}
         try:
             inspected: list[tuple[Path, dict]] = []
             for source in sources:
@@ -143,14 +157,15 @@ class ImportJobs:
                     store.commit_segments(self.db_path, session_id, inspected)
                 except ValueError:
                     raise media.MediaError("duplicate_source", "A selected source is already present in this session or batch. No sources were added.") from None
-                self._jobs[job_id].update(state="complete", phase="complete")
+                outcome = {"state": "complete", "phase": "complete", "error": None}
         except media.MediaError as error:
-            with self._lock:
-                self._jobs[job_id].update(state="cancelled" if error.code == "cancelled" else "failed",
-                                         phase="cancelled" if error.code == "cancelled" else "failed",
-                                         error={"code": error.code, "message": error.message})
+            state = "cancelled" if error.code == "cancelled" else "failed"
+            outcome = {"state": state, "phase": state, "error": {"code": error.code, "message": error.message}}
         except Exception:
             # Decoder, SQLite and OS exception text can include confidential filesystem paths.
+            pass
+        finally:
+            # A terminal status and an available processing reservation become visible together.
             with self._lock:
-                self._jobs[job_id].update(state="failed", phase="failed", error={
-                    "code": "import_failed", "message": "Import failed. No sources were added. Check source access and retry."})
+                self._jobs[job_id].update(outcome)
+                self._activity_lock.release()

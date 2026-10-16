@@ -1,6 +1,6 @@
 # Implementation plan
 
-Reviewed 2026-10-16. Status: **Slice 0 and Slice 1A media import verified on Linux. Slice 1 playback, Windows and ownership checks remain open**. This is a dependency-ordered sequence, not a promise of dates. The application is built in **small vertical slices**, each delivering observable behavior and tests. No workarounds or speculative infrastructure.
+Reviewed 2026-10-16. Status: **Slice 0, Slice 1A import and the Slice 1B preview candidate verified on synthetic Linux media. Slice 1B awaits independent review; Windows and ownership checks remain open**. This is a dependency-ordered sequence, not a promise of dates. The application is built in **small vertical slices**, each delivering observable behavior and tests. No workarounds or speculative infrastructure.
 
 ## Principles of execution
 
@@ -38,7 +38,9 @@ Reviewed 2026-10-16. Status: **Slice 0 and Slice 1A media import verified on Lin
 
 **Slice 1A progress (2026-10-15):** [Issue #3](https://github.com/cameaci/Bat_Innovation/issues/3) implements native import and metadata/PTS inspection against the merged Slice 0 app. PyAV 19.0.1 is the sole production decoder after exact decoded-pixel/PTS comparison with FFmpeg on three generated fixtures. Existing databases require the explicit UI action for the transactional schema 1 -> 2 transition. Imported sources remain untouched; full batches, exact timestamp boundaries, explicit segment order, continuity and optional clock provenance persist in SQLite. Cancellation and progress are visible. See the [research log](../docs/07-research-log.md) for actual commands, licensing evidence and unverified Windows/runtime behavior. No playback/seek or summary feature is claimed.
 
-**Review revalidation (2026-10-16):** At `574c340`, all four required suites passed locally after the PR #4 corrections: 37 Python tests, strict TypeScript, 16 Node tests and 5 Electron E2E tests. Global source uniqueness, unreadable-source classification, unsaved timeline protection and unknown final-frame duration are covered. No further application fix was needed; GitHub Actions was not used. PR #4 remains unmerged for independent review. Slice 1B and issue #5 have not started; the unchecked gates below remain open.
+**Review revalidation (2026-10-16):** At `574c340`, all four required suites passed locally after the PR #4 corrections: 37 Python tests, strict TypeScript, 16 Node tests and 5 Electron E2E tests. Global source uniqueness, unreadable-source classification, unsaved timeline protection and unknown final-frame duration are covered. No further application fix was needed; GitHub Actions was not used. This preceded the independent review and merge of PR #4; Slice 1B progress is recorded below.
+
+**Slice 1B progress (2026-10-16):** PR #4 subsequently merged as `a6fe013`; [issue #5](https://github.com/cameaci/Bat_Innovation/issues/5) now adds bounded source previews on that baseline. The pre-code Electron proof rejected native MPEG-2 MTS playback and an inaccurate native irregular-MP4 seek; 14 PyAV-derived VP9/WebM clips passed all 59 visible-marker checks, including a later keyframe and final single frames. One PyAV source decode/PTS path supplies both the display frames and exact source mapping. The player uses that mapping rather than a browser timer/FPS conversion. Local validation passed 76 Python tests, strict TypeScript, 21 Node checks and 9 Electron E2E tests. No hosted CI was used. This source-only candidate remains unmerged for independent review; Slice 2 has not started. See the [research log](../docs/07-research-log.md) for limits, commands and measured evidence.
 
 **Goal:** accurate original-video seeking and segmented session import, not a decorative UI.
 
@@ -50,14 +52,17 @@ Reviewed 2026-10-16. Status: **Slice 0 and Slice 1A media import verified on Lin
 - [x] Import **ordered source segments** into a recording session. Record a checksum, exact sequence and explicit `contiguous / gap / unknown` status. Do not assume filenames prove continuity.
 - [x] Preserve exact source PTS and segment-relative elapsed boundaries, plus a separate optional UTC anchor bound to a segment ID and its first decoded PTS with provenance. Unknown continuity never creates global session elapsed time or an invented clock.
 - [x] Add an explicit, tested schema 1 -> 2 transition that preserves existing sessions and review tables, rolls back failures and never upgrades silently on startup.
-- [ ] Implement source-time navigation and event/session-clock mapping after the playback/seek increment is verified.
-- [ ] Implement original-media verification with a working player. Compare direct browser playback versus **on-demand FFmpeg preview clips** for non-browser-compatible codecs. Choose by an actual seek-accuracy and start/end-boundary test, not extension.
+- [x] Implement source-PTS navigation within one selected segment, exact segment-elapsed labels and a separately attributed saved clock anchor. Segments are never joined automatically.
+- [ ] Implement event/session-clock mapping with defensible continuity and original-speed provenance; preview-relative time is not survey time.
+- [x] Implement original-media verification with a bounded player on synthetic Linux media. Compare native browser playback with **on-demand FFmpeg-library preview clips** by actual marker/seek and start/end-boundary tests. Choose one PyAV-derived VP9/WebM path; no extension-based native fallback.
 - [ ] Preserve original-speed provenance and flag derivatives of unknown speed.
 - [x] Validate import cancellation, missing/changed sources, corrupt/truncated streams, unavailable codecs, unknown/nonmonotonic PTS, explicit gap provenance and short final segments. Playback-specific boundary validation remains in the next increment.
 
 **Exit:** a user can select and inspect multi-part media, click a source timestamp and see the correct source content in the local UI. Clip start and duration are asserted against known synthetic marker frames; original sources are unchanged. Unsupported input yields a clear error.
 
 **Slice 1A limit:** technical import/PTS gate passed on synthetic Linux media. PyAV code is BSD-3-Clause, but the exact wheels bundle separately licensed FFmpeg/codecs; the Windows wheel contains GPL-licensed x264/x265 despite an LGPL FFmpeg self-report. Binary redistribution is uncleared. No representative Canon XA, Sony AX53 or Nightfox original was examined.
+
+**Slice 1B limit:** bounded preview/seek gate passed on generated Linux MP4 and MPEG-TS media only. Preview generation currently requires Linux hard process limits; Windows returns an explicit unsupported-limits state. Display clips are silent yuv420p derivatives, may be resized, and use millisecond display timing with at most 0.5 ms quantisation per frame. Exact original PTS remain separate. Rotation is not applied and interlaced content is not deinterlaced; warnings remain visible. Unknown final-frame duration blocks previews instead of inventing an end. Representative camera originals, Windows runtime, physical native-picker interaction, Chromium OS sandbox and all binary redistribution/packaging remain unverified.
 
 **Stop condition:** if accurate preview seeking cannot be demonstrated, resolve the media design before motion-image work.
 

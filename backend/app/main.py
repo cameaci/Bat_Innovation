@@ -6,6 +6,7 @@ import os
 import json
 import shutil
 import sqlite3
+from threading import Lock
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -15,11 +16,12 @@ from uuid import UUID
 
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from . import store
 from .imports import ImportErrorResponse, ImportJobs, source_state
+from .preview import PreviewJobs
 
 
 @dataclass(frozen=True)
@@ -71,6 +73,19 @@ class NewImport(BaseModel):
 
 class EmptyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class NewPreview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    segment_id: UUID
+    source_pts: str = Field(pattern=r"^-?\d{1,19}$", max_length=20)
+
+    @field_validator("source_pts")
+    @classmethod
+    def signed_64_bit(cls, value: str) -> str:
+        if not -(2 ** 63) <= int(value) < 2 ** 63:
+            raise ValueError("Source PTS must fit a signed 64-bit integer")
+        return str(int(value))
 
 
 class Continuity(BaseModel):
@@ -138,11 +153,14 @@ def create_app(settings: Settings) -> FastAPI:
             raise RuntimeError(f"Required media tool is unavailable: {executable}")
     db_path = settings.data_dir / "bat_innovation.sqlite3"
     store.initialise(db_path)
-    jobs = ImportJobs(db_path, settings.data_dir)
+    activity_lock = Lock()
+    jobs = ImportJobs(db_path, settings.data_dir, activity_lock)
+    previews = PreviewJobs(db_path, settings.data_dir, activity_lock)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         yield
+        previews.close()
         jobs.close()
 
     app = FastAPI(title="Bat Innovation local API", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
@@ -233,5 +251,21 @@ def create_app(settings: Settings) -> FastAPI:
     @app.post("/api/media/import/{job_id}/cancel", dependencies=[Depends(authenticate)])
     def cancel_import(job_id: UUID, _payload: EmptyRequest = Body(default_factory=EmptyRequest)) -> dict:
         return jobs.cancel(str(job_id))
+
+    @app.post("/api/media/preview", status_code=202, dependencies=[Depends(authenticate)])
+    def post_preview(payload: NewPreview) -> dict:
+        return previews.start(str(payload.segment_id), payload.source_pts)
+
+    @app.get("/api/media/preview/{preview_id}", dependencies=[Depends(authenticate)])
+    def get_preview(preview_id: UUID) -> dict:
+        return previews.get(str(preview_id))
+
+    @app.post("/api/media/preview/{preview_id}/cancel", dependencies=[Depends(authenticate)])
+    def cancel_preview(preview_id: UUID, _payload: EmptyRequest = Body(default_factory=EmptyRequest)) -> dict:
+        return previews.cancel(str(preview_id))
+
+    @app.get("/api/media/preview/{preview_id}/content", dependencies=[Depends(authenticate)])
+    def preview_content(preview_id: UUID) -> Response:
+        return Response(previews.content(str(preview_id)), media_type="video/webm", headers={"Cache-Control": "no-store"})
 
     return app

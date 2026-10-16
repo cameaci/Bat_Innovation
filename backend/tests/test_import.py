@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import shutil
 import sqlite3
-from threading import Event
+from threading import Event, Lock
 import time
 from uuid import uuid4
 
@@ -356,6 +356,73 @@ def test_unreadable_original_is_not_reported_as_missing(
 
     monkeypatch.setattr(Path, "open", forbidden_open)
     assert imports.source_state(row) == "unreadable_source"
+    # Permission changes can also change ctime; unreadability must remain actionable.
+    row["identity_json"] = json.dumps({**identity, "ctime_ns": identity["ctime_ns"] - 1})
+    assert imports.source_state(row) == "unreadable_source"
     monkeypatch.undo()
     original.unlink()
     assert imports.source_state(row) == "missing_source"
+
+
+@pytest.mark.parametrize("outcome", ["complete", "cancelled", "failed"])
+def test_terminal_import_status_releases_processing_reservation_atomically(
+    tmp_path: Path, videos: dict[str, Path], monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    database = tmp_path / "data" / "bat_innovation.sqlite3"
+    store.initialise(database)
+    store.upgrade_media(database)
+    session_id = store.create_session(database, "Synthetic reservation", "Test camera")["id"]
+    released_under_status_lock: list[bool] = []
+
+    class Reservation:
+        def __init__(self):
+            self.lock = Lock()
+
+        def acquire(self, blocking=True):
+            return self.lock.acquire(blocking=blocking)
+
+        def release(self):
+            released_under_status_lock.append(jobs._lock.locked())
+            self.lock.release()
+
+    reservation = Reservation()
+    jobs = imports.ImportJobs(database, database.parent, reservation)
+    if outcome != "complete":
+        def unsuccessful(*args, **kwargs):
+            raise media.MediaError("cancelled" if outcome == "cancelled" else "decode_failed", "Synthetic failure")
+        monkeypatch.setattr(media, "inspect_source", unsuccessful)
+    try:
+        job = jobs.start(session_id, [str(videos["short_mp4"])])
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and jobs.get(job["id"])["state"] == "running":
+            time.sleep(0.005)
+        assert jobs.get(job["id"])["state"] == outcome
+        assert released_under_status_lock == [True]
+        assert reservation.acquire(blocking=False)
+        reservation.lock.release()
+    finally:
+        jobs.close()
+
+
+def test_import_thread_start_failure_leaves_no_running_job_or_reservation(
+    tmp_path: Path, videos: dict[str, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "data" / "bat_innovation.sqlite3"
+    store.initialise(database)
+    store.upgrade_media(database)
+    session_id = store.create_session(database, "Synthetic startup failure", "Test camera")["id"]
+    reservation = Lock()
+    jobs = imports.ImportJobs(database, database.parent, reservation)
+
+    def cannot_start(_thread):
+        raise RuntimeError("Synthetic thread startup failure with private details")
+
+    monkeypatch.setattr(imports.Thread, "start", cannot_start)
+    with pytest.raises(imports.ImportErrorResponse) as error:
+        jobs.start(session_id, [str(videos["short_mp4"])])
+    assert error.value.code == "import_failed"
+    assert "private details" not in error.value.message
+    assert jobs.active(session_id) is None and jobs._jobs == {} and jobs._thread is None
+    assert reservation.acquire(blocking=False)
+    reservation.release()
+    jobs.close()

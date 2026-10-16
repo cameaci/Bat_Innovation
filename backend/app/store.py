@@ -108,6 +108,14 @@ def private_segments(db_path: Path, session_id: str) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def segment_by_id(db_path: Path, segment_id: str) -> dict | None:
+    if schema_version(db_path) != MEDIA_SCHEMA_VERSION:
+        return None
+    with closing(connect(db_path)) as connection:
+        row = connection.execute("SELECT * FROM segment WHERE id=?", (segment_id,)).fetchone()
+    return dict(row) if row is not None else None
+
+
 def clock_anchor(db_path: Path, session_id: str) -> dict | None:
     if schema_version(db_path) != MEDIA_SCHEMA_VERSION:
         return None

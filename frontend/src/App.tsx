@@ -106,7 +106,7 @@ export function App() {
       <header>
         <p className="eyebrow">Local original-media inspection</p>
         <h1>Bat Innovation</h1>
-        <p>Create recording sessions and inspect original .MTS / .MP4 segments locally. Video playback and review are not implemented yet.</p>
+        <p>Inspect original .MTS / .MP4 segments and bounded source previews locally. Motion summaries and ecological review are not implemented yet.</p>
       </header>
 
       <section aria-labelledby="backend-heading" className="status-panel">
