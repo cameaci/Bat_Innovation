@@ -247,6 +247,38 @@ def test_preview_worker_enforces_hard_linux_limits_and_no_launch_token(tmp_path:
     assert not Path(f"/proc/{pid}").exists()
 
 
+def test_preview_thread_start_failure_preserves_cleanup_and_retry(
+    tmp_path: Path, videos: dict[str, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database, row = prepared(tmp_path / "data", videos["cfr_mp4"])
+    reservation = Lock()
+    jobs = preview.PreviewJobs(database, database.parent, reservation)
+
+    def cannot_start(_thread) -> None:
+        raise RuntimeError("simulated native thread resource exhaustion")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(preview.Thread, "start", cannot_start)
+        with pytest.raises(preview.ImportErrorResponse) as error:
+            jobs.start(row["id"], "0")
+        assert error.value.code == "preview_failed"
+        assert jobs._thread is None
+        assert jobs._jobs == {} and jobs._sources == {} and jobs._cancel == {}
+        assert reservation.acquire(blocking=False)
+        reservation.release()
+        # Shutdown must not join a Thread object that was never started.
+        jobs.close()
+
+    assert list(jobs.directory.iterdir()) == []
+    retried = preview.PreviewJobs(database, database.parent, reservation)
+    try:
+        job = retried.start(row["id"], "0")
+        assert wait_job(retried.get, job["id"])["state"] == "ready"
+    finally:
+        retried.close()
+    assert list(retried.directory.iterdir()) == []
+
+
 def test_import_and_preview_share_one_atomic_processing_reservation(
     tmp_path: Path, videos: dict[str, Path], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
