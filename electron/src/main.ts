@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSaveMedia, isUUID, MAX_PREVIEW_BYTES } from './backend';
+import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isSaveMedia, isUUID, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
 import type { NewSession } from './contracts';
 
 const UI_URL = 'app://bat/index.html';
@@ -63,7 +63,7 @@ async function open(): Promise<void> {
       const content = readFileSync(join(repoRoot, 'frontend/dist', url.pathname));
       return new Response(content, { headers: {
         'Content-Type': url.pathname.endsWith('.js') ? 'text/javascript' : url.pathname.endsWith('.css') ? 'text/css' : 'text/html',
-        'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; media-src blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'",
+        'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'",
         'X-Content-Type-Options': 'nosniff',
       } });
     } catch { return new Response('Built UI missing. Run npm run build.', { status: 404 }); }
@@ -71,14 +71,14 @@ async function open(): Promise<void> {
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   session.defaultSession.setPermissionCheckHandler(() => false);
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
-    const previewBlob = details.resourceType === 'media' && /^blob:app:\/\/bat\/[0-9a-f-]+$/.test(details.url);
+    const previewBlob = ['media', 'image'].includes(details.resourceType) && /^blob:app:\/\/bat\/[0-9a-f-]+$/.test(details.url);
     callback({ cancel: !details.url.startsWith('app://bat/') && !previewBlob });
   });
   session.defaultSession.on('will-download', (event) => event.preventDefault());
   Menu.setApplicationMenu(null);
   window = new BrowserWindow({
     width: 1000, height: 760, minWidth: 640, minHeight: 500,
-    title: 'Bat Innovation - original media inspection',
+    title: 'Bat Innovation - source motion evidence',
     webPreferences: { preload: join(__dirname, 'preload.js'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, webviewTag: false, spellcheck: false },
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -103,11 +103,21 @@ async function open(): Promise<void> {
     const result = await backend.previewContent(id);
     return result.ok && result.value.bytes.byteLength > MAX_PREVIEW_BYTES ? invalid('Preview content exceeds its byte limit.') : result;
   });
+  handle('bat:upgrade-summaries', 0, () => backend.upgradeSummaries());
+  handle('bat:list-summary-runs', 1, ([id]) => isUUID(id) ? backend.listSummaryRuns(id) : invalid('Select a valid session ID.'));
+  handle('bat:start-summaries', 1, ([input]) => isSummaryRequest(input) ? backend.startSummaries(input) : invalid('Select a session ID and an integer window duration from 1 to 120 seconds.'));
+  handle('bat:summary-run', 1, ([id]) => isUUID(id) ? backend.summaryRun(id) : invalid('Select a valid run ID.'));
+  handle('bat:cancel-summaries', 1, ([id]) => isUUID(id) ? backend.cancelSummaries(id) : invalid('Select a valid run ID.'));
+  handle('bat:summary-image', 1, async ([id]) => {
+    if (!isUUID(id)) return invalid('Select a valid window ID.');
+    const result = await backend.summaryImage(id);
+    return result.ok && result.value.bytes.byteLength > MAX_SUMMARY_BYTES ? invalid('Summary image exceeds its byte limit.') : result;
+  });
   handle('bat:choose-media', 1, async ([id]) => {
     if (!isUUID(id)) return invalid('Select a valid session ID.');
     const media = await backend.getMedia(id);
     if (!media.ok) return media;
-    if (media.value.schema_version !== 2) return { ok: false, error: { code: 'schema_upgrade_required', message: 'Use Upgrade media storage before choosing original videos.' } };
+    if (media.value.schema_version < 2) return { ok: false, error: { code: 'schema_upgrade_required', message: 'Use Upgrade media storage before choosing original videos.' } };
     const owner = window;
     if (!owner || owner.isDestroyed()) return invalid('The application window is closed.');
     const selected = await dialog.showOpenDialog(owner, {

@@ -75,3 +75,16 @@ ul.source-warning { padding-left: 32px; }
   .preview-timing { grid-template-columns: 1fr; gap: 3px; }
   .preview-timing dd { margin-bottom: 8px; }
 }
+
+.summary-windows { margin: 24px 0 0; border-color: #7d8d86; }
+.summary-windows select { margin: 8px 0 16px; }
+.summary-list { padding-left: 24px; }
+.summary-list > li { border-top: 1px solid #d6dedb; padding: 16px 0; }
+.summary-list h3, .summary-inspection h3 { margin: 0 0 10px; font-size: 1rem; overflow-wrap: anywhere; }
+.summary-list article > p { overflow-wrap: anywhere; }
+.summary-inspection { border-top: 2px solid #7d8d86; padding-top: 20px; }
+.summary-inspection img { display: block; max-width: 100%; height: auto; margin: 16px 0; border: 1px solid #d6dedb; }
+.summary-provenance { margin: 16px 0; }
+.summary-provenance summary { cursor: pointer; font-weight: 600; }
+.summary-provenance pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .85rem; }
+.summary-upgrade { margin-top: 20px; }

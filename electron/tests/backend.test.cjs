@@ -1,12 +1,13 @@
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
+const { createHash } = require('node:crypto');
 const { access, mkdtemp, readFile, readdir, rm, symlink } = require('node:fs/promises');
 const { createServer } = require('node:net');
 const { createServer: httpServer } = require('node:http');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
-const { BackendClient, BackendRuntime, MAX_PREVIEW_BYTES } = require('../dist/backend.js');
+const { BackendClient, BackendRuntime, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } = require('../dist/backend.js');
 
 const repoRoot = path.resolve(__dirname, '../..');
 const python = process.env.BAT_PYTHON || 'python';
@@ -35,6 +36,17 @@ function expectFailure(result, code) {
 function expectExited(pid) {
   assert.equal(typeof pid, 'number');
   assert.throws(() => process.kill(pid, 0), error => error.code === 'ESRCH');
+}
+
+async function waitUntilTerminal(read, activeStates) {
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) {
+    const result = await read();
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!activeStates.includes(result.value.state)) return result.value;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  assert.fail('Synthetic media operation did not reach a terminal state');
 }
 
 test('real backend persists sessions across runtime restart and rejects unauthorized access', { timeout: 45000 }, async t => {
@@ -150,6 +162,173 @@ test('binary preview transport admits only one in-flight content response', { ti
     response.end(JSON.stringify({ detail: { code: 'preview_not_ready' } }));
     expectFailure(await first, 'preview_not_ready');
   } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
+test('summary bridge requires explicit storage upgrade and rejects paths, invalid durations and unauthorized routes', { timeout: 30000 }, async t => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'bat-summary-contract-'));
+  const runtime = new BackendRuntime();
+  t.after(async () => { await runtime.stop(); await rm(dataDir, { recursive: true, force: true }); });
+  const port = await availablePort();
+  assert.equal((await runtime.start({ python, repoRoot, dataDir, port })).ok, true);
+  expectFailure(await runtime.upgradeSummaries(), 'summary_upgrade_failed');
+  assert.deepEqual(await runtime.upgradeMedia(), { ok: true, value: { schema_version: 2 } });
+  const created = await runtime.createSession({ display_name: 'Synthetic summary contract', camera_ref: 'Synthetic camera' });
+  assert.equal(created.ok, true);
+  const id = created.value.id;
+  expectFailure(await runtime.startSummaries({ session_id: id, window_seconds: 30 }), 'summary_upgrade_required');
+  for (const input of [
+    { session_id: '../not-selected', window_seconds: 30 },
+    { session_id: id, window_seconds: 0 },
+    { session_id: id, window_seconds: 121 },
+    { session_id: id, window_seconds: 1.5 },
+    { session_id: id, window_seconds: '30' },
+    { session_id: id, window_seconds: NaN },
+    { session_id: id, window_seconds: 30, path: '/not-selected/synthetic.mp4' },
+    { session_id: id, window_seconds: 30, algorithm_version: 'unrecorded' },
+    { session_id: id },
+  ]) expectFailure(await runtime.startSummaries(input), 'invalid');
+  for (const invalidID of ['../not-selected', 'file:///not-selected/synthetic.png', 'https://example.invalid', 1]) {
+    for (const method of ['listSummaryRuns', 'summaryRun', 'cancelSummaries', 'summaryImage']) {
+      expectFailure(await runtime[method](invalidID), 'invalid');
+    }
+  }
+  const unauthorized = new BackendClient(port, 'deliberately-incorrect-synthetic-token');
+  expectFailure(await unauthorized.upgradeSummaries(), 'unauthorized');
+  expectFailure(await unauthorized.listSummaryRuns(id), 'unauthorized');
+  expectFailure(await unauthorized.startSummaries({ session_id: id, window_seconds: 30 }), 'unauthorized');
+  expectFailure(await unauthorized.summaryRun(id), 'unauthorized');
+  expectFailure(await unauthorized.cancelSummaries(id), 'unauthorized');
+  expectFailure(await unauthorized.summaryImage(id), 'unauthorized');
+  assert.equal((await runtime.getMedia(id)).value.schema_version, 2, 'Rejected requests must not upgrade storage');
+});
+
+test('summary PNG transport refuses oversized bodies, incorrect MIME and private error text', { timeout: 15000 }, async t => {
+  assert.equal(MAX_SUMMARY_BYTES, 4 * 1024 * 1024);
+  for (const scenario of ['declared-length', 'chunked', 'wrong-mime', 'missing-image']) {
+    await t.test(scenario, async () => {
+      const server = httpServer((_request, response) => {
+        if (scenario === 'missing-image') {
+          response.writeHead(409, { 'Content-Type': 'application/json' });
+          response.end(JSON.stringify({ detail: { code: 'summary_image_missing', message: '/private/synthetic/image.png' } }));
+        } else if (scenario === 'wrong-mime') {
+          response.writeHead(200, { 'Content-Type': 'text/plain' });
+          response.end('This is not a summary PNG');
+        } else {
+          response.writeHead(200, { 'Content-Type': 'image/png',
+            ...(scenario === 'declared-length' ? { 'Content-Length': MAX_SUMMARY_BYTES + 1 } : {}) });
+          response.end(Buffer.alloc(MAX_SUMMARY_BYTES + 1));
+        }
+      });
+      await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+      try {
+        const client = new BackendClient(server.address().port, 'synthetic-transport-test-token-only');
+        const result = await client.summaryImage('00000000-0000-4000-8000-000000000000');
+        expectFailure(result, scenario === 'missing-image' ? 'summary_image_missing' : scenario === 'wrong-mime' ? 'backend' : 'unavailable');
+        assert.doesNotMatch(result.error.message, /private|synthetic\/image|not a summary PNG/);
+      } finally { await new Promise(resolve => server.close(resolve)); }
+    });
+  }
+});
+
+test('preview and summary binary transport share one in-flight response reservation', { timeout: 10000 }, async () => {
+  for (const [firstMethod, blockedMethod] of [['summaryImage', 'previewContent'], ['previewContent', 'summaryImage']]) {
+    let received;
+    const arrived = new Promise(resolve => { received = resolve; });
+    let requests = 0;
+    const server = httpServer((_request, response) => { requests += 1; received(response); });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const client = new BackendClient(server.address().port, 'synthetic-transport-test-token-only');
+      const first = client[firstMethod]('00000000-0000-4000-8000-000000000000');
+      const response = await arrived;
+      expectFailure(await client[blockedMethod]('00000000-0000-4000-8000-000000000001'), 'preview_busy');
+      assert.equal(requests, 1);
+      response.writeHead(409, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ detail: { code: 'summary_not_ready' } }));
+      expectFailure(await first, 'summary_not_ready');
+    } finally { await new Promise(resolve => server.close(resolve)); }
+  }
+});
+
+test('real PyAV summaries and PNG evidence survive runtime restart after a media-to-summary upgrade', { timeout: 60000 }, async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'bat-summary-persistence-'));
+  const dataDir = path.join(directory, 'app-data');
+  const first = new BackendRuntime();
+  const reopened = new BackendRuntime();
+  t.after(async () => {
+    await Promise.all([first.stop(), reopened.stop()]);
+    await rm(directory, { recursive: true, force: true });
+  });
+  const generated = spawnSync(python, ['-m', 'backend.tests.summary_fixtures', path.join(directory, 'originals')],
+    { cwd: repoRoot, encoding: 'utf8', timeout: 15000 });
+  assert.equal(generated.status, 0, generated.stderr);
+  const source = JSON.parse(generated.stdout).quiet_9;
+  const original = await readFile(source);
+  assert.equal((await first.start({ python, repoRoot, dataDir })).ok, true);
+  assert.deepEqual(await first.upgradeMedia(), { ok: true, value: { schema_version: 2 } });
+  const created = await first.createSession({ display_name: 'Synthetic summary persistence', camera_ref: 'Synthetic camera' });
+  assert.equal(created.ok, true);
+  const sessionID = created.value.id;
+  const imported = await first.importSelectedMedia(sessionID, [source]);
+  assert.equal(imported.ok, true, JSON.stringify(imported));
+  assert.equal((await waitUntilTerminal(() => first.importStatus(imported.value.id), ['running'])).state, 'complete');
+  const before = await first.getMedia(sessionID);
+  assert.equal(before.ok, true);
+  assert.equal(before.value.schema_version, 2);
+  assert.equal(before.value.segments.length, 1);
+  assert.deepEqual(await first.upgradeSummaries(), { ok: true, value: { schema_version: 3 } });
+  assert.deepEqual(await first.upgradeSummaries(), { ok: true, value: { schema_version: 3 } });
+  const after = await first.getMedia(sessionID);
+  assert.deepEqual(after.value.segments, before.value.segments);
+  assert.equal(after.value.schema_version, 3);
+  const started = await first.startSummaries({ session_id: sessionID, window_seconds: 30 });
+  assert.equal(started.ok, true, JSON.stringify(started));
+  const run = await waitUntilTerminal(() => first.summaryRun(started.value.id), ['queued', 'running']);
+  assert.equal(run.state, 'complete', JSON.stringify(run));
+  assert.equal(run.counts.planned, 1);
+  assert.equal(run.counts.complete, 1);
+  assert.equal(run.windows.length, 1);
+  const window = run.windows[0];
+  assert.equal(window.status, 'complete');
+  assert.equal(window.stats.motion_pixels, 0, 'Quiet evidence remains an accessible complete window');
+  const content = await first.summaryImage(window.id);
+  assert.equal(content.ok, true, JSON.stringify(content));
+  const png = Buffer.from(content.value.bytes);
+  assert.deepEqual(png.subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  assert.equal(png.length, window.image.bytes);
+  assert.equal(createHash('sha256').update(png).digest('hex'), window.image.sha256);
+  assert.doesNotMatch(JSON.stringify(run), /source_path|image_path|bat-summary-persistence-/);
+
+  // The existing source-preview route must still work after schema 3 is selected.
+  const segment = after.value.segments[0];
+  const preview = await first.startPreview({ segment_id: segment.id, source_pts: segment.metadata.last_pts });
+  assert.equal(preview.ok, true, JSON.stringify(preview));
+  assert.equal((await waitUntilTerminal(() => first.previewStatus(preview.value.id), ['running'])).state, 'ready');
+  assert.equal((await first.previewContent(preview.value.id)).ok, true);
+  const firstPid = first.pid;
+  await first.stop();
+  expectExited(firstPid);
+  assert.equal((await reopened.start({ python, repoRoot, dataDir })).ok, true);
+  assert.deepEqual(await reopened.summaryRun(run.id), { ok: true, value: run });
+  const listed = await reopened.listSummaryRuns(sessionID);
+  assert.equal(listed.ok, true);
+  assert.equal(listed.value.length, 1);
+  assert.equal(listed.value[0].id, run.id);
+  assert.deepEqual(Buffer.from((await reopened.summaryImage(window.id)).value.bytes), png);
+  assert.deepEqual(await readFile(source), original, 'Import, processing and preview leave original bytes untouched');
+
+  await rm(path.join(dataDir, 'summaries', run.id, `${window.id}.png`));
+  const missing = await reopened.summaryImage(window.id);
+  expectFailure(missing, 'summary_image_missing');
+  assert.doesNotMatch(missing.error.message, /bat-summary-persistence-|\.png|source_path|image_path/);
+  const invalidated = await reopened.summaryRun(run.id);
+  assert.equal(invalidated.ok, true);
+  assert.equal(invalidated.value.windows[0].status, 'incomplete');
+  assert.equal(invalidated.value.windows[0].image, null);
+  assert.equal(invalidated.value.windows[0].error.code, 'summary_image_missing');
+  const reopenedPid = reopened.pid;
+  await reopened.stop();
+  expectExited(reopenedPid);
 });
 
 test('invalid startup configuration is rejected before launching a backend', { timeout: 15000 }, async t => {

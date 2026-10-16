@@ -1,6 +1,6 @@
 # Reuse and dependency audit
 
-Reviewed: 2026-10-15. Source: live default branch of [cameaci/Camera_Trap](https://github.com/cameaci/Camera_Trap) and upstream project documentation already in the [research register](../docs/02-source-register.md).
+Reviewed: 2026-10-16. Source: [cameaci/Camera_Trap](https://github.com/cameaci/Camera_Trap) and upstream project documentation already in the [research register](../docs/02-source-register.md). The immutable Slice 2A source revision and dependency artifacts are recorded below.
 
 ## Reuse policy
 
@@ -36,8 +36,9 @@ For each candidate record: exact path and licence, transitive dependencies, exte
 | Need | Selected primitive | Explicit scope | Rejected premature addition |
 | --- | --- | --- | --- |
 | Media inspection and preview | [FFmpeg / ffprobe](https://ffmpeg.org/) as versioned local executable | Codec probe, stream timestamps, bounded preview clips, optional orientation/deinterlace | Handwritten media parser, mandatory VLC bridge, giant full-recording transcodes |
-| Frame decoding with original PTS | [PyAV](https://github.com/PyAV-Org/PyAV) **candidate**, inspect [licence](https://github.com/PyAV-Org/PyAV/blob/master/LICENSE.txt) | Direct access to decoded frames, presentation timestamps and timebases if Windows package/licensing spike succeeds | Custom timestamp parsing and dual unsynchronised decode pipelines |
-| Pixel operations | [OpenCV](https://github.com/opencv/opencv) and NumPy | Grayscale frame differences/background, simple morphology, quality warnings | Custom optical-flow engine, early YOLO/torch |
+| Frame decoding with original PTS | [PyAV 19.0.1](https://github.com/PyAV-Org/PyAV), existing dependency | Sole source pixels/PTS path for import, preview and summaries; Linux synthetic validation does not establish Windows or redistribution readiness | Custom timestamp parsing and dual unsynchronised decode pipelines |
+| Pixel operations | [NumPy 2.4.2](https://github.com/numpy/numpy/tree/v2.4.2) | Signed grayscale differences, threshold/gain, temporal maxima and spatial max pooling | Custom Python pixel loops, OpenCV's additional codec stack, optical flow, YOLO/torch |
+| Summary PNG and labels | [Pillow 12.1.1](https://github.com/python-pillow/Pillow/tree/12.1.1) | Bounded two-panel PNG, standard text drawing and built-in bitmap font | Custom PNG encoder/font or operating-system font lookup |
 | Local API/schema validation | FastAPI with built-in Pydantic ecosystem | Small set of local routes and typed request/response data | GraphQL, API gateway, distributed queue |
 | Durable reviews | Python `sqlite3` | Transactions, constraints, schema version, small tables | Separate DB server, heavy migration stack now |
 | UI | React + TypeScript + Vite | 1 workspace, review panels, native file selection via Electron | Whole Camera_Trap frontend, maps, global state library or form stack by default |
@@ -47,6 +48,24 @@ For each candidate record: exact path and licence, transitive dependencies, exte
 ### Dependency and binary licence review
 
 Before introducing each dependency or bundling FFmpeg, record exact version, package/binary URL, code and binary licence, bundled codec configuration, network behavior and distribution terms. **FFmpeg licensing can differ by build and codecs. PyAV is published under a BSD-style licence, while its binary wheels may bundle FFmpeg with separate terms.** Verify exact versions and packaged binaries. Camera_Trap licence text does not cover independent new dependencies. Avoid shipping model weights in v1.
+
+### Slice 2A inspection and decision
+
+Camera_Trap was inspected at [`176451c272628f4f8e38633db747cb427d587072`](https://github.com/cameaci/Camera_Trap/tree/176451c272628f4f8e38633db747cb427d587072). Its [video iterator](https://github.com/cameaci/Camera_Trap/blob/176451c272628f4f8e38633db747cb427d587072/backend/app/ml/inference/video_iter.py), [best-frame selection](https://github.com/cameaci/Camera_Trap/blob/176451c272628f4f8e38633db747cb427d587072/backend/app/ml/best_frame.py), [scoring](https://github.com/cameaci/Camera_Trap/blob/176451c272628f4f8e38633db747cb427d587072/backend/app/ml/inference/scoring.py) and [filmstrip service](https://github.com/cameaci/Camera_Trap/blob/176451c272628f4f8e38633db747cb427d587072/backend/app/services/filmstrip_service.py) produce selected thumbnails using OpenCV/Pillow and frame indices. The filmstrip's `frame_number / frame_rate` time and best-effort skipped files cannot provide exact, complete PTS-window coverage. Its [output preview](https://github.com/cameaci/Camera_Trap/blob/176451c272628f4f8e38633db747cb427d587072/backend/app/ml/postprocessing_outputs/output_preview.py) counts classification-output placement; it is not a motion image generator. These remain **pattern-only** references. No Camera_Trap code was copied for Slice 2A; its MIT/WSP and Peter van Lunteren notices do not establish publication authority for a new copy.
+
+NumPy's versioned [ufunc primitives](https://github.com/numpy/numpy/blob/v2.4.2/numpy/_core/code_generators/ufunc_docstrings.py) and Pillow's standard image/text APIs implement the required pixel and artifact operations without a second decoder or custom native/image/font code. The generated-fixture spike compared consecutive and fixed-reference differences on the same weak-target/noise inputs and measured native NumPy against Python pixel loops. This supports two pinned dependencies rather than adding OpenCV or retaining slow bespoke loops; the [Slice 2A validation report](../docs/12-slice-2a-validation.md) records measurements and exact installed-wheel provenance. Runtime remains offline; installation is a development setup step, not an application download feature.
+
+Before coding, five roles challenged the design:
+
+| Role | Resulting constraint |
+| --- | --- |
+| IR computer-vision engineer | Preserve weak small changes before spatial max pooling; compare both simple baselines and retain noise/hotspot motion without bat-specific suppression. |
+| Ecological reviewer | Keep quiet, failed and quality-flagged windows visible; colored change pixels make no bat, count or absence claim. |
+| Desktop/QA engineer | Persist the plan before decoding; test exact PTS boundaries, restart, cancellation and worker-start failure while preserving import/preview. |
+| Security/licensing engineer | One reserved Linux worker, hard resource limits, managed UUID artifacts, capped ID-only transfer and explicit dependency/binary notice review. |
+| Maintainer | Keep stdlib SQLite and existing lifecycle patterns; use NumPy/Pillow primitives instead of another framework, decoder or custom font/encoder. |
+
+The development wheels have additional bundled-library terms. Their hashes, notices and font usage are recorded once in the [validation report](../docs/12-slice-2a-validation.md#dependency-artifacts-and-licences). Windows execution and binary redistribution clearance remain unverified; no dependency binary or generated media is committed.
 
 ## How to avoid writing redundant code
 

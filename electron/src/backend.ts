@@ -4,7 +4,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia } from './contracts';
+import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia, SummaryRequest, SummaryRun, SummaryDetail } from './contracts';
 
 const unavailable = (message = 'Backend unavailable. Reopen the app after checking Python, ffmpeg and ffprobe.') =>
   ({ ok: false, error: { code: 'unavailable', message } }) as const;
@@ -15,6 +15,12 @@ export const invalid = (message = 'Invalid application request.') => ({ ok: fals
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const exactKeys = (value: Record<string, unknown>, keys: string[]) => Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 const provenance = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0 && value.length <= 500;
+
+export const MAX_SUMMARY_BYTES = 4 * 1024 * 1024;
+export function isSummaryRequest(input: unknown): input is SummaryRequest {
+  return object(input) && exactKeys(input, ['session_id', 'window_seconds']) && isUUID(input.session_id) &&
+    typeof input.window_seconds === 'number' && Number.isInteger(input.window_seconds) && input.window_seconds >= 1 && input.window_seconds <= 120;
+}
 
 export const MAX_PREVIEW_BYTES = 8 * 1024 * 1024;
 export function isPreviewRequest(input: unknown): input is PreviewRequest {
@@ -43,6 +49,25 @@ export function isSaveMedia(input: unknown): input is SaveMedia {
 
 // Only known error codes cross the desktop boundary; arbitrary response text never does.
 const mediaErrors: Record<string, string> = {
+  summary_image_missing: 'The generated image is missing. Its original window remains in the manifest; generate a new run.',
+  summary_no_sources: 'Import original recordings before generating summaries.',
+  coverage_mismatch: 'Decoded source coverage differs from imported metadata. The run remains incomplete.',
+  image_unavailable: 'A derived image is missing or corrupt. Its window remains incomplete.',
+  incomplete_coverage: 'Some planned windows have no valid output. Inspect all coverage records.',
+  incomplete_run: 'Processing ended before this window completed. Its coverage record remains visible.',
+  summary_upgrade_failed: 'Summary storage needs an explicit upgrade from media schema version 2. The existing database was preserved.',
+  summary_upgrade_required: 'Use Upgrade summary storage before processing windows.',
+  summary_busy: 'A media operation is running. Wait for it or cancel it before starting another.',
+  summary_missing: 'This summary run or window is unavailable. Refresh the session.',
+  summary_not_ready: 'This window has no complete image. Its coverage record remains visible.',
+  summary_limits_unavailable: 'Summary resource limits are unavailable on this platform. Windows execution remains unverified.',
+  summary_limit: 'This run exceeds a time, frame, memory, image, source or disk limit. Incomplete windows remain visible.',
+  summary_failed: 'Summary processing failed. Inspect the coverage records and original recordings before retrying.',
+  summary_image_invalid: 'This derived image is missing or corrupt. Its window remains incomplete; start a new run to regenerate it.',
+  invalid_summary: 'Choose an imported session and an integer window duration from 1 to 120 seconds.',
+  unknown_end: 'The final frame duration is unknown. The open final interval remains incomplete.',
+  no_decoded_frames: 'No original frames were decoded in this planned interval. Coverage is incomplete.',
+  interrupted: 'Processing was interrupted. Completed windows are retained; remaining windows are incomplete.',
   schema_upgrade_required: 'Media storage needs an explicit upgrade. Use Upgrade media storage before importing.',
   schema_upgrade_failed: 'Media storage could not be upgraded. Close the app and check the local database before retrying.',
   session_missing: 'This session no longer exists. Refresh the session list.',
@@ -51,7 +76,7 @@ const mediaErrors: Record<string, string> = {
   invalid_sources: 'Choose readable local .MTS or .MP4 original files using the native picker.',
   invalid_timeline: 'Check segment order, continuity evidence and the optional UTC clock anchor.',
   duplicate_source: 'A selected source is already imported. Choose different original files.',
-  cancelled: 'Media operation cancelled. No partial output was kept.',
+  cancelled: 'Media operation cancelled. Inspect its status and any completed outputs before retrying.',
   missing_source: 'A source file is missing. Restore the selected original file and refresh media.',
   unreadable_metadata: 'Media metadata could not be read. Check the original file and supported format.',
   unsupported_codec: 'This media codec or container is unsupported. Choose a supported .MTS or .MP4 original.',
@@ -75,6 +100,7 @@ function mediaFailure(code: unknown) {
 }
 type ApiRoute = '/api/health' | '/api/sessions' | '/api/media/upgrade' | '/api/media/import' |
   `/api/sessions/${string}/media` | `/api/media/import/${string}` | `/api/media/import/${string}/cancel` |
+  '/api/summaries/upgrade' | '/api/summaries' | `/api/summaries/${string}` | `/api/summaries/${string}/cancel` | `/api/sessions/${string}/summary-runs` |
   '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
 
 /** Read only known, redacted startup codes from the Python process. */
@@ -159,7 +185,7 @@ export class BackendClient {
   getMedia(sessionID: string): Promise<ApiResult<MediaSession>> {
     return isUUID(sessionID) ? this.call(`/api/sessions/${sessionID}/media`) : Promise.resolve(invalid());
   }
-  upgradeMedia(): Promise<ApiResult<{ schema_version: 2 }>> { return this.call('/api/media/upgrade', 'POST'); }
+  upgradeMedia(): Promise<ApiResult<{ schema_version: 2 | 3 }>> { return this.call('/api/media/upgrade', 'POST'); }
   saveMedia(sessionID: string, input: SaveMedia): Promise<ApiResult<MediaSession>> {
     return isUUID(sessionID) && isSaveMedia(input) ? this.call(`/api/sessions/${sessionID}/media`, 'PUT', input) : Promise.resolve(invalid('Use only selected segment IDs, continuity evidence and an optional UTC clock anchor.'));
   }
@@ -194,28 +220,59 @@ export class BackendClient {
     if (result.ok && result.value.error) result.value.error = mediaFailure(result.value.error.code);
     return result;
   }
+  upgradeSummaries(): Promise<ApiResult<{ schema_version: 3 }>> { return this.call('/api/summaries/upgrade', 'POST'); }
+  async listSummaryRuns(sessionID: string): Promise<ApiResult<SummaryRun[]>> {
+    if (!isUUID(sessionID)) return invalid();
+    const result = await this.call<SummaryRun[]>(`/api/sessions/${sessionID}/summary-runs`);
+    if (result.ok) result.value.forEach(run => { if (run.error) run.error = mediaFailure(run.error.code); });
+    return result;
+  }
+  startSummaries(input: SummaryRequest): Promise<ApiResult<SummaryDetail>> {
+    return isSummaryRequest(input) ? this.summary('/api/summaries', 'POST', input) : Promise.resolve(invalid());
+  }
+  summaryRun(runID: string): Promise<ApiResult<SummaryDetail>> {
+    return isUUID(runID) ? this.summary(`/api/summaries/${runID}`) : Promise.resolve(invalid());
+  }
+  cancelSummaries(runID: string): Promise<ApiResult<SummaryDetail>> {
+    return isUUID(runID) ? this.summary(`/api/summaries/${runID}/cancel`, 'POST') : Promise.resolve(invalid());
+  }
+  private async summary(route: ApiRoute, method: 'GET' | 'POST' = 'GET', input?: unknown): Promise<ApiResult<SummaryDetail>> {
+    const result = await this.call<SummaryDetail>(route, method, input);
+    if (result.ok) {
+      if (result.value.error) result.value.error = mediaFailure(result.value.error.code);
+      result.value.windows.forEach(window => { if (window.error) window.error = mediaFailure(window.error.code); });
+    }
+    return result;
+  }
+  summaryImage(windowID: string): Promise<ApiResult<{ bytes: Uint8Array }>> {
+    return isUUID(windowID) ? this.binary(`/api/summary-windows/${windowID}/image`, 'image/png', MAX_SUMMARY_BYTES) : Promise.resolve(invalid());
+  }
+
   // A separate fixed binary route, capped before buffering or crossing IPC. No general HTTP bridge.
   previewContent(jobID: string): Promise<ApiResult<{ bytes: Uint8Array }>> {
     if (!isUUID(jobID)) return Promise.resolve(invalid());
+    return this.binary(`/api/media/preview/${jobID}/content`, 'video/webm', MAX_PREVIEW_BYTES);
+  }
+  private binary(path: string, mime: 'video/webm' | 'image/png', maxBytes: number): Promise<ApiResult<{ bytes: Uint8Array }>> {
     if (this.readingPreview) return Promise.resolve({ ok: false, error: mediaFailure('preview_busy') });
     this.readingPreview = true;
     return new Promise<ApiResult<{ bytes: Uint8Array }>>(resolve => {
       const req = request({ hostname: '127.0.0.1', port: this.port,
-        path: `/api/media/preview/${jobID}/content`, headers: { 'X-Bat-Token': this.token } }, res => {
+        path, headers: { 'X-Bat-Token': this.token } }, res => {
         const chunks: Buffer[] = [];
         let size = 0;
-        const limit = res.statusCode === 200 ? MAX_PREVIEW_BYTES : 4096;
+        const limit = res.statusCode === 200 ? maxBytes : 4096;
         if (Number(res.headers['content-length']) > limit) res.destroy(new Error('Response too large'));
         res.on('data', (chunk: Buffer) => {
           size += chunk.length;
           if (size > limit) res.destroy(new Error('Response too large'));
           else chunks.push(chunk);
         });
-        res.on('error', () => resolve(unavailable('Preview content could not be read within its byte or time limit.')));
+        res.on('error', () => resolve(unavailable('Derived content could not be read within its byte or time limit.')));
         res.on('end', () => {
           if (res.statusCode === 401) {
             resolve({ ok: false, error: { code: 'unauthorized', message: 'Backend token rejected. Close and reopen the app.' } });
-          } else if (res.statusCode === 200 && size > 0 && res.headers['content-type'] === 'video/webm') {
+          } else if (res.statusCode === 200 && size > 0 && res.headers['content-type'] === mime) {
             resolve({ ok: true, value: { bytes: new Uint8Array(Buffer.concat(chunks, size)) } });
           } else {
             let failure = mediaFailure(undefined);
@@ -224,7 +281,7 @@ export class BackendClient {
           }
         });
       });
-      const deadline = setTimeout(() => req.destroy(new Error('Preview read timed out')), 3000);
+      const deadline = setTimeout(() => req.destroy(new Error('Derived content read timed out')), 3000);
       req.on('close', () => clearTimeout(deadline));
       req.on('error', () => resolve(unavailable()));
       req.end();
@@ -341,7 +398,7 @@ export class BackendRuntime {
     return health.ok && this.client ? operation(this.client) : health as ApiResult<T>;
   }
   getMedia(sessionID: string): Promise<ApiResult<MediaSession>> { return this.ready(client => client.getMedia(sessionID)); }
-  upgradeMedia(): Promise<ApiResult<{ schema_version: 2 }>> { return this.ready(client => client.upgradeMedia()); }
+  upgradeMedia(): Promise<ApiResult<{ schema_version: 2 | 3 }>> { return this.ready(client => client.upgradeMedia()); }
   saveMedia(sessionID: string, input: SaveMedia): Promise<ApiResult<MediaSession>> { return this.ready(client => client.saveMedia(sessionID, input)); }
   importSelectedMedia(sessionID: string, paths: string[]): Promise<ApiResult<ImportJob>> { return this.ready(client => client.importSelectedMedia(sessionID, paths)); }
   importStatus(jobID: string): Promise<ApiResult<ImportJob>> { return this.ready(client => client.importStatus(jobID)); }
@@ -350,6 +407,13 @@ export class BackendRuntime {
   previewStatus(jobID: string): Promise<ApiResult<PreviewJob>> { return this.ready(client => client.previewStatus(jobID)); }
   cancelPreview(jobID: string): Promise<ApiResult<PreviewJob>> { return this.ready(client => client.cancelPreview(jobID)); }
   previewContent(jobID: string): Promise<ApiResult<{ bytes: Uint8Array }>> { return this.ready(client => client.previewContent(jobID)); }
+
+  upgradeSummaries(): Promise<ApiResult<{ schema_version: 3 }>> { return this.ready(client => client.upgradeSummaries()); }
+  listSummaryRuns(sessionID: string): Promise<ApiResult<SummaryRun[]>> { return this.ready(client => client.listSummaryRuns(sessionID)); }
+  startSummaries(input: SummaryRequest): Promise<ApiResult<SummaryDetail>> { return this.ready(client => client.startSummaries(input)); }
+  summaryRun(runID: string): Promise<ApiResult<SummaryDetail>> { return this.ready(client => client.summaryRun(runID)); }
+  cancelSummaries(runID: string): Promise<ApiResult<SummaryDetail>> { return this.ready(client => client.cancelSummaries(runID)); }
+  summaryImage(windowID: string): Promise<ApiResult<{ bytes: Uint8Array }>> { return this.ready(client => client.summaryImage(windowID)); }
 
   stop(): Promise<void> {
     this.stopped = true;
