@@ -175,12 +175,38 @@ def get_run(db_path: Path, run_id: str) -> dict | None:
 
 
 def list_runs(db_path: Path, session_id: str) -> list[dict]:
+    """List bounded run headers in one query; never deserialize their windows."""
     if store.schema_version(db_path) != store.SUMMARY_SCHEMA_VERSION:
         return []
     with closing(store.connect(db_path)) as connection:
-        ids = [row[0] for row in connection.execute(
-            "SELECT id FROM processing_run WHERE session_id=? ORDER BY rowid DESC", (session_id,)).fetchall()]
-    return [_public_run(result) for key in ids if (result := private_run(db_path, key)) is not None]
+        rows = connection.execute(
+            """SELECT r.id, r.session_id, r.state, r.algorithm_version,
+                      r.parameters_json, r.parameter_hash, r.started_at_utc,
+                      r.finished_at_utc, r.error_code, r.expected_windows,
+                      COUNT(CASE WHEN w.status='planned' THEN 1 END) AS pending_count,
+                      COUNT(CASE WHEN w.status='running' THEN 1 END) AS running_count,
+                      COUNT(CASE WHEN w.status='complete' THEN 1 END) AS complete_count,
+                      COUNT(CASE WHEN w.status='incomplete' THEN 1 END) AS incomplete_count,
+                      COUNT(CASE WHEN w.status='failed' THEN 1 END) AS failed_count
+               FROM processing_run AS r
+               LEFT JOIN summary_window AS w ON w.run_id=r.id
+               WHERE r.session_id=?
+               GROUP BY r.id
+               ORDER BY r.rowid DESC""", (session_id,)
+        ).fetchall()
+    return [{
+        "id": row["id"], "session_id": row["session_id"],
+        "state": row["state"], "algorithm_version": row["algorithm_version"],
+        "parameters": json.loads(row["parameters_json"]),
+        "parameter_hash": row["parameter_hash"],
+        "started_at_utc": row["started_at_utc"], "finished_at_utc": row["finished_at_utc"],
+        "error": _error(row["error_code"]),
+        "counts": {
+            "planned": row["expected_windows"], "pending": row["pending_count"],
+            "running": row["running_count"], "complete": row["complete_count"],
+            "incomplete": row["incomplete_count"], "failed": row["failed_count"],
+        },
+    } for row in rows]
 
 
 def set_running(db_path: Path, run_id: str) -> None:
