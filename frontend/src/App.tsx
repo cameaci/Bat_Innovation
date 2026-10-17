@@ -104,9 +104,9 @@ export function App() {
   return (
     <main>
       <header>
-        <p className="eyebrow">Local original-media inspection</p>
+        <p className="eyebrow">Local source and motion evidence</p>
         <h1>Bat Innovation</h1>
-        <p>Inspect original .MTS / .MP4 segments and bounded source previews locally. Motion summaries and ecological review are not implemented yet.</p>
+        <p>Inspect original .MTS / .MP4 segments, exact source previews and complete motion-summary windows locally. Derived motion evidence requires human verification.</p>
       </header>
 
       <section aria-labelledby="backend-heading" className="status-panel">

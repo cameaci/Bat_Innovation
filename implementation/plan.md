@@ -1,6 +1,6 @@
 # Implementation plan
 
-Reviewed 2026-10-16. Status: **Slice 0, Slice 1A import and the Slice 1B preview candidate verified on synthetic Linux media. Slice 1B awaits independent review; Windows and ownership checks remain open**. This is a dependency-ordered sequence, not a promise of dates. The application is built in **small vertical slices**, each delivering observable behavior and tests. No workarounds or speculative infrastructure.
+Reviewed 2026-10-16. Status: **Slice 0, Slice 1A and Slice 1B are merged. Slice 2A is a synthetic Linux review candidate; Windows and ownership checks remain open**. This is a dependency-ordered sequence, not a promise of dates. The application is built in **small vertical slices**, each delivering observable behavior and tests. No workarounds or speculative infrastructure.
 
 ## Principles of execution
 
@@ -40,7 +40,7 @@ Reviewed 2026-10-16. Status: **Slice 0, Slice 1A import and the Slice 1B preview
 
 **Review revalidation (2026-10-16):** At `574c340`, all four required suites passed locally after the PR #4 corrections: 37 Python tests, strict TypeScript, 16 Node tests and 5 Electron E2E tests. Global source uniqueness, unreadable-source classification, unsaved timeline protection and unknown final-frame duration are covered. No further application fix was needed; GitHub Actions was not used. This preceded the independent review and merge of PR #4; Slice 1B progress is recorded below.
 
-**Slice 1B progress (2026-10-16):** PR #4 subsequently merged as `a6fe013`; [issue #5](https://github.com/cameaci/Bat_Innovation/issues/5) now adds bounded source previews on that baseline. The pre-code Electron proof rejected native MPEG-2 MTS playback and an inaccurate native irregular-MP4 seek; 14 PyAV-derived VP9/WebM clips passed all 59 visible-marker checks, including a later keyframe and final single frames. One PyAV source decode/PTS path supplies both the display frames and exact source mapping. The player uses that mapping rather than a browser timer/FPS conversion. Local validation passed 76 Python tests, strict TypeScript, 21 Node checks and 9 Electron E2E tests. No hosted CI was used. This source-only candidate remains unmerged for independent review; Slice 2 has not started. See the [research log](../docs/07-research-log.md) for limits, commands and measured evidence.
+**Slice 1B progress (2026-10-16):** PR #4 subsequently merged as `a6fe013`; [issue #5](https://github.com/cameaci/Bat_Innovation/issues/5) now adds bounded source previews on that baseline. The pre-code Electron proof rejected native MPEG-2 MTS playback and an inaccurate native irregular-MP4 seek; 14 PyAV-derived VP9/WebM clips passed all 59 visible-marker checks, including a later keyframe and final single frames. One PyAV source decode/PTS path supplies both the display frames and exact source mapping. The player uses that mapping rather than a browser timer/FPS conversion. Local validation passed 76 Python tests, strict TypeScript, 21 Node checks and 9 Electron E2E tests. No hosted CI was used. PR #6 was subsequently independently reviewed and merged as `bdd52222b0763cebb843f4cc7f8625b0a260828c`, including the preview thread-start cleanup regression. Slice 2A starts from that merged baseline. See the [research log](../docs/07-research-log.md) for limits, commands and measured evidence.
 
 **Goal:** accurate original-video seeking and segmented session import, not a decorative UI.
 
@@ -68,15 +68,17 @@ Reviewed 2026-10-16. Status: **Slice 0, Slice 1A import and the Slice 1B preview
 
 ## Slice 2 - Complete IR motion-summary baseline
 
+**Slice 2A progress (2026-10-16):** [Issue #7](https://github.com/cameaci/Bat_Innovation/issues/7) adds an explicit schema 2 -> 3 upgrade, exact per-segment window plan, streaming consecutive grayscale differences, atomic two-panel PNGs, durable interruption/cancellation records and a minimal all-window inspection list. The [validation report](../docs/12-slice-2a-validation.md) records synthetic coverage, weak-motion evidence, actual local tests and limits. This increment awaits independent review; it does not complete ecological quality hardening, Windows execution or Slice 3.
+
 **Goal:** produce a reviewer-ready image for every source-time window.
 
-- [ ] Build a streaming 30-second (configurable) window iterator per segment; emit final partial windows; prove no dropped or overlapping source coverage.
-- [ ] Implement and compare the simplest motion-mask candidates on generated weak/fast moving targets and known noise. Start with frame differencing or a simple OpenCV background method, record parameters, and choose on validation evidence.
-- [ ] Build a two-panel motion summary: reference image and motion evidence with a documented early/middle/late colour legend.
-- [ ] Flag rather than silently erase significant camera shake/re-aiming, day-to-IR switching, sharp illumination changes and unusable image/codec conditions. Reset background only as an explicit logged operation.
+- [x] Build a streaming 30-second (configurable) window iterator per segment; emit final partial windows; prove no dropped or overlapping source coverage.
+- [x] Implement and compare the simplest motion-mask candidates on generated weak/fast moving targets and known noise. Start with frame differencing or a simple OpenCV background method, record parameters, and choose on validation evidence.
+- [x] Build a two-panel motion summary: reference image and motion evidence with a documented early/middle/late colour legend.
+- [x] Flag rather than silently erase significant camera shake/re-aiming, day-to-IR switching, sharp illumination changes and unusable image/codec conditions. Reset background only as an explicit logged operation.
 - [ ] Support per-camera exclusion masks only when configured and labelled; no secret hard-coded HUD masking or global insect deletion.
-- [ ] Store `processing_run` parameters and the complete `summary_window` manifest in SQLite; write images atomically. Interrupted processing is marked incomplete and can be safely restarted without duplicate windows.
-- [ ] Provide progress and a reproducible processing error record with segment and window identity.
+- [x] Store `processing_run` parameters and the complete `summary_window` manifest in SQLite; write images atomically. Interrupted processing is marked incomplete and can be safely restarted without duplicate windows.
+- [x] Provide progress and a reproducible processing error record with segment and window identity.
 
 **Exit:** every valid window produces exactly one summary or an explicitly failed record. Given a two-hour continuous recording and 30-second windows, expect 240 coverage records, not necessarily 240 successfully rendered images when errors occur. The UI cannot claim complete if any planned window is missing.
 

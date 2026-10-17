@@ -1,0 +1,227 @@
+import { useEffect, useRef, useState } from 'react';
+import type { MediaSegment, Rational, SummaryDetail, SummaryRun, SummaryWindow } from '../../electron/src/contracts';
+import { getAPI } from './api';
+
+const unavailable = 'The local backend is unavailable. Summary status could not be verified; retry after checking the backend.';
+const activeRun = (run: SummaryRun | null) => run?.state === 'queued' || run?.state === 'running';
+const rational = (value: Rational | null | undefined) => value ? `${value.num}/${value.den}` : 'Unknown';
+const interval = (start: Rational, end: Rational | null) => `[${rational(start)}, ${rational(end)})`;
+
+const flagMeaning: Record<string, string> = {
+  unknown_end_unassessable: 'The final source-time endpoint is unknown, so time-coloured motion evidence cannot be assessed.',
+  framewide_change: 'Change covers a large part of the frame. Check camera movement, lighting and artefacts in the original.',
+  brightness_transition: 'A large brightness change may reflect IR switching or illumination. Evidence was retained.',
+  declared_timestamp_gap: 'Decoded frame durations leave a timestamp gap. The interval does not establish continuous imagery.',
+  gap_examples_truncated: 'Only bounded gap examples are stored; the total gap count remains visible.',
+  source_speed_unverified: 'Original recording speed has not been verified.',
+  derived_grayscale_evidence: 'Grayscale codec conversion can affect weak changes and retain compression noise.',
+  rotation_not_applied: 'Source rotation was not applied.',
+  rotation_unverified: 'Source rotation is unknown.',
+  interlaced_not_deinterlaced: 'Interlaced content was not deinterlaced.',
+  field_order_unverified: 'Interlace field order is unknown.',
+  insufficient_comparison_frames: 'There are too few frames to assess motion in this window.',
+};
+
+function evidence(window: SummaryWindow): string {
+  if (window.status !== 'complete') return 'Motion evidence unavailable or incomplete.';
+  if ((window.stats.comparison_count ?? 0) === 0) return 'No frame comparison available; motion cannot be assessed.';
+  return window.stats.motion_pixels === 0 ? 'No motion evidence above threshold.' : 'Motion evidence above threshold.';
+}
+
+export function SummaryWindows({ sessionID, segments, disabled, onBusyChange, onPreview }: {
+  sessionID: string;
+  segments: MediaSegment[];
+  disabled: boolean;
+  onBusyChange: (busy: boolean) => void;
+  onPreview: (segment: MediaSegment, sourcePTS: string) => void;
+}) {
+  const [runs, setRuns] = useState<SummaryRun[]>([]);
+  const [runID, setRunID] = useState('');
+  const [detail, setDetail] = useState<SummaryDetail | null>(null);
+  const [selectedID, setSelectedID] = useState('');
+  const [action, setAction] = useState<'loading' | 'starting' | 'cancelling' | null>('loading');
+  const [cancelling, setCancelling] = useState(false);
+  const [refresh, setRefresh] = useState(0);
+  const [verified, setVerified] = useState(false);
+  const [error, setError] = useState('');
+  const [imageURL, setImageURL] = useState<string | null>(null);
+  const [imageError, setImageError] = useState('');
+  const inspectionHeading = useRef<HTMLHeadingElement>(null);
+  const processing = activeRun(detail);
+  const checking = runID !== '' && detail === null;
+  const busy = action !== null || processing || cancelling || checking;
+  const selected = detail?.windows.find(window => window.id === selectedID);
+
+  useEffect(() => {
+    onBusyChange(busy);
+    return () => onBusyChange(false);
+  }, [busy, onBusyChange]);
+
+  async function loadRuns() {
+    setAction('loading'); setError(''); setVerified(false);
+    try {
+      const result = await getAPI()?.listSummaryRuns(sessionID);
+      if (!result?.ok) setError(result?.error.message ?? unavailable);
+      else {
+        setRuns(result.value);
+        setRunID(current => result.value.find(activeRun)?.id ?? (result.value.some(run => run.id === current) ? current : result.value[0]?.id ?? ''));
+        setRefresh(current => current + 1);
+      }
+    } catch { setError(unavailable); }
+    finally { setAction(null); }
+  }
+
+  useEffect(() => { void loadRuns(); }, [sessionID]);
+
+  // Even a completed run is revalidated so a stale original cannot leave an image displayed.
+  useEffect(() => {
+    setVerified(false); setDetail(null);
+    if (!runID) return;
+    let current = true;
+    let timer: ReturnType<typeof setTimeout>;
+    async function poll() {
+      try {
+        const result = await getAPI()?.summaryRun(runID);
+        if (!current) return;
+        if (!result?.ok) { setError(result?.error.message ?? unavailable); setVerified(false); }
+        else if (result.value.session_id !== sessionID || result.value.id !== runID) {
+          setError('The summary run does not match this session. Refresh summary runs.'); setVerified(false);
+        } else {
+          const value = result.value;
+          setDetail(value); setVerified(true); setError('');
+          setRuns(previous => [value, ...previous.filter(run => run.id !== value.id)]);
+          setSelectedID(previous => value.windows.some(window => window.id === previous) ? previous : value.windows[0]?.id ?? '');
+          if (!activeRun(value)) setCancelling(false);
+        }
+      } catch { if (current) { setError(unavailable); setVerified(false); } }
+      if (current) timer = setTimeout(() => void poll(), 1000);
+    }
+    void poll();
+    return () => { current = false; clearTimeout(timer); };
+  }, [runID, sessionID, refresh]);
+
+  // Only the selected image is transferred and retained. The backend checks its checksum and original source.
+  useEffect(() => {
+    setImageURL(null); setImageError('');
+    if (!verified || selected?.status !== 'complete' || !selected.image || (selected.source_state && selected.source_state !== 'ready')) return;
+    let current = true;
+    let url: string | undefined;
+    const id = selected.id;
+    async function loadImage() {
+      try {
+        const result = await getAPI()?.summaryImage(id);
+        if (!current) return;
+        if (!result?.ok) { setImageError(result?.error.message ?? unavailable); return; }
+        const bytes = new Uint8Array(result.value.bytes);
+        if (bytes.byteLength < 1 || bytes.byteLength > 4 * 1024 * 1024) { setImageError('The summary image is empty or exceeds its 4 MiB limit.'); return; }
+        url = URL.createObjectURL(new Blob([bytes.buffer], { type: 'image/png' }));
+        setImageURL(url);
+      } catch { if (current) setImageError(unavailable); }
+    }
+    void loadImage();
+    return () => { current = false; if (url) URL.revokeObjectURL(url); };
+  }, [selected?.id, selected?.image?.sha256, selected?.status, selected?.source_state, verified, refresh]);
+
+  async function start() {
+    if (disabled || busy) return;
+    setAction('starting'); setError(''); setVerified(false);
+    try {
+      const result = await getAPI()?.startSummaries({ session_id: sessionID, window_seconds: 30 });
+      if (!result?.ok) setError(result?.error.message ?? unavailable);
+      else {
+        setRuns(previous => [result.value, ...previous.filter(run => run.id !== result.value.id)]);
+        setRunID(result.value.id); setDetail(result.value); setSelectedID('');
+      }
+    } catch { setError(unavailable); }
+    finally { setAction(null); }
+  }
+
+  async function cancel() {
+    if (!detail || !processing || action !== null) return;
+    setCancelling(true); setAction('cancelling'); setError('');
+    try {
+      const result = await getAPI()?.cancelSummaries(detail.id);
+      if (!result?.ok) setError(result?.error.message ?? unavailable);
+      else { setDetail(result.value); if (!activeRun(result.value)) setCancelling(false); }
+    } catch { setError(unavailable); }
+    finally { setAction(null); }
+  }
+
+  function inspect(id: string) {
+    setSelectedID(id);
+    requestAnimationFrame(() => {
+      inspectionHeading.current?.focus();
+      inspectionHeading.current?.scrollIntoView({ block: 'start' });
+    });
+  }
+
+  function preview(window: SummaryWindow) {
+    const segment = segments.find(value => value.id === window.segment_id);
+    if (!disabled && !busy && verified && segment?.source_state === 'ready' && window.preview_pts !== null && (!window.source_state || window.source_state === 'ready')) onPreview(segment, window.preview_pts);
+  }
+
+  return <section className="summary-windows" aria-labelledby="summary-heading" aria-busy={action !== null}>
+    <h2 id="summary-heading">Motion summary windows</h2>
+    <p className="detail">Every planned interval remains listed, including quiet, quality-flagged, failed and incomplete windows. A summary is derived motion evidence, not a bat classification or proof of absence. Check the original recording.</p>
+    <div className="media-actions">
+      <button type="button" onClick={() => void start()} disabled={disabled || busy || segments.length === 0}>Generate motion summaries</button>
+      <button type="button" onClick={() => void loadRuns()} disabled={disabled || busy}>Refresh summary runs</button>
+      {processing && <button type="button" onClick={() => void cancel()} disabled={action !== null || cancelling}>{cancelling ? 'Cancellation in progress...' : 'Cancel summary run'}</button>}
+    </div>
+    <p className="detail">New runs use 30-second per-segment windows. Each rerun has its own manifest and keeps prior output traceability. Segments are never joined.</p>
+    {error && <div className="error" role="alert"><strong>Summary operation failed</strong><p>{error}</p></div>}
+    {action === 'loading' && <p role="status">Loading summary runs...</p>}
+    {action === 'starting' && <p role="status">Planning all source windows and starting processing...</p>}
+    {runs.length === 0 && action === null && <p>No summary runs saved.</p>}
+    {runs.length > 0 && <><label htmlFor="summary-run">Processing run</label><select id="summary-run" value={runID} disabled={disabled || busy} onChange={event => { setRunID(event.target.value); setSelectedID(''); }}>
+      {runs.map(run => <option key={run.id} value={run.id}>{run.started_at_utc} · {run.state} · {run.id}</option>)}
+    </select></>}
+    {detail && <>
+      <p role="status">Run {detail.state}: {detail.counts.complete}/{detail.counts.planned} windows complete; {detail.counts.failed} failed; {detail.counts.incomplete} incomplete; {detail.counts.pending} pending; {detail.counts.running} running.{cancelling && ' Cancellation requested; waiting for resource cleanup.'}</p>
+      {detail.error && <p className="source-warning" role="alert">{detail.error.code}: {detail.error.message}</p>}
+      <details className="summary-provenance"><summary>Processing provenance and parameters</summary><dl className="media-timing">
+        <dt>Run ID</dt><dd>{detail.id}</dd>
+        <dt>Algorithm</dt><dd>{detail.algorithm_version}</dd>
+        <dt>Parameter SHA256</dt><dd className="source-hash">{detail.parameter_hash}</dd>
+        <dt>Started / finished (UTC)</dt><dd>{detail.started_at_utc} / {detail.finished_at_utc ?? 'Not finished'}</dd>
+      </dl><pre>{JSON.stringify(detail.parameters, null, 2)}</pre></details>
+      <p className="detail">Intervals below are exact half-open [start, end) values. Rational seconds and PTS are separate from an optional saved clock anchor. Timestamp gaps do not prove recorded imagery between frames.</p>
+      <ol className="summary-list" aria-label="All planned windows">{detail.windows.map(window => {
+        const segment = segments.find(value => value.id === window.segment_id);
+        const sourceReady = segment?.source_state === 'ready' && (!window.source_state || window.source_state === 'ready');
+        return <li key={window.id}><article aria-label={`Window ${window.index + 1}: ${segment?.metadata.filename ?? window.segment_id}`}>
+          <h3>Window {window.index + 1} · {segment?.metadata.filename ?? window.segment_id}</h3>
+          <p>Processing: <strong>{window.status}</strong> · Segment elapsed seconds: {interval(window.interval.elapsed_start, window.interval.elapsed_end)}</p>
+          <p>{evidence(window)}</p>
+          {window.flags.length > 0 && <ul className="source-warning" aria-label="Window quality flags">{window.flags.map(flag => <li key={flag}>{flag}: {flagMeaning[flag] ?? 'Inspect the original recording.'}</li>)}</ul>}
+          {window.error && <p className="source-warning">{window.error.code}: {window.error.message}</p>}
+          {window.source_state && window.source_state !== 'ready' && <p className="source-warning">Original source state: {window.source_state}. Derived image and source preview are unavailable.</p>}
+          <div className="media-actions"><button type="button" aria-pressed={selectedID === window.id} onClick={() => inspect(window.id)}>Inspect summary</button><button type="button" disabled={disabled || busy || !verified || !sourceReady || window.preview_pts === null} onClick={() => preview(window)}>Preview window source</button></div>
+        </article></li>;
+      })}</ol>
+      {detail.windows.length !== detail.counts.planned && <p role="alert" className="source-warning">The visible manifest count does not match the planned count. This run cannot establish complete source coverage.</p>}
+    </>}
+    {selected && <div className="summary-inspection" aria-label="Selected summary window">
+      <h3 ref={inspectionHeading} tabIndex={-1}>Inspect window {selected.index + 1}</h3>
+      <p className="detail">Left: source reference/context. Right: motion evidence. Cyan = early third, yellow = middle third, magenta = late third of this window's source-time interval. Overlapping evidence combines colours. These colours do not identify animals.</p>
+      {imageURL ? <img src={imageURL} alt={`Reference and motion evidence for window ${selected.index + 1}`} onError={() => { URL.revokeObjectURL(imageURL); setImageURL(null); setImageError('The generated summary image could not be displayed. Refresh summary runs and retry.'); }} /> : <p>{imageError ? 'Summary image unavailable.' : !verified ? 'Source validation is unavailable; no image is displayed.' : selected.status !== 'complete' || !selected.image ? 'No complete image exists for this window.' : selected.source_state && selected.source_state !== 'ready' ? 'The original source is unavailable or changed; no derived image is displayed.' : 'Loading summary image...'}</p>}
+      {imageError && <p role="alert" className="source-warning">{imageError}</p>}
+      <dl className="media-timing">
+        <dt>Window / segment ID</dt><dd>{selected.id} / {selected.segment_id}</dd>
+        <dt>Source PTS interval</dt><dd>{interval(selected.interval.start_pts, selected.interval.end_pts)}</dd>
+        <dt>Source timebase (seconds)</dt><dd>{rational(selected.time_base)}</dd>
+        <dt>Source time interval (seconds)</dt><dd>{interval(selected.interval.start_time, selected.interval.end_time)}</dd>
+        <dt>Segment elapsed interval (seconds)</dt><dd>{interval(selected.interval.elapsed_start, selected.interval.elapsed_end)}</dd>
+        <dt>Decoded first / last PTS</dt><dd>{selected.stats.first_pts ?? 'Unknown'} / {selected.stats.last_pts ?? 'Unknown'}</dd>
+        <dt>Decoded frames / comparisons</dt><dd>{selected.stats.frame_count ?? 'Unavailable'} / {selected.stats.comparison_count ?? 'Unavailable'}</dd>
+        <dt>Decoded PTS SHA256</dt><dd className="source-hash">{selected.stats.pts_digest ?? 'Unavailable'}</dd>
+        <dt>Source SHA256</dt><dd className="source-hash">{selected.source_sha256}</dd>
+        <dt>Image SHA256 / bytes</dt><dd className="source-hash">{selected.image ? `${selected.image.sha256} / ${selected.image.bytes}` : 'Unavailable'}</dd>
+        <dt>Motion pixels / early, middle, late</dt><dd>{selected.stats.motion_pixels ?? 'Unavailable'} / {selected.stats.phase_pixels?.join(', ') ?? 'Unavailable'}</dd>
+        <dt>Timestamp gaps / maximum spacing (seconds)</dt><dd>{selected.stats.gap_count ?? 'Unavailable'} / {rational(selected.stats.max_spacing)}</dd>
+        <dt>Preview source PTS</dt><dd>{selected.preview_pts ?? 'Unavailable'}</dd>
+      </dl>
+      {(selected.stats.gaps?.length ?? 0) > 0 && <details><summary>Timestamp gap examples ({selected.stats.gaps?.length} shown; {selected.stats.gap_examples_recorded ?? selected.stats.gaps?.length} stored; {selected.stats.gap_count} total)</summary><ul>{selected.stats.gaps?.map((gap, index) => <li key={index}>{interval(gap.start, gap.end)} source seconds</li>)}</ul></details>}
+    </div>}
+  </section>;
+}

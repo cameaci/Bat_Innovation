@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import type { ApiResult, BatAPI, Continuity, ImportJob, MediaMetadata, MediaSegment, MediaSession, Rational, RecordingSession, SaveMedia } from '../../electron/src/contracts';
 import { getAPI } from './api';
 import { SourcePreview } from './SourcePreview';
+import { SummaryWindows } from './SummaryWindows';
 
 const unavailable = 'The local backend is unavailable. Retry, or close and reopen the desktop app.';
 const rational = (value: Rational | null) => value ? `${value.num}/${value.den}` : 'Unknown';
@@ -36,9 +37,10 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [selectedPreview, setSelectedPreview] = useState<MediaSegment | null>(null);
+  const [selectedPreview, setSelectedPreview] = useState<{ segment: MediaSegment; sourcePTS: string } | null>(null);
+  const [summaryBusy, setSummaryBusy] = useState(false);
   const importing = job?.state === 'running';
-  const disabled = busy !== null || importing || selectedPreview !== null;
+  const disabled = busy !== null || importing || selectedPreview !== null || summaryBusy;
 
   useEffect(() => {
     onBusyChange?.(disabled || dirty);
@@ -117,6 +119,16 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
     setBusy(null);
   }
 
+  async function upgradeSummaries() {
+    if (dirty || disabled) return;
+    setBusy('upgrade-summary'); setError(''); setNotice('');
+    if (await request(api => api.upgradeSummaries())) {
+      const value = await request(api => api.getMedia(session.id));
+      if (value) { replace(value); setNotice('Summary storage upgraded to schema 3. Existing sessions and source metadata are retained.'); }
+    }
+    setBusy(null);
+  }
+
   async function choose() {
     if (dirty) { setError('Save or discard timeline edits before importing.'); return; }
     setBusy('picker'); setError(''); setNotice('');
@@ -153,7 +165,7 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
   }
 
   function closePreview() {
-    const id = selectedPreview?.id;
+    const id = selectedPreview?.segment.id;
     setSelectedPreview(null);
     if (id) requestAnimationFrame(() => {
       const row = document.getElementById(`segment-${id}`);
@@ -190,7 +202,7 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
     <p className="detail">Inspect original MP4 or MTS segments. Source timestamps and exact rational seconds are authoritative. Original-speed provenance is unverified.</p>
     <div className="media-actions">
       <button type="button" onClick={() => void refresh()} disabled={disabled || dirty}>Refresh media</button>
-      {media?.schema_version === 2 && <button type="button" onClick={() => void choose()} disabled={disabled || dirty}>Choose original videos</button>}
+      {(media?.schema_version ?? 0) >= 2 && <button type="button" onClick={() => void choose()} disabled={disabled || dirty}>Choose original videos</button>}
     </div>
     {error && <div className="error" role="alert"><strong>Media operation failed</strong><p>{error}</p></div>}
     {notice && <p className="notice" role="status">{notice}</p>}
@@ -203,7 +215,7 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
       <p role="status">Import {job.state}: {job.phase}{job.filename && ` · ${job.filename}`} · {job.files_done}/{job.files_total} files{job.phase === 'hashing' ? ` · ${job.progress_value} bytes hashed` : job.phase === 'decoding' ? ` · ${job.progress_value} frames decoded` : ''}</p>
       {importing && <button type="button" onClick={() => void cancel()} disabled={busy !== null}>{busy === 'cancel' ? 'Cancelling...' : 'Cancel import'}</button>}
     </div>}
-    {media?.schema_version === 2 && <form className="media-form" onSubmit={event => void save(event)}>
+    {media && media.schema_version >= 2 && <form className="media-form" onSubmit={event => void save(event)}>
       <p className="detail">Continuity describes the relationship to the previous segment. Filenames and file times do not prove continuity. No global continuous timeline is inferred.</p>
       {segments.length === 0 ? <p>No source segments imported.</p> : <ol className="segment-list">{segments.map((segment, index) => <li key={segment.id}>
         <article id={`segment-${segment.id}`} tabIndex={-1} aria-label={`Segment ${index + 1}: ${segment.metadata.filename}`}>
@@ -211,7 +223,7 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
           <p className="detail">{segment.source_state === 'ready' ? 'Source identity unchanged since import.' : `Source state: ${segment.source_state}`}</p>
           {segment.source_state !== 'ready' && <p role="alert" className="source-warning">{segment.source_state === 'missing_source' ? 'Original source is missing. Restore it to its selected location and refresh.' : segment.source_state === 'unreadable_source' ? 'Original source exists but cannot be read. Check file permissions or storage access and refresh.' : 'Original source changed. Restore the unchanged original and refresh; stored timestamps do not verify this changed file.'}</p>}
           <div className="media-actions">
-            <button type="button" disabled={disabled || dirty || segment.source_state !== 'ready'} onClick={() => setSelectedPreview(segment)}>Preview source</button>
+            <button type="button" disabled={disabled || dirty || segment.source_state !== 'ready'} onClick={() => setSelectedPreview({ segment, sourcePTS: segment.metadata.first_pts })}>Preview source</button>
             <button type="button" disabled={disabled || index === 0} onClick={() => move(index, -1)}>Move up</button>
             <button type="button" disabled={disabled || index === segments.length - 1} onClick={() => move(index, 1)}>Move down</button>
           </div>
@@ -246,6 +258,12 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
       </fieldset>}
       {segments.length > 0 && <><button type="submit" disabled={disabled || !dirty}>{busy === 'saving' ? 'Saving...' : 'Save timeline'}</button>{dirty && <button type="button" disabled={disabled} onClick={() => { if (media) replace(media); setError(''); setNotice('Unsaved timeline changes discarded.'); }}>Discard unsaved changes</button>}</>}
     </form>}
-    {selectedPreview && <SourcePreview key={selectedPreview.id} segment={selectedPreview} clockAnchor={media?.clock_anchor ?? null} onClose={closePreview} />}
+    {media?.schema_version === 2 && <div className="summary-upgrade">
+      <h3>Motion-summary storage</h3>
+      <p>Motion summaries need an explicit storage upgrade from schema 2 to schema 3. This adds run and window manifests and preserves existing sessions and source metadata.</p>
+      <button type="button" disabled={disabled || dirty} onClick={() => void upgradeSummaries()}>Upgrade summary storage</button>
+    </div>}
+    {(media?.schema_version ?? 0) >= 3 && <SummaryWindows sessionID={session.id} segments={segments} disabled={busy !== null || importing || selectedPreview !== null || dirty} onBusyChange={setSummaryBusy} onPreview={(segment, sourcePTS) => { if (!disabled && !dirty) setSelectedPreview({ segment, sourcePTS }); }} />}
+    {selectedPreview && <SourcePreview key={`${selectedPreview.segment.id}:${selectedPreview.sourcePTS}`} segment={selectedPreview.segment} initialPTS={selectedPreview.sourcePTS} clockAnchor={media?.clock_anchor ?? null} onClose={closePreview} />}
   </section>;
 }

@@ -19,9 +19,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from . import store
+from . import store, summary_store
 from .imports import ImportErrorResponse, ImportJobs, source_state
 from .preview import PreviewJobs
+from .summary_jobs import SummaryJobs
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,12 @@ class NewImport(BaseModel):
 
 class EmptyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class NewSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: UUID
+    window_seconds: int = Field(default=30, ge=1, le=120, strict=True)
 
 
 class NewPreview(BaseModel):
@@ -156,10 +163,12 @@ def create_app(settings: Settings) -> FastAPI:
     activity_lock = Lock()
     jobs = ImportJobs(db_path, settings.data_dir, activity_lock)
     previews = PreviewJobs(db_path, settings.data_dir, activity_lock)
+    summaries = SummaryJobs(db_path, settings.data_dir, activity_lock)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         yield
+        summaries.close()
         previews.close()
         jobs.close()
 
@@ -200,7 +209,7 @@ def create_app(settings: Settings) -> FastAPI:
             raise ImportErrorResponse("session_missing", "The selected recording session does not exist.", 404)
 
     def require_media_schema() -> None:
-        if store.schema_version(db_path) != store.MEDIA_SCHEMA_VERSION:
+        if store.schema_version(db_path) not in (store.MEDIA_SCHEMA_VERSION, store.SUMMARY_SCHEMA_VERSION):
             raise ImportErrorResponse("schema_upgrade_required", "Explicitly upgrade the local database before importing media.", 409)
 
     def media_inventory(session_id: str) -> dict:
@@ -218,7 +227,7 @@ def create_app(settings: Settings) -> FastAPI:
             store.upgrade_media(db_path)
         except (store.DatabaseSchemaError, sqlite3.DatabaseError):
             raise ImportErrorResponse("schema_upgrade_failed", "The media schema upgrade failed; the existing database was preserved.", 409) from None
-        return {"schema_version": store.MEDIA_SCHEMA_VERSION}
+        return {"schema_version": store.schema_version(db_path)}
 
     @app.get("/api/sessions/{session_id}/media", dependencies=[Depends(authenticate)])
     def get_media(session_id: UUID) -> dict:
@@ -267,5 +276,39 @@ def create_app(settings: Settings) -> FastAPI:
     @app.get("/api/media/preview/{preview_id}/content", dependencies=[Depends(authenticate)])
     def preview_content(preview_id: UUID) -> Response:
         return Response(previews.content(str(preview_id)), media_type="video/webm", headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/summaries/upgrade", dependencies=[Depends(authenticate)])
+    def upgrade_summaries(_payload: EmptyRequest = Body(default_factory=EmptyRequest)) -> dict[str, int]:
+        if not activity_lock.acquire(blocking=False):
+            raise ImportErrorResponse("summary_busy", "Wait for the active media operation before upgrading storage.", 409)
+        try:
+            summary_store.upgrade(db_path)
+        except (store.DatabaseSchemaError, sqlite3.DatabaseError):
+            raise ImportErrorResponse("summary_upgrade_failed", "The summary schema upgrade failed; the existing database was preserved.", 409) from None
+        finally:
+            activity_lock.release()
+        return {"schema_version": store.SUMMARY_SCHEMA_VERSION}
+
+    @app.get("/api/sessions/{session_id}/summary-runs", dependencies=[Depends(authenticate)])
+    def list_summaries(session_id: UUID) -> list[dict]:
+        require_session(str(session_id))
+        return summaries.list(str(session_id))
+
+    @app.post("/api/summaries", status_code=202, dependencies=[Depends(authenticate)])
+    def start_summaries(payload: NewSummary) -> dict:
+        require_session(str(payload.session_id))
+        return summaries.start(str(payload.session_id), payload.window_seconds)
+
+    @app.get("/api/summaries/{run_id}", dependencies=[Depends(authenticate)])
+    def get_summary(run_id: UUID) -> dict:
+        return summaries.get(str(run_id))
+
+    @app.post("/api/summaries/{run_id}/cancel", dependencies=[Depends(authenticate)])
+    def cancel_summary(run_id: UUID, _payload: EmptyRequest = Body(default_factory=EmptyRequest)) -> dict:
+        return summaries.cancel(str(run_id))
+
+    @app.get("/api/summary-windows/{window_id}/image", dependencies=[Depends(authenticate)])
+    def summary_image(window_id: UUID) -> Response:
+        return Response(summaries.image(str(window_id)), media_type="image/png", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
     return app

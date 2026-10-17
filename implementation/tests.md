@@ -1,6 +1,6 @@
 # Testing and ecological evaluation
 
-Reviewed: 2026-10-16. Status: **Slice 0, Slice 1A and the Slice 1B candidate pass synthetic Linux tests; motion-summary, ecological and Windows acceptance remains planned**. Quality requirements are part of implementation, not a later add-on.
+Reviewed: 2026-10-16. Status: **Slices 0/1A/1B are merged; Slice 2A has local synthetic coverage, motion and lifecycle checks. Independent review, ecological and Windows acceptance remain open**. Quality requirements are part of implementation, not a later add-on.
 
 ## Testing layers
 
@@ -102,3 +102,12 @@ The root lockfile pins workspace dependencies. `npm run typecheck` includes Reac
 On the Linux development host, 6 Python tests, strict TypeScript checks, Vite build, 13 Node integration assertions and 3 Electron tests passed after a clean npm install. The end-to-end tests check live readiness, create/list, persistence after reload and reopening, token regeneration, terminated/missing backend errors, narrow bridge behavior and backend process cleanup. The Node suite additionally tests real HTTP 401 responses and filesystem/configuration boundaries. See [setup and limits](../docs/11-slice-0-development.md) and [command outcomes](../docs/07-research-log.md).
 
 The current candidate passed 76 Python tests, strict TypeScript, 21 Node checks and 9 Electron tests locally. Preview tests generate exact-PTS-labelled MP4/MTS markers in temporary directories, verify visible frames and rational source mapping, exercise non-millisecond display quantisation, real resource limits, cancellation/reaping and cleanup, and test stale/unreadable originals and unknown final timing. See the [research log](../docs/07-research-log.md) for exact commands and boundaries. Electron uses Linux `/proc`, `ps`, Xvfb and test-only `--no-sandbox`. The real permission E2E requires an unprivileged user; root-safe permission injection is covered in Python. Windows execution, Chromium's OS sandbox, physical picker interaction, representative camera originals, packaging and ecological benchmarks remain unverified.
+
+
+## Slice 2A local acceptance
+
+The [Slice 2A report](../docs/12-slice-2a-validation.md) records exact commands and synthetic evidence. Local final results: 139 Python tests (77 previous plus 62 summary cases), strict TypeScript, 29 Node tests and 11 Electron E2E tests, all exit 0. No GitHub Actions was used. The existing Python deprecation and Playwright colour-environment warnings remain visible.
+
+Coverage includes exact 7200/65/9-second plans, original-PTS ownership digests, VFR/nonzero MTS/independent sources, empty/unknown-ended intervals, weak noisy motion retained in saved time-coloured PNGs, actual limited full-HD decoding, transactional migration/rollback, source/image integrity, restart, kill/cancel/parent death, ENOSPC injection and thread-start/secondary-cleanup failures. Every failed, quiet and quality-flagged window remains accessible through the minimal list. Successful media/API operations are real; only negative OS conditions and the native-dialog return are injected.
+
+Windows execution, representative camera originals, physical picker interaction, OS sandbox, binary redistribution, full-mounted-volume/power-loss testing and ecological performance remain unverified. Large-history and full-survey performance are not benchmarked; hard limits can leave explicit incomplete windows. No Slice 3 review workflow is implemented.
