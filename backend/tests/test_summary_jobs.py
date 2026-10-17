@@ -462,3 +462,46 @@ def test_full_hd_weak_targets_survive_the_actual_limited_worker(tmp_path: Path) 
         print(f"Full-HD limited worker: {time.monotonic()-started:.3f}s, peak RSS {peak_kib} KiB, PNG {len(image)} bytes, phase pixels {window['stats']['phase_pixels']}")
     finally:
         jobs.close()
+
+
+@pytest.mark.parametrize("window_status, terminal_error", [
+    ("failed", "decode_failed"),
+    ("incomplete", "cancelled"),
+    ("incomplete", "no_decoded_frames"),
+])
+def test_missing_original_does_not_erase_terminal_summary_errors(
+    tmp_path: Path, originals: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch, window_status: str, terminal_error: str,
+) -> None:
+    source = tmp_path / "original.mp4"
+    source.write_bytes(originals["quiet_9"].read_bytes())
+    database, session = prepare(tmp_path / "data", source)
+    run_id = summary_store.create_run(database, session)
+    window = summary_store.private_run(database, run_id)["windows"][0]
+    summary_store.record_window(database, window["id"], {"frame_count": 0},
+                                window_status, error_code=terminal_error)
+    summary_store.finish_run(database, run_id, "cancelled" if terminal_error == "cancelled" else "failed",
+                             terminal_error)
+    source.unlink()
+    jobs = summary_jobs.SummaryJobs(database, database.parent, Lock())
+    try:
+        for _ in range(2):
+            result = jobs.get(run_id)
+            assert result["windows"][0]["status"] == window_status
+            assert result["windows"][0]["error"]["code"] == terminal_error
+            assert result["windows"][0]["source_state"] == "missing_source"
+            saved = summary_store.private_window(database, window["id"])
+            assert saved["status"] == window_status
+            assert saved["error_code"] == terminal_error
+
+        def forbidden_detail(*_args, **_kwargs):
+            raise AssertionError("Run listing must not load or revalidate every window")
+
+        monkeypatch.setattr(jobs, "_get", forbidden_detail)
+        listing = jobs.list(session)
+        assert len(listing) == 1
+        assert listing[0]["id"] == run_id
+        assert listing[0]["counts"]["planned"] == 1
+        assert listing[0]["counts"][window_status] == 1
+    finally:
+        jobs.close()
