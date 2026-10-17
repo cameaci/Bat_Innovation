@@ -280,3 +280,29 @@ def test_maximum_public_manifest_fits_desktop_transport_without_losing_windows(t
     assert public["windows"][0]["stats"]["gap_examples_recorded"] == 64
     assert public["windows"][0]["stats"]["gap_count"] == 1000
     assert len(summary_store.private_run(database, run_id)["windows"][0]["stats"]["gaps"]) == 64
+
+
+def test_run_list_is_header_only_with_exact_aggregate_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database, session = prepared(tmp_path)
+    failed_id = summary_store.create_run(database, session)
+    first = summary_store.private_run(database, failed_id)["windows"][0]
+    summary_store.record_window(database, first["id"], {"frame_count": 0}, "failed",
+                                error_code="decode_failed")
+    summary_store.finish_run(database, failed_id, "failed", "decode_failed")
+    queued_id = summary_store.create_run(database, session)
+    expected = [
+        {key: value for key, value in summary_store.get_run(database, run_id).items()
+         if key != "windows"}
+        for run_id in (queued_id, failed_id)
+    ]
+    assert expected[0]["counts"]["pending"] == 3
+    assert expected[1]["counts"]["failed"] == 1
+    assert expected[1]["counts"]["incomplete"] == 2
+
+    def forbidden_manifest(*_args, **_kwargs):
+        raise AssertionError("Run headers must not materialize full window manifests")
+
+    monkeypatch.setattr(summary_store, "private_run", forbidden_manifest)
+    assert summary_store.list_runs(database, session) == expected
