@@ -505,3 +505,43 @@ def test_missing_original_does_not_erase_terminal_summary_errors(
         assert listing[0]["counts"][window_status] == 1
     finally:
         jobs.close()
+
+
+
+def test_worker_source_failure_retains_preexisting_terminal_errors(
+    tmp_path: Path, originals: dict[str, Path],
+) -> None:
+    from hashlib import sha256
+    from backend.app import summary_worker
+
+    source = tmp_path / "original.mp4"
+    source.write_bytes(originals["quiet_65"].read_bytes())
+    database, session = prepare(tmp_path / "data", source)
+    run_id = summary_store.create_run(database, session)
+    first, second, third = summary_store.private_run(database, run_id)["windows"]
+    saved_image = tmp_path / "previous-complete.png"
+    saved_image.write_bytes(b"synthetic image data for storage transaction only")
+    data = saved_image.read_bytes()
+    summary_store.record_window(
+        database, first["id"], {"frame_count": 1}, "complete",
+        saved_image, sha256(data).hexdigest(), len(data),
+    )
+    summary_store.record_window(
+        database, second["id"], {"frame_count": 0}, "failed", error_code="decode_failed",
+    )
+    source.write_bytes(source.read_bytes() + b"changed after import")
+    with pytest.raises(summary_worker.WorkerError) as error:
+        summary_worker.render({
+            "db_path": str(database), "data_dir": str(database.parent), "run_id": run_id,
+        })
+    assert error.value.code == "changed_source"
+    completed = summary_store.private_window(database, first["id"])
+    prior_failure = summary_store.private_window(database, second["id"])
+    untouched = summary_store.private_window(database, third["id"])
+    assert completed["status"] == "incomplete"
+    assert completed["error_code"] == "changed_source"
+    assert prior_failure["status"] == "failed"
+    assert prior_failure["error_code"] == "decode_failed"
+    assert untouched["status"] == "planned"
+    summary_store.finish_run(database, run_id, "failed", "changed_source")
+    assert summary_store.private_window(database, third["id"])["error_code"] == "incomplete_run"
