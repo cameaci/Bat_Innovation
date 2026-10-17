@@ -249,7 +249,10 @@ def render(payload: dict) -> None:
         # retained for audit but cannot remain labelled complete.
         if code in {"changed_source", "coverage_mismatch", "unknown_timing", "decode_failed"}:
             for row in current_rows:
-                summary_store.invalidate_window(db, row["id"], code)
+                # Revoke only outputs previously marked complete. A failed
+                # window's original terminal cause remains immutable history.
+                if summary_store.private_window(db, row["id"])["status"] == "complete":
+                    summary_store.invalidate_window(db, row["id"], code)
         raise WorkerError(code) from None
 
 
