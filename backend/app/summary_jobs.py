@@ -147,13 +147,18 @@ class SummaryJobs:
             raise SummaryError("summary_missing", 404)
         states = {source["id"]: source_state(source) for source in private["sources"]}
         for row in private["windows"]:
+            # A failed/incomplete window is durable processing history. Current
+            # source availability is reported separately and must not erase
+            # its terminal decode, cancellation or missing-frame error.
+            if row["status"] != "complete":
+                continue
             code = states[row["segment_id"]]
-            if code == "ready" and row["status"] == "complete":
+            if code == "ready":
                 try:
                     self._image_path(row)
                 except SummaryError as error:
                     code = error.code
-            if code != "ready" and row["error_code"] != code:
+            if code != "ready":
                 summary_store.invalidate_window(self.db_path, row["id"], code)
         result = summary_store.get_run(self.db_path, run_id)
         for window in result["windows"]:
@@ -167,10 +172,10 @@ class SummaryJobs:
             return self._get(run_id)
 
     def list(self, session_id: str) -> list[dict]:
+        # Listing run headers must not load or revalidate every window.
+        # Detailed source/image checks occur when a particular run is opened.
         with self._lock:
-            rows = summary_store.list_runs(self.db_path, session_id)
-            return [{key: value for key, value in self._get(row["id"]).items() if key != "windows"}
-                    for row in rows]
+            return summary_store.list_runs(self.db_path, session_id)
 
     def start(self, session_id: str, window_seconds: int = 30) -> dict:
         if sys.platform != "linux":
