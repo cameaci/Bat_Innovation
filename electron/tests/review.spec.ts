@@ -116,6 +116,12 @@ test('explicit first review keeps all quiet and incomplete windows visible with 
     await expect(observations).toContainText('Count unknown');
     await expect(observations).toContainText('Uncertain');
     expect((await savedReview(shell, first.id)).decision).toBe('unreviewed');
+    // Discard must also restore the saved audit attribution, not only form
+    // fields. Otherwise the next action could be signed by a discarded actor.
+    await shell.page.getByLabel('Reviewer label', { exact: true }).fill('Discarded temporary reviewer');
+    await shell.page.getByRole('button', { name: 'Discard review draft', exact: true }).click();
+    await expect(shell.page.getByLabel('Reviewer label', { exact: true })).toHaveValue('Synthetic reviewer');
+    expect((await savedReview(shell, first.id)).revision).toBe(1);
     await shell.page.getByRole('button', { name: 'Add provisional observation', exact: true }).click();
     await shell.page.getByLabel('Observation end source PTS (exclusive)', { exact: true }).fill(String(BigInt(start) + 2n));
     await shell.page.getByLabel('Provisional visual category', { exact: true }).selectOption('insect');
