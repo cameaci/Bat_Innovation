@@ -268,9 +268,11 @@ test('invalid evidence requires explicit re-review after restoration and preserv
     const imagePath = join(directory, 'data', 'summaries', run.id, `${row.id}.png`);
     const imageBytes = await readFile(imagePath);
     await rm(imagePath);
+    await shell.page.getByRole('button', { name: 'Refresh summary runs', exact: true }).click();
     await expect(shell.page.getByRole('status').filter({ hasText: /^First review progress: 0\/1 reviewed;/ })).toBeVisible();
     await writeFile(imagePath, imageBytes);
     expect((await savedReview(shell, row.id)).effective_decision).toBe('unreviewed');
+    await shell.page.getByRole('button', { name: 'Refresh summary runs', exact: true }).click();
     await openReceipt(shell, row.id);
     await expect(shell.page.getByRole('button', { name: 'Mark reviewed: no discernible event', exact: true })).toBeEnabled();
     await shell.page.getByRole('button', { name: 'Mark reviewed: no discernible event', exact: true }).click();
@@ -278,6 +280,7 @@ test('invalid evidence requires explicit re-review after restoration and preserv
     await shell.page.getByRole('button', { name: 'Close preview', exact: true }).click();
     expect((await savedReview(shell, row.id)).revision).toBe(2);
     await appendFile(fixtures.quiet_9, 'Synthetic external change after human review');
+    await shell.page.getByRole('button', { name: 'Refresh summary runs', exact: true }).click();
     await expect(shell.page.getByRole('status').filter({ hasText: /^First review progress: 0\/1 reviewed;/ })).toBeVisible();
     await expect(shell.page.getByRole('alert').filter({ hasText: /^Re-verification required\. Historical decision:/ })).toBeVisible();
     await expect(shell.page.getByRole('status').filter({ hasText: /^First review: unreviewed/ })).toBeVisible();

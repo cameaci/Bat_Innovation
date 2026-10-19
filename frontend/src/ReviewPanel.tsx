@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ProvisionalObservation, ProvisionalObservationInput, ReviewChange, ReviewHistory, SummaryWindow, WindowReview } from '../../electron/src/contracts';
 import { getAPI } from './api';
+import { displayedPTSFor } from './sourceFrame';
+import type { WindowSourceFrame } from './sourceFrame';
 
 const unavailable = 'The local backend is unavailable. Your draft is retained. Retry after checking the backend.';
 const decisionLabel = (value: string) => value.replaceAll('_', ' ');
 type ActionInput<T = ReviewChange> = T extends ReviewChange ? Omit<T, 'actor' | 'expected_revision'> : never;
 
-export function ReviewPanel({ window: selected, previewID, disabled, onDirtyChange, onSaved }: {
+export function ReviewPanel({ window: selected, previewID, displayedSourceFrame, disabled, onDirtyChange, onSaved }: {
   window: SummaryWindow;
   previewID: string | null;
+  displayedSourceFrame?: WindowSourceFrame | null;
   disabled: boolean;
   onDirtyChange: (dirty: boolean) => void;
   onSaved: () => void;
@@ -133,6 +136,8 @@ export function ReviewPanel({ window: selected, previewID, disabled, onDirtyChan
   }
 
   const lock = disabled || saving || loading;
+  const displayedStart = displayedPTSFor(displayedSourceFrame, selected, review?.binding, previewID, 'start');
+  const displayedEnd = displayedPTSFor(displayedSourceFrame, selected, review?.binding, previewID, 'end');
   const currentWarning = selected.review?.verification_warning || review?.verification_warning;
   const needsReverification = selected.review?.needs_reverification || review?.needs_reverification;
   const sourceUnavailable = selected.source_state !== undefined && selected.source_state !== 'ready';
@@ -165,7 +170,10 @@ export function ReviewPanel({ window: selected, previewID, disabled, onDirtyChan
         <h4>{editingID ? 'Edit provisional observation' : 'New provisional observation'}</h4>
         <p className="detail">Use original integer PTS ticks in timebase {selected.time_base.num}/{selected.time_base.den} seconds. The span must remain inside this window and its single original segment. End is excluded. Copy authoritative PTS from the source preview; player seconds and motion colours are not timestamps.</p>
         <label htmlFor="observation-start">Observation start source PTS</label><input id="observation-start" value={editor.start_pts} disabled={lock} inputMode="numeric" maxLength={20} onChange={event => field('start_pts', event.target.value)} required />
+        <button type="button" disabled={lock || displayedStart === null} onClick={() => { if (displayedStart !== null) field('start_pts', displayedStart); }}>Use displayed PTS as start</button>
         <label htmlFor="observation-end">Observation end source PTS (exclusive)</label><input id="observation-end" value={editor.end_pts} disabled={lock} inputMode="numeric" maxLength={20} onChange={event => field('end_pts', event.target.value)} required />
+        <button type="button" disabled={lock || displayedEnd === null} onClick={() => { if (displayedEnd !== null) field('end_pts', displayedEnd); }}>Use displayed PTS as exclusive end</button>
+        <p className="detail">These buttons copy only the mapped original PTS into this draft. An exclusive end excludes the displayed frame; no final-frame duration is inferred. Pause the preview to select a frame deliberately. Frames outside this window or without a current source mapping cannot be copied.</p>
         <label htmlFor="observation-category">Provisional visual category</label><select id="observation-category" value={editor.category} disabled={lock} onChange={event => field('category', event.target.value as ProvisionalObservationInput['category'])}><option value="uncertain">Uncertain</option><option value="bat">Bat (provisional)</option><option value="insect">Insect</option><option value="bird">Bird</option><option value="other">Other</option></select>
         <label htmlFor="observation-activity">Optional activity / behaviour</label><input id="observation-activity" value={editor.activity ?? ''} disabled={lock} maxLength={120} onChange={event => field('activity', event.target.value)} />
         <label htmlFor="observation-count">Count (blank means unknown)</label><input id="observation-count" value={countText} disabled={lock} inputMode="numeric" maxLength={6} onChange={event => { setCountText(event.target.value); markDirty(); }} />

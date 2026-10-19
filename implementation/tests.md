@@ -1,6 +1,6 @@
 # Testing and ecological evaluation
 
-Reviewed: 2026-10-19. Status: **Slices 0/1A/1B/2A are merged; Slice 3A has local synthetic review/audit checks. Independent review, ecological and Windows acceptance remain open**. Quality requirements are part of implementation, not a later add-on.
+Reviewed: 2026-10-19. Status: **Slices 0/1A/1B/2A/3A are merged; Slice 3B is a local synthetic gallery/navigation review candidate. Ecological and Windows acceptance remain open**. Quality requirements are part of implementation, not a later add-on.
 
 ## Testing layers
 
@@ -97,7 +97,7 @@ npm test
 npm run test:e2e
 ```
 
-The root lockfile pins workspace dependencies. `npm run typecheck` includes React, Electron and Playwright test TypeScript. `npm test` builds, then runs Node's real backend integration suite. `npm run test:e2e` builds, then exercises the real Electron/React/API/SQLite path. No API responses are mocked.
+The root lockfile pins workspace dependencies. `npm run typecheck` includes React, Electron and Playwright test TypeScript. `npm test` builds, then runs Node's real backend integration suite and renderer scheduling/rational-PTS unit tests. `npm run test:e2e` builds, then exercises the real Electron/React/API/SQLite path. No successful API responses are mocked.
 
 On the Linux development host, 6 Python tests, strict TypeScript checks, Vite build, 13 Node integration assertions and 3 Electron tests passed after a clean npm install. The end-to-end tests check live readiness, create/list, persistence after reload and reopening, token regeneration, terminated/missing backend errors, narrow bridge behavior and backend process cleanup. The Node suite additionally tests real HTTP 401 responses and filesystem/configuration boundaries. See [setup and limits](../docs/11-slice-0-development.md) and [command outcomes](../docs/07-research-log.md).
 
@@ -115,3 +115,9 @@ Windows execution, representative camera originals, physical picker interaction,
 ## Slice 3A local acceptance
 
 The [Slice 3A report](../docs/13-slice-3a-validation.md) records the exact final local commands and results. New checks cover transactional v3 -> v4 migration/rollback, immutable event replay, atomic projection updates, conflicting writers and stale forms, exact original PTS/window bounds, unknown counts, observation edits/deletion, explicit no-event decisions, all-window totals, run isolation and restart. Evidence invalidation and identical restoration must keep old decisions effectively unreviewed until a fresh explicit verified action. Real Electron tests include loaded source previews, audit reopening, dirty close/reload/quit confirmation and a stopped then killed backend during Save. Successful decoding and persistence are never mocked. No GitHub Actions was used; Slice 4 and ecological acceptance remain out of scope.
+
+## Slice 3B local acceptance
+
+The [Slice 3B report](../docs/15-slice-3b-validation.md) records exact commands, the paused-seek regression correction and bounds. Final local results: **201 Python tests**, strict TypeScript, **43 Node tests** and **17 Electron E2E tests**, plus `git diff --check`, all exit **0**. Vite/Electron builds passed; no GitHub Actions was used. New cases cover all seven filters with unchanged progress, quiet/failed/incomplete cards, chronological independent-PTS sources, dirty navigation/scoped keys, exact displayed-frame draft copying in both seek directions, audit/restart/source invalidation and real failed processing/retry. Existing review, run-isolation, PTS and worker-cleanup suites remain successful.
+
+The sparse two-hour fixture produces 240 real window records/images and exercises every one of 20 gallery pages. Final observed peak: one binary transfer and seven Blob URLs; 74 URLs created/revoked, zero retained after unmount and zero reservation collisions. This is bounded UI/lifetime evidence, not full-rate media throughput, RSS or ecological acceptance. Existing pre-roll limits remain enforced. Windows, camera-original compatibility, physical picker, OS sandbox and binary redistribution remain unverified; no Slice 4 or packaging change.
