@@ -11,6 +11,8 @@ from uuid import uuid4
 
 SCHEMA_VERSION = 1
 MEDIA_SCHEMA_VERSION = 2
+SUMMARY_SCHEMA_VERSION = 3
+MEDIA_SCHEMA_VERSIONS = (MEDIA_SCHEMA_VERSION, SUMMARY_SCHEMA_VERSION)
 
 
 class DatabaseSchemaError(RuntimeError):
@@ -29,9 +31,9 @@ def initialise(db_path: Path) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with closing(connect(db_path)) as connection, connection:
         version = connection.execute("PRAGMA user_version").fetchone()[0]
-        if version not in (0, SCHEMA_VERSION, MEDIA_SCHEMA_VERSION):
+        if version not in (0, SCHEMA_VERSION, *MEDIA_SCHEMA_VERSIONS):
             raise DatabaseSchemaError(
-                f"Unsupported database schema version {version}; expected {SCHEMA_VERSION} or {MEDIA_SCHEMA_VERSION}"
+                f"Unsupported database schema version {version}; expected 1, 2 or 3"
             )
         if version == 0:
             connection.execute("BEGIN IMMEDIATE")
@@ -51,9 +53,12 @@ def initialise(db_path: Path) -> None:
             connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
         # An existing versioned file is not silently rewritten.
         connection.execute("SELECT 1 FROM recording_session LIMIT 1")
-        if version == MEDIA_SCHEMA_VERSION:
+        if version in MEDIA_SCHEMA_VERSIONS:
             connection.execute("SELECT id, source_path, metadata_json FROM segment LIMIT 1")
             connection.execute("SELECT session_id, clock_anchor_json FROM session_media LIMIT 1")
+        if version == SUMMARY_SCHEMA_VERSION:
+            connection.execute("SELECT id, state, source_snapshots_json FROM processing_run LIMIT 1")
+            connection.execute("SELECT id, run_id, interval_json, image_sha256 FROM summary_window LIMIT 1")
 
 
 def schema_version(db_path: Path) -> int:
@@ -68,7 +73,7 @@ def upgrade_media(db_path: Path) -> None:
     with closing(connect(db_path)) as connection, connection:
         connection.execute("BEGIN IMMEDIATE")
         version = connection.execute("PRAGMA user_version").fetchone()[0]
-        if version == MEDIA_SCHEMA_VERSION:
+        if version in MEDIA_SCHEMA_VERSIONS:
             return
         if version != SCHEMA_VERSION:
             raise DatabaseSchemaError("Media upgrade requires database schema version 1")
@@ -99,7 +104,7 @@ def session_exists(db_path: Path, session_id: str) -> bool:
 
 
 def private_segments(db_path: Path, session_id: str) -> list[dict]:
-    if schema_version(db_path) != MEDIA_SCHEMA_VERSION:
+    if schema_version(db_path) not in MEDIA_SCHEMA_VERSIONS:
         return []
     with closing(connect(db_path)) as connection:
         rows = connection.execute(
@@ -109,7 +114,7 @@ def private_segments(db_path: Path, session_id: str) -> list[dict]:
 
 
 def segment_by_id(db_path: Path, segment_id: str) -> dict | None:
-    if schema_version(db_path) != MEDIA_SCHEMA_VERSION:
+    if schema_version(db_path) not in MEDIA_SCHEMA_VERSIONS:
         return None
     with closing(connect(db_path)) as connection:
         row = connection.execute("SELECT * FROM segment WHERE id=?", (segment_id,)).fetchone()
@@ -117,7 +122,7 @@ def segment_by_id(db_path: Path, segment_id: str) -> dict | None:
 
 
 def clock_anchor(db_path: Path, session_id: str) -> dict | None:
-    if schema_version(db_path) != MEDIA_SCHEMA_VERSION:
+    if schema_version(db_path) not in MEDIA_SCHEMA_VERSIONS:
         return None
     with closing(connect(db_path)) as connection:
         row = connection.execute("SELECT clock_anchor_json FROM session_media WHERE session_id=?", (session_id,)).fetchone()
@@ -130,7 +135,7 @@ def commit_segments(db_path: Path, session_id: str, sources: list[tuple[Path, di
         # A busy database must not hold the job/shutdown lock for the default 30 seconds.
         connection.execute("PRAGMA busy_timeout=1000")
         connection.execute("BEGIN IMMEDIATE")
-        if connection.execute("PRAGMA user_version").fetchone()[0] != MEDIA_SCHEMA_VERSION:
+        if connection.execute("PRAGMA user_version").fetchone()[0] not in MEDIA_SCHEMA_VERSIONS:
             raise DatabaseSchemaError("Explicit media schema upgrade is required")
         if connection.execute("SELECT 1 FROM recording_session WHERE id=?", (session_id,)).fetchone() is None:
             raise ValueError("Session does not exist")

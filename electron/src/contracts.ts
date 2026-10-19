@@ -120,12 +120,50 @@ export interface PreviewJob {
   manifest: PreviewManifest | null;
 }
 
+export interface SummaryRequest { session_id: string; window_seconds: number }
+export type SummaryState = 'queued' | 'running' | 'complete' | 'incomplete' | 'failed' | 'cancelled' | 'interrupted';
+export interface SummaryRun {
+  id: string;
+  session_id: string;
+  state: SummaryState;
+  algorithm_version: string;
+  parameters: Record<string, unknown>;
+  parameter_hash: string;
+  started_at_utc: string;
+  finished_at_utc: string | null;
+  error: { code: string; message: string } | null;
+  counts: { planned: number; pending: number; complete: number; running: number; incomplete: number; failed: number };
+}
+export interface SummaryWindow {
+  id: string;
+  run_id: string;
+  segment_id: string;
+  index: number;
+  status: 'planned' | 'running' | 'complete' | 'incomplete' | 'failed';
+  source_sha256: string;
+  source_state?: MediaSegment['source_state'];
+  time_base: Rational;
+  interval: { start_pts: Rational; end_pts: Rational | null; start_time: Rational; end_time: Rational | null; elapsed_start: Rational; elapsed_end: Rational | null };
+  stats: { frame_count?: number; first_pts?: string | null; last_pts?: string | null; pts_digest?: string; motion_pixels?: number | null; comparison_count?: number; gap_count?: number; gap_examples_recorded?: number; max_spacing?: Rational | null; gaps?: { start: Rational; end: Rational }[]; phase_pixels?: number[] | null; preview_pts?: string | null; motion_state?: 'quiet' | 'evidence' | 'unassessable' };
+  flags: string[];
+  error: { code: string; message: string } | null;
+  preview_pts: string | null;
+  image: { sha256: string; bytes: number } | null;
+}
+export interface SummaryDetail extends SummaryRun { windows: SummaryWindow[] }
+
 export interface BatAPI {
+  upgradeSummaries(): Promise<ApiResult<{ schema_version: 3 }>>;
+  listSummaryRuns(sessionID: string): Promise<ApiResult<SummaryRun[]>>;
+  startSummaries(input: SummaryRequest): Promise<ApiResult<SummaryDetail>>;
+  summaryRun(runID: string): Promise<ApiResult<SummaryDetail>>;
+  cancelSummaries(runID: string): Promise<ApiResult<SummaryDetail>>;
+  summaryImage(windowID: string): Promise<ApiResult<{ bytes: Uint8Array }>>;
   health(): Promise<ApiResult<Health>>;
   listSessions(): Promise<ApiResult<RecordingSession[]>>;
   createSession(input: NewSession): Promise<ApiResult<RecordingSession>>;
   getMedia(sessionID: string): Promise<ApiResult<MediaSession>>;
-  upgradeMedia(): Promise<ApiResult<{ schema_version: 2 }>>;
+  upgradeMedia(): Promise<ApiResult<{ schema_version: 2 | 3 }>>;
   chooseMedia(sessionID: string): Promise<ApiResult<ImportJob | null>>;
   importStatus(jobID: string): Promise<ApiResult<ImportJob>>;
   cancelImport(jobID: string): Promise<ApiResult<ImportJob>>;

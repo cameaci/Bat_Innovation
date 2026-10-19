@@ -6,12 +6,13 @@ import { getAPI } from './api';
 const rational = (value: Rational) => `${value.num}/${value.den}`;
 const unavailable = 'The local backend is unavailable. Close the preview and retry after checking the backend.';
 
-export function SourcePreview({ segment, clockAnchor, onClose }: {
+export function SourcePreview({ segment, initialPTS, clockAnchor, onClose }: {
   segment: MediaSegment;
+  initialPTS?: string;
   clockAnchor: ClockAnchor | null;
   onClose: () => void;
 }) {
-  const [sourcePTS, setSourcePTS] = useState(segment.metadata.first_pts);
+  const [sourcePTS, setSourcePTS] = useState(initialPTS ?? segment.metadata.first_pts);
   const [job, setJob] = useState<PreviewJob | null>(null);
   const [starting, setStarting] = useState(false);
   const [pendingCancellation, setPendingCancellation] = useState<string | null>(null);
