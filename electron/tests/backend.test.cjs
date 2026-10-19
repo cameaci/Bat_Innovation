@@ -7,7 +7,7 @@ const { createServer: httpServer } = require('node:http');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
-const { BackendClient, BackendRuntime, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } = require('../dist/backend.js');
+const { BackendClient, BackendRuntime, isReviewChange, isReviewCursor, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } = require('../dist/backend.js');
 
 const repoRoot = path.resolve(__dirname, '../..');
 const python = process.env.BAT_PYTHON || 'python';
@@ -329,6 +329,201 @@ test('real PyAV summaries and PNG evidence survive runtime restart after a media
   const reopenedPid = reopened.pid;
   await reopened.stop();
   expectExited(reopenedPid);
+});
+
+test('review bridge bounds IDs, fields, source PTS and history cursors and authenticates every route', { timeout: 30000 }, async t => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'bat-review-contract-'));
+  const runtime = new BackendRuntime();
+  t.after(async () => { await runtime.stop(); await rm(dataDir, { recursive: true, force: true }); });
+  const port = await availablePort();
+  assert.equal((await runtime.start({ python, repoRoot, dataDir, port })).ok, true);
+  const id = '00000000-0000-4000-8000-000000000000';
+  const observation = { segment_id: id, start_pts: '0', end_pts: '1', category: 'uncertain',
+    activity: null, count: null, uncertain: true, notes: 'Synthetic provisional note' };
+  const change = { expected_revision: 0, actor: 'Synthetic reviewer', action: 'add_observation', observation };
+  assert.equal(isReviewChange(change), true, 'Unknown count is a supported provisional value');
+  assert.equal(isReviewChange({ ...change, observation: { ...observation, count: 0 } }), true);
+  const oversized = { ...change, observation: { ...observation, notes: '\u0000'.repeat(2000) } };
+  assert.ok(Buffer.byteLength(JSON.stringify(oversized)) > 8 * 1024, 'Escaped text tests the serialized request byte cap');
+  for (const invalidID of ['../private', 'file:///private/source.mp4', 'https://example.invalid', 1, null]) {
+    expectFailure(await runtime.getWindowReview(invalidID), 'invalid');
+    expectFailure(await runtime.saveReview(invalidID, change), 'invalid');
+    expectFailure(await runtime.reviewHistory(invalidID, 0), 'invalid');
+  }
+  for (const invalidChange of [
+    { ...change, actor: '' }, { ...change, actor: '   ' }, { ...change, actor: 'x'.repeat(121) },
+    { ...change, expected_revision: -1 }, { ...change, expected_revision: 1.5 },
+    { ...change, expected_revision: true }, { ...change, expected_revision: 2 ** 31 },
+    { ...change, expected_revision: Number.MAX_SAFE_INTEGER + 1 },
+    { ...change, path: '/private/source.mp4' }, { ...change, action: 'finalise' },
+    { ...change, observation: { ...observation, source_path: '/private/source.mp4' } },
+    { ...change, observation: { ...observation, segment_id: '../source' } },
+    { ...change, observation: { ...observation, start_pts: 0 } },
+    { ...change, observation: { ...observation, start_pts: '1.5' } },
+    { ...change, observation: { ...observation, start_pts: '1e3' } },
+    { ...change, observation: { ...observation, start_pts: '1', end_pts: '0' } },
+    { ...change, observation: { ...observation, start_pts: '-9223372036854775809' } },
+    { ...change, observation: { ...observation, end_pts: '9223372036854775808' } },
+    { ...change, observation: { ...observation, category: 'species' } },
+    { ...change, observation: { ...observation, category: ['bat'] } },
+    { ...change, observation: { ...observation, activity: 'x'.repeat(121) } },
+    { ...change, observation: { ...observation, count: true } },
+    { ...change, observation: { ...observation, count: -1 } },
+    { ...change, observation: { ...observation, count: 0.5 } },
+    { ...change, observation: { ...observation, count: 100001 } },
+    { ...change, observation: { ...observation, uncertain: 'true' } },
+    { ...change, observation: { ...observation, notes: 'x'.repeat(2001) } },
+    { ...change, observation: { ...observation, notes: '🦇'.repeat(2000) } },
+    oversized,
+    { expected_revision: 0, actor: 'Synthetic reviewer', action: 'delete_observation', observation_id: '../private' },
+    { expected_revision: 0, actor: 'Synthetic reviewer', action: 'set_decision', decision: 'qa_reviewed', preview_id: null },
+    { expected_revision: 0, actor: 'Synthetic reviewer', action: 'set_decision', decision: ['unreviewed'], preview_id: null },
+    { expected_revision: 0, actor: 'Synthetic reviewer', action: 'set_decision', decision: 'unreviewed', preview_id: '../private' },
+    { expected_revision: 0, actor: 'Synthetic reviewer', action: 'unable_to_assess', note: '' },
+  ]) {
+    assert.equal(isReviewChange(invalidChange), false, JSON.stringify(invalidChange));
+    expectFailure(await runtime.saveReview(id, invalidChange), 'invalid');
+  }
+  for (const cursor of [-1, 0.5, true, '0', 2 ** 31, Number.MAX_SAFE_INTEGER + 1, '../private']) {
+    assert.equal(isReviewCursor(cursor), false);
+    expectFailure(await runtime.reviewHistory(id, cursor), 'invalid');
+  }
+  const unauthorized = new BackendClient(port, 'deliberately-incorrect-synthetic-token');
+  expectFailure(await unauthorized.upgradeReviews(), 'unauthorized');
+  expectFailure(await unauthorized.getWindowReview(id), 'unauthorized');
+  expectFailure(await unauthorized.saveReview(id, change), 'unauthorized');
+  expectFailure(await unauthorized.reviewHistory(id, 0), 'unauthorized');
+  assert.deepEqual(await runtime.upgradeMedia(), { ok: true, value: { schema_version: 2 } });
+  assert.deepEqual(await runtime.upgradeSummaries(), { ok: true, value: { schema_version: 3 } });
+  expectFailure(await runtime.getWindowReview(id), 'review_schema_required');
+  assert.deepEqual(await runtime.upgradeReviews(), { ok: true, value: { schema_version: 4 } });
+  assert.deepEqual(await runtime.upgradeReviews(), { ok: true, value: { schema_version: 4 } });
+  expectFailure(await runtime.getWindowReview(id), 'review_missing');
+  expectFailure(await runtime.saveReview(id, change), 'review_missing');
+  expectFailure(await runtime.reviewHistory(id, 0), 'review_missing');
+});
+
+test('real provisional review retains source spans and audit revisions across restart and source loss', { timeout: 60000 }, async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'bat-review-persistence-'));
+  const dataDir = path.join(directory, 'app-data');
+  const first = new BackendRuntime();
+  const reopened = new BackendRuntime();
+  t.after(async () => {
+    await Promise.all([first.stop(), reopened.stop()]);
+    await rm(directory, { recursive: true, force: true });
+  });
+  const generated = spawnSync(python, ['-m', 'backend.tests.summary_fixtures', path.join(directory, 'originals')],
+    { cwd: repoRoot, encoding: 'utf8', timeout: 15000 });
+  assert.equal(generated.status, 0, generated.stderr);
+  const source = JSON.parse(generated.stdout).quiet_9;
+  const original = await readFile(source);
+  assert.equal((await first.start({ python, repoRoot, dataDir })).ok, true);
+  assert.equal((await first.upgradeMedia()).ok, true);
+  const created = await first.createSession({ display_name: 'Synthetic review persistence', camera_ref: 'Synthetic camera' });
+  assert.equal(created.ok, true);
+  const sessionID = created.value.id;
+  const imported = await first.importSelectedMedia(sessionID, [source]);
+  assert.equal(imported.ok, true, JSON.stringify(imported));
+  assert.equal((await waitUntilTerminal(() => first.importStatus(imported.value.id), ['running'])).state, 'complete');
+  assert.equal((await first.upgradeSummaries()).ok, true);
+  const started = await first.startSummaries({ session_id: sessionID, window_seconds: 30 });
+  assert.equal(started.ok, true, JSON.stringify(started));
+  const run = await waitUntilTerminal(() => first.summaryRun(started.value.id), ['queued', 'running']);
+  assert.equal(run.state, 'complete', JSON.stringify(run));
+  assert.equal((await first.upgradeReviews()).ok, true);
+  const segment = (await first.getMedia(sessionID)).value.segments[0];
+  const windowID = run.windows[0].id;
+  assert.equal(run.windows[0].stats.motion_pixels, 0);
+  const initial = await first.getWindowReview(windowID);
+  assert.equal(initial.ok, true, JSON.stringify(initial));
+  assert.equal(initial.value.revision, 0);
+  assert.equal(initial.value.decision, 'unreviewed');
+  assert.deepEqual(initial.value.observations, []);
+  const change = (revision, action, values) => ({ expected_revision: revision, actor: 'Synthetic reviewer', action, ...values });
+  const observation = { segment_id: segment.id, start_pts: segment.metadata.first_pts, end_pts: segment.metadata.last_pts,
+    category: 'uncertain', activity: null, count: null, uncertain: true, notes: 'Synthetic uncertainty; not a bat verdict.' };
+  expectFailure(await first.saveReview(windowID, change(0, 'add_observation', { observation: {
+    ...observation, start_pts: String(BigInt(observation.start_pts) - 1n),
+  } })), 'review_invalid');
+  const added = await first.saveReview(windowID, change(0, 'add_observation', { observation }));
+  assert.equal(added.ok, true, JSON.stringify(added));
+  assert.equal(added.value.revision, 1);
+  assert.equal(added.value.decision, 'unreviewed', 'Saving an observation never completes first review');
+  assert.equal(added.value.observations[0].count, null, 'Unknown count must remain unknown');
+  const observationID = added.value.observations[0].id;
+  const withoutPreview = await first.saveReview(windowID, change(1, 'set_decision', {
+    decision: 'reviewed_with_observations', preview_id: null,
+  }));
+  expectFailure(withoutPreview, 'review_unavailable');
+  const updated = await first.saveReview(windowID, change(1, 'update_observation', { observation_id: observationID,
+    observation: { ...observation, notes: 'Synthetic revised provisional note.' } }));
+  assert.equal(updated.ok, true, JSON.stringify(updated));
+  assert.equal(updated.value.revision, 2);
+  const preview = await first.startPreview({ segment_id: segment.id, source_pts: segment.metadata.first_pts });
+  assert.equal(preview.ok, true, JSON.stringify(preview));
+  const readyPreview = await waitUntilTerminal(() => first.previewStatus(preview.value.id), ['running']);
+  assert.equal(readyPreview.state, 'ready', JSON.stringify(readyPreview));
+  const reviewed = await first.saveReview(windowID, change(2, 'set_decision', {
+    decision: 'reviewed_with_observations', preview_id: preview.value.id,
+  }));
+  assert.equal(reviewed.ok, true, JSON.stringify(reviewed));
+  assert.equal(reviewed.value.revision, 3);
+  assert.equal(reviewed.value.effective_decision, 'reviewed_with_observations');
+  expectFailure(await first.saveReview(windowID, change(2, 'delete_observation', { observation_id: observationID })), 'review_conflict');
+  const deleted = await first.saveReview(windowID, change(3, 'delete_observation', { observation_id: observationID }));
+  assert.equal(deleted.ok, true, JSON.stringify(deleted));
+  assert.equal(deleted.value.revision, 4);
+  assert.equal(deleted.value.decision, 'unreviewed');
+  assert.deepEqual(deleted.value.observations, []);
+  const clear = await first.saveReview(windowID, change(4, 'set_decision', {
+    decision: 'reviewed_no_discernible_event', preview_id: preview.value.id,
+  }));
+  assert.equal(clear.ok, true, JSON.stringify(clear));
+  assert.equal(clear.value.revision, 5);
+  const history = await first.reviewHistory(windowID, 0);
+  assert.equal(history.ok, true, JSON.stringify(history));
+  assert.deepEqual(history.value.events.map(event => event.revision), [1, 2, 3, 4, 5]);
+  assert.deepEqual(history.value.events.map(event => event.action),
+    ['add_observation', 'update_observation', 'set_decision', 'delete_observation', 'set_decision']);
+  assert.ok(history.value.events.every(event => event.actor === 'Synthetic reviewer' && Number.isFinite(Date.parse(event.utc))));
+  assert.ok(history.value.events.every(event => event.run_id === run.id && event.window_id === windowID &&
+    event.segment_id === segment.id && event.source_sha256 === segment.metadata.sha256));
+  assert.doesNotMatch(JSON.stringify(history.value), /source_path|image_path|bat-review-persistence-/);
+  const firstPID = first.pid;
+  await first.stop();
+  expectExited(firstPID);
+  assert.equal((await reopened.start({ python, repoRoot, dataDir })).ok, true);
+  assert.deepEqual(await reopened.getWindowReview(windowID), clear);
+  assert.deepEqual(await reopened.reviewHistory(windowID, 0), history);
+  const reopenedRun = await reopened.summaryRun(run.id);
+  assert.equal(reopenedRun.ok, true, JSON.stringify(reopenedRun));
+  assert.equal(reopenedRun.value.review_progress.total, 1);
+  assert.equal(reopenedRun.value.review_progress.reviewed, 1);
+  assert.deepEqual(await readFile(source), original, 'Manual review and previews preserve original media bytes');
+  await rm(source);
+  const unavailableReview = await reopened.getWindowReview(windowID);
+  assert.equal(unavailableReview.ok, true, JSON.stringify(unavailableReview));
+  assert.equal(unavailableReview.value.decision, 'reviewed_no_discernible_event', 'Historical manual decision remains recorded');
+  assert.equal(unavailableReview.value.effective_decision, 'unreviewed');
+  assert.equal(unavailableReview.value.needs_reverification, true);
+  expectFailure(await reopened.saveReview(windowID, change(5, 'set_decision', {
+    decision: 'reviewed_no_discernible_event', preview_id: preview.value.id,
+  })), 'review_unavailable');
+  assert.deepEqual(await reopened.reviewHistory(windowID, 0), history, 'Revalidation and rejected saves cannot mutate append-only history');
+});
+
+test('review transport returns fixed messages instead of backend exception text or private paths', { timeout: 10000 }, async () => {
+  const server = httpServer((_request, response) => {
+    response.writeHead(409, { 'Content-Type': 'application/json' });
+    response.end(JSON.stringify({ detail: { code: 'review_conflict', message: 'Traceback at /private/synthetic/review.sqlite3' } }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const client = new BackendClient(server.address().port, 'synthetic-error-redaction-token-only');
+    const result = await client.getWindowReview('00000000-0000-4000-8000-000000000000');
+    expectFailure(result, 'review_conflict');
+    assert.doesNotMatch(result.error.message, /private|sqlite3|Traceback/);
+  } finally { await new Promise(resolve => server.close(resolve)); }
 });
 
 test('invalid startup configuration is rejected before launching a backend', { timeout: 15000 }, async t => {

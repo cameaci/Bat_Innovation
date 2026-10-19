@@ -135,6 +135,7 @@ export interface SummaryRun {
   counts: { planned: number; pending: number; complete: number; running: number; incomplete: number; failed: number };
 }
 export interface SummaryWindow {
+  review?: ReviewHeader;
   id: string;
   run_id: string;
   segment_id: string;
@@ -150,10 +151,101 @@ export interface SummaryWindow {
   preview_pts: string | null;
   image: { sha256: string; bytes: number } | null;
 }
-export interface SummaryDetail extends SummaryRun { windows: SummaryWindow[] }
+export interface SummaryDetail extends SummaryRun { windows: SummaryWindow[]; review_progress?: ReviewProgress }
+
+export type ReviewDecision = 'unreviewed' | 'reviewed_with_observations' | 'reviewed_no_discernible_event';
+export interface ProvisionalObservationInput {
+  segment_id: string;
+  start_pts: string;
+  end_pts: string;
+  category: 'bat' | 'insect' | 'bird' | 'other' | 'uncertain';
+  activity: string | null;
+  count: number | null;
+  uncertain: boolean;
+  notes: string;
+}
+export interface ProvisionalObservation extends ProvisionalObservationInput { id: string }
+export interface ReviewProjection {
+  revision: number;
+  decision: ReviewDecision;
+  observations: ProvisionalObservation[];
+  unable_note: string;
+  verification: Record<string, unknown> | null;
+  actor: string | null;
+  updated_at_utc: string | null;
+}
+export interface ReviewBinding {
+  run_id: string;
+  window_id: string;
+  segment_id: string;
+  source_sha256: string;
+  parameter_hash: string;
+  time_base: Rational;
+  interval: SummaryWindow['interval'];
+  source_first_pts: string;
+  source_last_pts: string;
+  source_end_pts: Rational | null;
+}
+export interface WindowReview extends ReviewProjection {
+  run_id: string;
+  window_id: string;
+  source_state: MediaSegment['source_state'];
+  can_verify: boolean;
+  needs_reverification: boolean;
+  verification_warning: string | null;
+  effective_decision: ReviewDecision;
+  binding: ReviewBinding;
+}
+export interface ReviewHeader {
+  revision: number;
+  decision: ReviewDecision;
+  effective_decision: ReviewDecision;
+  needs_reverification: boolean;
+  verification_warning: string | null;
+  observation_count: number;
+}
+export interface ReviewProgress {
+  total: number;
+  reviewed: number;
+  unreviewed: number;
+  quality_flagged: number;
+  failed: number;
+  incomplete: number;
+  needs_reverification: number;
+}
+export type ReviewChange = { actor: string; expected_revision: number } & (
+  | { action: 'add_observation'; observation: ProvisionalObservationInput }
+  | { action: 'update_observation'; observation_id: string; observation: ProvisionalObservationInput }
+  | { action: 'delete_observation'; observation_id: string }
+  | { action: 'set_decision'; decision: ReviewDecision; preview_id: string | null }
+  | { action: 'unable_to_assess'; note: string }
+);
+export interface ReviewEvent {
+  revision: number;
+  utc: string;
+  actor: string;
+  action: ReviewChange['action'];
+  run_id: string;
+  window_id: string;
+  segment_id: string;
+  source_sha256: string;
+  parameter_hash: string;
+  time_base: Rational;
+  interval: SummaryWindow['interval'];
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+  observation_id: string | null;
+  span: { start_pts: string; end_pts: string } | null;
+}
+export interface ReviewHistory { events: ReviewEvent[]; next_after_revision: number | null }
 
 export interface BatAPI {
-  upgradeSummaries(): Promise<ApiResult<{ schema_version: 3 }>>;
+  upgradeReviews(): Promise<ApiResult<{ schema_version: 4 }>>;
+  getWindowReview(windowID: string): Promise<ApiResult<WindowReview>>;
+  saveReview(windowID: string, input: ReviewChange): Promise<ApiResult<WindowReview>>;
+  reviewHistory(windowID: string, afterRevision: number): Promise<ApiResult<ReviewHistory>>;
+  setDraftDirty(dirty: boolean): Promise<ApiResult<{ dirty: boolean }>>;
+  upgradeSummaries(): Promise<ApiResult<{ schema_version: 3 | 4 }>>;
   listSummaryRuns(sessionID: string): Promise<ApiResult<SummaryRun[]>>;
   startSummaries(input: SummaryRequest): Promise<ApiResult<SummaryDetail>>;
   summaryRun(runID: string): Promise<ApiResult<SummaryDetail>>;
@@ -163,7 +255,7 @@ export interface BatAPI {
   listSessions(): Promise<ApiResult<RecordingSession[]>>;
   createSession(input: NewSession): Promise<ApiResult<RecordingSession>>;
   getMedia(sessionID: string): Promise<ApiResult<MediaSession>>;
-  upgradeMedia(): Promise<ApiResult<{ schema_version: 2 | 3 }>>;
+  upgradeMedia(): Promise<ApiResult<{ schema_version: 2 | 3 | 4 }>>;
   chooseMedia(sessionID: string): Promise<ApiResult<ImportJob | null>>;
   importStatus(jobID: string): Promise<ApiResult<ImportJob>>;
   cancelImport(jobID: string): Promise<ApiResult<ImportJob>>;

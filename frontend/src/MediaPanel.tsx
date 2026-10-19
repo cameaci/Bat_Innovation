@@ -37,8 +37,10 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [selectedPreview, setSelectedPreview] = useState<{ segment: MediaSegment; sourcePTS: string } | null>(null);
+  const [selectedPreview, setSelectedPreview] = useState<{ segment: MediaSegment; sourcePTS: string; windowID?: string } | null>(null);
+  const [previewReceipt, setPreviewReceipt] = useState<{ windowID: string; previewID: string } | null>(null);
   const [summaryBusy, setSummaryBusy] = useState(false);
+  const [reviewDirty, setReviewDirty] = useState(false);
   const importing = job?.state === 'running';
   const disabled = busy !== null || importing || selectedPreview !== null || summaryBusy;
 
@@ -46,6 +48,20 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
     onBusyChange?.(disabled || dirty);
     return () => onBusyChange?.(false);
   }, [disabled, dirty, onBusyChange]);
+
+  useEffect(() => {
+    const unsaved = dirty || reviewDirty;
+    void getAPI()?.setDraftDirty(unsaved).catch(() => undefined);
+    function preventUnload(event: BeforeUnloadEvent) {
+      if (!unsaved) return;
+      event.preventDefault(); event.returnValue = '';
+    }
+    window.addEventListener('beforeunload', preventUnload);
+    return () => {
+      window.removeEventListener('beforeunload', preventUnload);
+      void getAPI()?.setDraftDirty(false).catch(() => undefined);
+    };
+  }, [dirty, reviewDirty]);
 
   function replace(value: MediaSession) {
     setMedia(value);
@@ -129,6 +145,16 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
     setBusy(null);
   }
 
+  async function upgradeReviews() {
+    if (dirty || disabled) return;
+    setBusy('upgrade-review'); setError(''); setNotice('');
+    if (await request(api => api.upgradeReviews())) {
+      const value = await request(api => api.getMedia(session.id));
+      if (value) { replace(value); setNotice('Review storage upgraded to schema 4. Source and summary provenance are retained.'); }
+    }
+    setBusy(null);
+  }
+
   async function choose() {
     if (dirty) { setError('Save or discard timeline edits before importing.'); return; }
     setBusy('picker'); setError(''); setNotice('');
@@ -167,6 +193,7 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
   function closePreview() {
     const id = selectedPreview?.segment.id;
     setSelectedPreview(null);
+    setPreviewReceipt(null);
     if (id) requestAnimationFrame(() => {
       const row = document.getElementById(`segment-${id}`);
       row?.focus();
@@ -263,7 +290,14 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
       <p>Motion summaries need an explicit storage upgrade from schema 2 to schema 3. This adds run and window manifests and preserves existing sessions and source metadata.</p>
       <button type="button" disabled={disabled || dirty} onClick={() => void upgradeSummaries()}>Upgrade summary storage</button>
     </div>}
-    {(media?.schema_version ?? 0) >= 3 && <SummaryWindows sessionID={session.id} segments={segments} disabled={busy !== null || importing || selectedPreview !== null || dirty} onBusyChange={setSummaryBusy} onPreview={(segment, sourcePTS) => { if (!disabled && !dirty) setSelectedPreview({ segment, sourcePTS }); }} />}
-    {selectedPreview && <SourcePreview key={`${selectedPreview.segment.id}:${selectedPreview.sourcePTS}`} segment={selectedPreview.segment} initialPTS={selectedPreview.sourcePTS} clockAnchor={media?.clock_anchor ?? null} onClose={closePreview} />}
+    {media?.schema_version === 3 && <div className="review-upgrade">
+      <h3>Manual review storage</h3>
+      <p>Manual first review needs an explicit schema 3 to 4 upgrade. Existing source files, processing runs and window provenance are preserved.</p>
+      <button type="button" disabled={disabled || dirty} onClick={() => void upgradeReviews()}>Upgrade review storage</button>
+    </div>}
+    {(media?.schema_version ?? 0) >= 3 && <SummaryWindows sessionID={session.id} segments={segments} disabled={busy !== null || importing || selectedPreview !== null || dirty} reviewDisabled={busy !== null || importing || dirty} reviewEnabled={(media?.schema_version ?? 0) >= 4} previewReceipt={previewReceipt} onBusyChange={setSummaryBusy} onDraftChange={setReviewDirty} onPreview={(segment, sourcePTS, windowID) => {
+      if (busy === null && !importing && !dirty && selectedPreview === null) { setPreviewReceipt(null); setSelectedPreview({ segment, sourcePTS, windowID }); }
+    }} />}
+    {selectedPreview && <SourcePreview key={`${selectedPreview.segment.id}:${selectedPreview.sourcePTS}`} segment={selectedPreview.segment} initialPTS={selectedPreview.sourcePTS} clockAnchor={media?.clock_anchor ?? null} onClose={closePreview} onReady={previewID => setPreviewReceipt(previewID && selectedPreview.windowID ? { windowID: selectedPreview.windowID, previewID } : null)} />}
   </section>;
 }

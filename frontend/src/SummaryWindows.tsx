@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { MediaSegment, Rational, SummaryDetail, SummaryRun, SummaryWindow } from '../../electron/src/contracts';
 import { getAPI } from './api';
+import { ReviewPanel } from './ReviewPanel';
 
 const unavailable = 'The local backend is unavailable. Summary status could not be verified; retry after checking the backend.';
 const activeRun = (run: SummaryRun | null) => run?.state === 'queued' || run?.state === 'running';
@@ -28,12 +29,16 @@ function evidence(window: SummaryWindow): string {
   return window.stats.motion_pixels === 0 ? 'No motion evidence above threshold.' : 'Motion evidence above threshold.';
 }
 
-export function SummaryWindows({ sessionID, segments, disabled, onBusyChange, onPreview }: {
+export function SummaryWindows({ sessionID, segments, disabled, reviewDisabled, reviewEnabled, previewReceipt, onBusyChange, onDraftChange, onPreview }: {
   sessionID: string;
   segments: MediaSegment[];
   disabled: boolean;
+  reviewDisabled: boolean;
+  reviewEnabled: boolean;
+  previewReceipt: { windowID: string; previewID: string } | null;
   onBusyChange: (busy: boolean) => void;
-  onPreview: (segment: MediaSegment, sourcePTS: string) => void;
+  onDraftChange: (dirty: boolean) => void;
+  onPreview: (segment: MediaSegment, sourcePTS: string, windowID: string) => void;
 }) {
   const [runs, setRuns] = useState<SummaryRun[]>([]);
   const [runID, setRunID] = useState('');
@@ -46,18 +51,27 @@ export function SummaryWindows({ sessionID, segments, disabled, onBusyChange, on
   const [error, setError] = useState('');
   const [imageURL, setImageURL] = useState<string | null>(null);
   const [imageError, setImageError] = useState('');
+  const [reviewDirty, setReviewDirty] = useState(false);
+  const [reviewRefresh, setReviewRefresh] = useState(0);
+  const draftActive = useRef(false);
+  draftActive.current = reviewDirty;
+  const selectedSnapshot = useRef<SummaryWindow | null>(null);
   const inspectionHeading = useRef<HTMLHeadingElement>(null);
   const processing = activeRun(detail);
   const checking = runID !== '' && detail === null;
   const busy = action !== null || processing || cancelling || checking;
-  const selected = detail?.windows.find(window => window.id === selectedID);
+  const currentSelected = detail?.windows.find(window => window.id === selectedID);
+  if (currentSelected) selectedSnapshot.current = currentSelected;
+  const selected = currentSelected ?? (reviewDirty ? selectedSnapshot.current : null);
 
   useEffect(() => {
-    onBusyChange(busy);
+    onBusyChange(busy || reviewDirty);
     return () => onBusyChange(false);
-  }, [busy, onBusyChange]);
+  }, [busy, reviewDirty, onBusyChange]);
+  useEffect(() => { onDraftChange(reviewDirty); return () => onDraftChange(false); }, [reviewDirty, onDraftChange]);
 
   async function loadRuns() {
+    if (reviewDirty) return;
     setAction('loading'); setError(''); setVerified(false);
     try {
       const result = await getAPI()?.listSummaryRuns(sessionID);
@@ -90,7 +104,7 @@ export function SummaryWindows({ sessionID, segments, disabled, onBusyChange, on
           const value = result.value;
           setDetail(value); setVerified(true); setError('');
           setRuns(previous => [value, ...previous.filter(run => run.id !== value.id)]);
-          setSelectedID(previous => value.windows.some(window => window.id === previous) ? previous : value.windows[0]?.id ?? '');
+          setSelectedID(previous => draftActive.current || value.windows.some(window => window.id === previous) ? previous : value.windows[0]?.id ?? '');
           if (!activeRun(value)) setCancelling(false);
         }
       } catch { if (current) { setError(unavailable); setVerified(false); } }
@@ -98,7 +112,7 @@ export function SummaryWindows({ sessionID, segments, disabled, onBusyChange, on
     }
     void poll();
     return () => { current = false; clearTimeout(timer); };
-  }, [runID, sessionID, refresh]);
+  }, [runID, sessionID, refresh, reviewRefresh]);
 
   // Only the selected image is transferred and retained. The backend checks its checksum and original source.
   useEffect(() => {
@@ -123,7 +137,7 @@ export function SummaryWindows({ sessionID, segments, disabled, onBusyChange, on
   }, [selected?.id, selected?.image?.sha256, selected?.status, selected?.source_state, verified, refresh]);
 
   async function start() {
-    if (disabled || busy) return;
+    if (disabled || busy || reviewDirty) return;
     setAction('starting'); setError(''); setVerified(false);
     try {
       const result = await getAPI()?.startSummaries({ session_id: sessionID, window_seconds: 30 });
@@ -137,7 +151,7 @@ export function SummaryWindows({ sessionID, segments, disabled, onBusyChange, on
   }
 
   async function cancel() {
-    if (!detail || !processing || action !== null) return;
+    if (!detail || !processing || action !== null || reviewDirty) return;
     setCancelling(true); setAction('cancelling'); setError('');
     try {
       const result = await getAPI()?.cancelSummaries(detail.id);
@@ -148,6 +162,7 @@ export function SummaryWindows({ sessionID, segments, disabled, onBusyChange, on
   }
 
   function inspect(id: string) {
+    if (disabled || busy || reviewDirty) return;
     setSelectedID(id);
     requestAnimationFrame(() => {
       inspectionHeading.current?.focus();
@@ -157,27 +172,37 @@ export function SummaryWindows({ sessionID, segments, disabled, onBusyChange, on
 
   function preview(window: SummaryWindow) {
     const segment = segments.find(value => value.id === window.segment_id);
-    if (!disabled && !busy && verified && segment?.source_state === 'ready' && window.preview_pts !== null && (!window.source_state || window.source_state === 'ready')) onPreview(segment, window.preview_pts);
+    if (!disabled && !busy && (!reviewDirty || window.id === selectedID) && verified && segment?.source_state === 'ready' && window.preview_pts !== null && (!window.source_state || window.source_state === 'ready')) onPreview(segment, window.preview_pts, window.id);
+  }
+
+  function navigate(offset: number | 'unreviewed') {
+    if (!detail || disabled || busy || reviewDirty) return;
+    const position = detail.windows.findIndex(window => window.id === selectedID);
+    const next = offset === 'unreviewed'
+      ? [...detail.windows.slice(position + 1), ...detail.windows.slice(0, position)].find(window => !window.review || window.review.effective_decision === 'unreviewed')
+      : detail.windows[position + offset];
+    if (next) inspect(next.id);
   }
 
   return <section className="summary-windows" aria-labelledby="summary-heading" aria-busy={action !== null}>
     <h2 id="summary-heading">Motion summary windows</h2>
     <p className="detail">Every planned interval remains listed, including quiet, quality-flagged, failed and incomplete windows. A summary is derived motion evidence, not a bat classification or proof of absence. Check the original recording.</p>
     <div className="media-actions">
-      <button type="button" onClick={() => void start()} disabled={disabled || busy || segments.length === 0}>Generate motion summaries</button>
-      <button type="button" onClick={() => void loadRuns()} disabled={disabled || busy}>Refresh summary runs</button>
-      {processing && <button type="button" onClick={() => void cancel()} disabled={action !== null || cancelling}>{cancelling ? 'Cancellation in progress...' : 'Cancel summary run'}</button>}
+      <button type="button" onClick={() => void start()} disabled={disabled || busy || reviewDirty || segments.length === 0}>Generate motion summaries</button>
+      <button type="button" onClick={() => void loadRuns()} disabled={disabled || busy || reviewDirty}>Refresh summary runs</button>
+      {processing && <button type="button" onClick={() => void cancel()} disabled={action !== null || cancelling || reviewDirty}>{cancelling ? 'Cancellation in progress...' : 'Cancel summary run'}</button>}
     </div>
     <p className="detail">New runs use 30-second per-segment windows. Each rerun has its own manifest and keeps prior output traceability. Segments are never joined.</p>
     {error && <div className="error" role="alert"><strong>Summary operation failed</strong><p>{error}</p></div>}
     {action === 'loading' && <p role="status">Loading summary runs...</p>}
     {action === 'starting' && <p role="status">Planning all source windows and starting processing...</p>}
     {runs.length === 0 && action === null && <p>No summary runs saved.</p>}
-    {runs.length > 0 && <><label htmlFor="summary-run">Processing run</label><select id="summary-run" value={runID} disabled={disabled || busy} onChange={event => { setRunID(event.target.value); setSelectedID(''); }}>
+    {runs.length > 0 && <><label htmlFor="summary-run">Processing run</label><select id="summary-run" value={runID} disabled={disabled || busy || reviewDirty} onChange={event => { setRunID(event.target.value); setSelectedID(''); }}>
       {runs.map(run => <option key={run.id} value={run.id}>{run.started_at_utc} · {run.state} · {run.id}</option>)}
     </select></>}
     {detail && <>
       <p role="status">Run {detail.state}: {detail.counts.complete}/{detail.counts.planned} windows complete; {detail.counts.failed} failed; {detail.counts.incomplete} incomplete; {detail.counts.pending} pending; {detail.counts.running} running.{cancelling && ' Cancellation requested; waiting for resource cleanup.'}</p>
+      {detail.review_progress && <p role="status" className="review-progress">First review progress: {detail.review_progress.reviewed}/{detail.review_progress.total} reviewed; {detail.review_progress.unreviewed} unreviewed; {detail.review_progress.quality_flagged} quality-flagged; {detail.review_progress.failed} failed; {detail.review_progress.incomplete} incomplete; {detail.review_progress.needs_reverification} need re-verification. All planned windows remain in the denominator.</p>}
       {detail.error && <p className="source-warning" role="alert">{detail.error.code}: {detail.error.message}</p>}
       <details className="summary-provenance"><summary>Processing provenance and parameters</summary><dl className="media-timing">
         <dt>Run ID</dt><dd>{detail.id}</dd>
@@ -193,16 +218,22 @@ export function SummaryWindows({ sessionID, segments, disabled, onBusyChange, on
           <h3>Window {window.index + 1} · {segment?.metadata.filename ?? window.segment_id}</h3>
           <p>Processing: <strong>{window.status}</strong> · Segment elapsed seconds: {interval(window.interval.elapsed_start, window.interval.elapsed_end)}</p>
           <p>{evidence(window)}</p>
+          {reviewEnabled && <p>First review: <strong>{(window.review?.effective_decision ?? 'unreviewed').replaceAll('_', ' ')}</strong> · {window.review?.observation_count ?? 0} provisional observations{window.review?.needs_reverification ? ' · Re-verification required' : ''}</p>}
           {window.flags.length > 0 && <ul className="source-warning" aria-label="Window quality flags">{window.flags.map(flag => <li key={flag}>{flag}: {flagMeaning[flag] ?? 'Inspect the original recording.'}</li>)}</ul>}
           {window.error && <p className="source-warning">{window.error.code}: {window.error.message}</p>}
           {window.source_state && window.source_state !== 'ready' && <p className="source-warning">Original source state: {window.source_state}. Derived image and source preview are unavailable.</p>}
-          <div className="media-actions"><button type="button" aria-pressed={selectedID === window.id} onClick={() => inspect(window.id)}>Inspect summary</button><button type="button" disabled={disabled || busy || !verified || !sourceReady || window.preview_pts === null} onClick={() => preview(window)}>Preview window source</button></div>
+          <div className="media-actions"><button type="button" disabled={disabled || busy || reviewDirty} aria-pressed={selectedID === window.id} onClick={() => inspect(window.id)}>Inspect summary</button><button type="button" disabled={disabled || busy || (reviewDirty && window.id !== selectedID) || !verified || !sourceReady || window.preview_pts === null} onClick={() => preview(window)}>Preview window source</button></div>
         </article></li>;
       })}</ol>
       {detail.windows.length !== detail.counts.planned && <p role="alert" className="source-warning">The visible manifest count does not match the planned count. This run cannot establish complete source coverage.</p>}
     </>}
     {selected && <div className="summary-inspection" aria-label="Selected summary window">
       <h3 ref={inspectionHeading} tabIndex={-1}>Inspect window {selected.index + 1}</h3>
+      {reviewEnabled && <nav className="media-actions" aria-label="Window review navigation">
+        <button type="button" disabled={disabled || busy || reviewDirty || detail?.windows[0]?.id === selected.id} onClick={() => navigate(-1)}>Previous window</button>
+        <button type="button" disabled={disabled || busy || reviewDirty || detail?.windows.at(-1)?.id === selected.id} onClick={() => navigate(1)}>Next window</button>
+        <button type="button" disabled={disabled || busy || reviewDirty || !detail?.windows.some(window => window.id !== selected.id && (!window.review || window.review.effective_decision === 'unreviewed'))} onClick={() => navigate('unreviewed')}>Next unreviewed window</button>
+      </nav>}
       <p className="detail">Left: source reference/context. Right: motion evidence. Cyan = early third, yellow = middle third, magenta = late third of this window's source-time interval. Overlapping evidence combines colours. These colours do not identify animals.</p>
       {imageURL ? <img src={imageURL} alt={`Reference and motion evidence for window ${selected.index + 1}`} onError={() => { URL.revokeObjectURL(imageURL); setImageURL(null); setImageError('The generated summary image could not be displayed. Refresh summary runs and retry.'); }} /> : <p>{imageError ? 'Summary image unavailable.' : !verified ? 'Source validation is unavailable; no image is displayed.' : selected.status !== 'complete' || !selected.image ? 'No complete image exists for this window.' : selected.source_state && selected.source_state !== 'ready' ? 'The original source is unavailable or changed; no derived image is displayed.' : 'Loading summary image...'}</p>}
       {imageError && <p role="alert" className="source-warning">{imageError}</p>}
@@ -222,6 +253,8 @@ export function SummaryWindows({ sessionID, segments, disabled, onBusyChange, on
         <dt>Preview source PTS</dt><dd>{selected.preview_pts ?? 'Unavailable'}</dd>
       </dl>
       {(selected.stats.gaps?.length ?? 0) > 0 && <details><summary>Timestamp gap examples ({selected.stats.gaps?.length} shown; {selected.stats.gap_examples_recorded ?? selected.stats.gaps?.length} stored; {selected.stats.gap_count} total)</summary><ul>{selected.stats.gaps?.map((gap, index) => <li key={index}>{interval(gap.start, gap.end)} source seconds</li>)}</ul></details>}
+      {!currentSelected && reviewDirty && <p role="alert" className="source-warning">The selected window is missing from the latest manifest. Your review draft is retained. Saving is unavailable until the original window is restored.</p>}
+      {reviewEnabled && <ReviewPanel key={selected.id} window={selected} previewID={previewReceipt?.windowID === selected.id ? previewReceipt.previewID : null} disabled={reviewDisabled || busy || !verified || !currentSelected} onDirtyChange={setReviewDirty} onSaved={() => setReviewRefresh(value => value + 1)} />}
     </div>}
   </section>;
 }

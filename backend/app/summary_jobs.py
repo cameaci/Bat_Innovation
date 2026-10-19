@@ -180,7 +180,7 @@ class SummaryJobs:
     def start(self, session_id: str, window_seconds: int = 30) -> dict:
         if sys.platform != "linux":
             raise SummaryError("summary_limits_unavailable")
-        if store.schema_version(self.db_path) != store.SUMMARY_SCHEMA_VERSION:
+        if store.schema_version(self.db_path) not in (store.SUMMARY_SCHEMA_VERSION, store.REVIEW_SCHEMA_VERSION):
             raise SummaryError("summary_upgrade_required")
         with self._lock:
             if self._closed:

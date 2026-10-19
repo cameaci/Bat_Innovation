@@ -28,7 +28,7 @@ def upgrade(db_path: Path) -> None:
     with closing(store.connect(db_path)) as connection, connection:
         connection.execute("BEGIN IMMEDIATE")
         version = connection.execute("PRAGMA user_version").fetchone()[0]
-        if version == store.SUMMARY_SCHEMA_VERSION:
+        if version in store.SUMMARY_SCHEMA_VERSIONS:
             return
         if version != store.MEDIA_SCHEMA_VERSION:
             raise store.DatabaseSchemaError("Summary upgrade requires database schema version 2")
@@ -72,7 +72,7 @@ def create_run(db_path: Path, session_id: str, window_seconds: int = 30) -> str:
     with closing(store.connect(db_path)) as connection, connection:
         connection.execute("PRAGMA busy_timeout=1000")
         connection.execute("BEGIN IMMEDIATE")
-        if connection.execute("PRAGMA user_version").fetchone()[0] != store.SUMMARY_SCHEMA_VERSION:
+        if connection.execute("PRAGMA user_version").fetchone()[0] not in store.SUMMARY_SCHEMA_VERSIONS:
             raise store.DatabaseSchemaError("Explicit summary schema upgrade is required")
         if connection.execute("SELECT id FROM recording_session WHERE id=?", (session_id,)).fetchone() is None:
             raise ValueError("The recording session does not exist")
@@ -112,7 +112,7 @@ def _decode_window(row: sqlite3.Row | dict) -> dict:
 
 
 def private_run(db_path: Path, run_id: str) -> dict | None:
-    if store.schema_version(db_path) != store.SUMMARY_SCHEMA_VERSION:
+    if store.schema_version(db_path) not in store.SUMMARY_SCHEMA_VERSIONS:
         return None
     with closing(store.connect(db_path)) as connection:
         run = connection.execute("SELECT * FROM processing_run WHERE id=?", (run_id,)).fetchone()
@@ -126,7 +126,7 @@ def private_run(db_path: Path, run_id: str) -> dict | None:
 
 
 def private_window(db_path: Path, window_id: str) -> dict | None:
-    if store.schema_version(db_path) != store.SUMMARY_SCHEMA_VERSION:
+    if store.schema_version(db_path) not in store.SUMMARY_SCHEMA_VERSIONS:
         return None
     with closing(store.connect(db_path)) as connection:
         row = connection.execute("SELECT * FROM summary_window WHERE id=?", (window_id,)).fetchone()
@@ -176,7 +176,7 @@ def get_run(db_path: Path, run_id: str) -> dict | None:
 
 def list_runs(db_path: Path, session_id: str) -> list[dict]:
     """List bounded run headers in one query; never deserialize their windows."""
-    if store.schema_version(db_path) != store.SUMMARY_SCHEMA_VERSION:
+    if store.schema_version(db_path) not in store.SUMMARY_SCHEMA_VERSIONS:
         return []
     with closing(store.connect(db_path)) as connection:
         rows = connection.execute(
@@ -297,7 +297,7 @@ def finish_run(db_path: Path, run_id: str, state: str, error_code: str | None = 
 
 def recover(db_path: Path) -> None:
     """A restart never resumes silently or converts interrupted work to success."""
-    if store.schema_version(db_path) != store.SUMMARY_SCHEMA_VERSION:
+    if store.schema_version(db_path) not in store.SUMMARY_SCHEMA_VERSIONS:
         return
     with closing(store.connect(db_path)) as connection, connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -314,7 +314,7 @@ def recover(db_path: Path) -> None:
 
 
 def image_references(db_path: Path) -> set[str]:
-    if store.schema_version(db_path) != store.SUMMARY_SCHEMA_VERSION:
+    if store.schema_version(db_path) not in store.SUMMARY_SCHEMA_VERSIONS:
         return set()
     with closing(store.connect(db_path)) as connection:
         return {row[0] for row in connection.execute(

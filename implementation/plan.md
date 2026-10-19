@@ -1,6 +1,6 @@
 # Implementation plan
 
-Reviewed 2026-10-16. Status: **Slice 0, Slice 1A and Slice 1B are merged. Slice 2A is a synthetic Linux review candidate; Windows and ownership checks remain open**. This is a dependency-ordered sequence, not a promise of dates. The application is built in **small vertical slices**, each delivering observable behavior and tests. No workarounds or speculative infrastructure.
+Reviewed 2026-10-19. Status: **Slices 0, 1A, 1B and 2A are merged. Slice 3A is a synthetic Linux manual-review candidate; independent review, Windows and ownership checks remain open**. This is a dependency-ordered sequence, not a promise of dates. The application is built in **small vertical slices**, each delivering observable behavior and tests. No workarounds or speculative infrastructure.
 
 ## Principles of execution
 
@@ -68,7 +68,7 @@ Reviewed 2026-10-16. Status: **Slice 0, Slice 1A and Slice 1B are merged. Slice 
 
 ## Slice 2 - Complete IR motion-summary baseline
 
-**Slice 2A progress (2026-10-16):** [Issue #7](https://github.com/cameaci/Bat_Innovation/issues/7) adds an explicit schema 2 -> 3 upgrade, exact per-segment window plan, streaming consecutive grayscale differences, atomic two-panel PNGs, durable interruption/cancellation records and a minimal all-window inspection list. The [validation report](../docs/12-slice-2a-validation.md) records synthetic coverage, weak-motion evidence, actual local tests and limits. This increment awaits independent review; it does not complete ecological quality hardening, Windows execution or Slice 3.
+**Slice 2A progress (2026-10-16):** [Issue #7](https://github.com/cameaci/Bat_Innovation/issues/7) adds an explicit schema 2 -> 3 upgrade, exact per-segment window plan, streaming consecutive grayscale differences, atomic two-panel PNGs, durable interruption/cancellation records and a minimal all-window inspection list. The [validation report](../docs/12-slice-2a-validation.md) records synthetic coverage, weak-motion evidence, actual local tests and limits. PR #8 was subsequently independently reviewed, locally revalidated and merged as `2e091358fb1a169c9c7e34f9ce5a5dd89dd0f5f2`. Ecological quality hardening and Windows execution remain open.
 
 **Goal:** produce a reviewer-ready image for every source-time window.
 
@@ -88,13 +88,17 @@ Reviewed 2026-10-16. Status: **Slice 0, Slice 1A and Slice 1B are merged. Slice 
 
 **Goal:** make the first fully useful ecological workflow, without automated bat classification.
 
+**Slice 3A progress (2026-10-19):** [Issue #9](https://github.com/cameaci/Bat_Innovation/issues/9) adds explicit per-run/window first-review decisions, zero-to-many provisional observations with exact single-segment source-PTS spans, local reviewer attribution and an explicit transactional schema 3 -> 4 upgrade. Append-only audit events and their projection commit atomically with stale-save conflicts. All planned windows remain in progress; invalidated evidence retains history and requires a new human verification. The existing list/player gains the form, audit inspection and previous/next/next-unreviewed controls. Dirty edits survive polling, conflicts and backend interruption; normal close/reload requires confirmation. See [validation and limitations](../docs/13-slice-3a-validation.md). This candidate awaits independent review; fuller gallery/keyboard work and multi-span observations remain Slice 3B, and Slice 4 has not begun.
+
 - [ ] Build a summary gallery and time-ordered list in React. Show **all** windows by default, including apparently empty and quality-flagged windows.
 - [ ] Reuse/adapt the reference app's bounded navigation shell and keyboard patterns after licence/ownership checks.
 - [ ] Click a summary to open its source-video window, zoom and frame-step where playback support allows; show both relative time and optional separately sourced clock time.
-- [ ] Allow multiple observations within one window; allow a single observation to cite multiple source spans when continuity is validated.
-- [ ] Store observation, optional activity, possible ecological decision, uncertain/unknown counts and notes. A movement trace never automatically becomes a confirmed bat.
-- [ ] Implement next/previous, next-unreviewed and an all-window reviewed-progress denominator. A quiet window requires an **explicit reviewed/no discernible event** decision to count as reviewed.
-- [ ] Persist every change in local SQLite; reopening must reproduce the same review state.
+- [x] Allow multiple provisional observations within one window, each with one exact original source-PTS span.
+- [ ] Allow a single observation to cite multiple source spans when continuity is validated (Slice 3B).
+- [x] Store provisional visual category, optional activity, uncertain/unknown counts and notes. A movement trace never automatically becomes a confirmed bat.
+- [ ] Add authorised ecological interpretations separately from provisional visual observations (Slice 4).
+- [x] Implement next/previous, next-unreviewed and an all-window reviewed-progress denominator. A quiet window requires an **explicit reviewed/no discernible event** decision to count as reviewed.
+- [x] Persist every saved action in local SQLite with append-only attribution; reopening reproduces the same review state. Unsaved in-memory drafts are protected on normal navigation/close, not abrupt OS failure.
 
 **Exit:** a reviewer can complete a sample recording, resume after restarting the app, locate an event on the original source and identify unreviewed/flagged intervals without data loss. No species model or cloud storage is involved.
 

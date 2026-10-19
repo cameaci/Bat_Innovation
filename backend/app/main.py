@@ -23,6 +23,7 @@ from . import store, summary_store
 from .imports import ImportErrorResponse, ImportJobs, source_state
 from .preview import PreviewJobs
 from .summary_jobs import SummaryJobs
+from .reviews import ReviewService, install_routes as install_review_routes
 
 
 @dataclass(frozen=True)
@@ -164,6 +165,7 @@ def create_app(settings: Settings) -> FastAPI:
     jobs = ImportJobs(db_path, settings.data_dir, activity_lock)
     previews = PreviewJobs(db_path, settings.data_dir, activity_lock)
     summaries = SummaryJobs(db_path, settings.data_dir, activity_lock)
+    reviews = ReviewService(db_path, summaries, previews, activity_lock)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -209,7 +211,7 @@ def create_app(settings: Settings) -> FastAPI:
             raise ImportErrorResponse("session_missing", "The selected recording session does not exist.", 404)
 
     def require_media_schema() -> None:
-        if store.schema_version(db_path) not in (store.MEDIA_SCHEMA_VERSION, store.SUMMARY_SCHEMA_VERSION):
+        if store.schema_version(db_path) not in store.MEDIA_SCHEMA_VERSIONS:
             raise ImportErrorResponse("schema_upgrade_required", "Explicitly upgrade the local database before importing media.", 409)
 
     def media_inventory(session_id: str) -> dict:
@@ -287,7 +289,7 @@ def create_app(settings: Settings) -> FastAPI:
             raise ImportErrorResponse("summary_upgrade_failed", "The summary schema upgrade failed; the existing database was preserved.", 409) from None
         finally:
             activity_lock.release()
-        return {"schema_version": store.SUMMARY_SCHEMA_VERSION}
+        return {"schema_version": store.schema_version(db_path)}
 
     @app.get("/api/sessions/{session_id}/summary-runs", dependencies=[Depends(authenticate)])
     def list_summaries(session_id: UUID) -> list[dict]:
@@ -297,18 +299,19 @@ def create_app(settings: Settings) -> FastAPI:
     @app.post("/api/summaries", status_code=202, dependencies=[Depends(authenticate)])
     def start_summaries(payload: NewSummary) -> dict:
         require_session(str(payload.session_id))
-        return summaries.start(str(payload.session_id), payload.window_seconds)
+        return reviews.augment_summary(summaries.start(str(payload.session_id), payload.window_seconds))
 
     @app.get("/api/summaries/{run_id}", dependencies=[Depends(authenticate)])
     def get_summary(run_id: UUID) -> dict:
-        return summaries.get(str(run_id))
+        return reviews.augment_summary(summaries.get(str(run_id)))
 
     @app.post("/api/summaries/{run_id}/cancel", dependencies=[Depends(authenticate)])
     def cancel_summary(run_id: UUID, _payload: EmptyRequest = Body(default_factory=EmptyRequest)) -> dict:
-        return summaries.cancel(str(run_id))
+        return reviews.augment_summary(summaries.cancel(str(run_id)))
 
     @app.get("/api/summary-windows/{window_id}/image", dependencies=[Depends(authenticate)])
     def summary_image(window_id: UUID) -> Response:
         return Response(summaries.image(str(window_id)), media_type="image/png", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
+    install_review_routes(app, reviews, authenticate)
     return app

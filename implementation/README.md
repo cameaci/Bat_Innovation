@@ -1,6 +1,6 @@
 # Implementation
 
-Status: **Slice 0, Slice 1A import and the Slice 1B preview candidate verified on synthetic Linux media; independent review, Windows and ownership gates remain open**. Reviewed 2026-10-16.
+Status: **Slices 0/1A/1B/2A are merged. Slice 3A manual first review and provisional audit are a synthetic Linux candidate; independent review, Windows and ownership gates remain open**. Reviewed 2026-10-19.
 
 Build a small, local Windows desktop reviewer for **recorded active-infrared (IR) bat survey video**. Reuse the structure and review ergonomics of [Camera_Trap](https://github.com/cameaci/Camera_Trap), but not its unrelated wildlife models, platform features or entire source tree.
 
@@ -42,9 +42,9 @@ Prove reliable **video playback/seek** for original .MTS/.MP4 media, including s
 
 ## Current implementation status
 
-The backend retains FastAPI and SQLite with authenticated loopback routes. Slice 0 and Slice 1A import are merged. The Slice 1B candidate adds bounded, explicitly derived source previews with exact original PTS mapping; the technical playback gate passed generated MP4/MTS marker tests in Electron on Linux. No motion-summary or ecological result is claimed.
+The backend retains FastAPI and SQLite with authenticated loopback routes. Merged import, bounded source preview and complete motion-window ledger use exact original PTS. Slice 3A adds explicit first-review actions, provisional observations, run-specific progress and an append-only local audit through the existing React list/player and restricted Electron bridge. No automated ecological result is claimed.
 
-The React/TypeScript UI uses the real backend through a restricted Electron bridge. Local validation passed 76 Python tests, strict TypeScript, 21 Node checks and 9 Electron tests, including visual marker seeking, persistence, explicit failures and worker cleanup. See [recorded validation and limits](../docs/07-research-log.md). Windows preview process limits are not implemented; Windows runtime, camera-original compatibility and binary redistribution/packaging remain unverified. The candidate awaits independent review.
+See [Slice 3A validation](../docs/13-slice-3a-validation.md) for local test commands, audit evidence and limits. Windows processing limits are not implemented; Windows runtime, camera-original compatibility and binary redistribution/packaging remain unverified. The candidate awaits independent review.
 
 ## Delivery order
 

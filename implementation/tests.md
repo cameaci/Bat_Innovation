@@ -1,6 +1,6 @@
 # Testing and ecological evaluation
 
-Reviewed: 2026-10-16. Status: **Slices 0/1A/1B are merged; Slice 2A has local synthetic coverage, motion and lifecycle checks. Independent review, ecological and Windows acceptance remain open**. Quality requirements are part of implementation, not a later add-on.
+Reviewed: 2026-10-19. Status: **Slices 0/1A/1B/2A are merged; Slice 3A has local synthetic review/audit checks. Independent review, ecological and Windows acceptance remain open**. Quality requirements are part of implementation, not a later add-on.
 
 ## Testing layers
 
@@ -110,4 +110,8 @@ The [Slice 2A report](../docs/12-slice-2a-validation.md) records exact commands 
 
 Coverage includes exact 7200/65/9-second plans, original-PTS ownership digests, VFR/nonzero MTS/independent sources, empty/unknown-ended intervals, weak noisy motion retained in saved time-coloured PNGs, actual limited full-HD decoding, transactional migration/rollback, source/image integrity, restart, kill/cancel/parent death, ENOSPC injection and thread-start/secondary-cleanup failures. Every failed, quiet and quality-flagged window remains accessible through the minimal list. Successful media/API operations are real; only negative OS conditions and the native-dialog return are injected.
 
-Windows execution, representative camera originals, physical picker interaction, OS sandbox, binary redistribution, full-mounted-volume/power-loss testing and ecological performance remain unverified. Large-history and full-survey performance are not benchmarked; hard limits can leave explicit incomplete windows. No Slice 3 review workflow is implemented.
+Windows execution, representative camera originals, physical picker interaction, OS sandbox, binary redistribution, full-mounted-volume/power-loss testing and ecological performance remain unverified. Large-history and full-survey performance are not benchmarked; hard limits can leave explicit incomplete windows. Slice 2A itself did not implement human review.
+
+## Slice 3A local acceptance
+
+The [Slice 3A report](../docs/13-slice-3a-validation.md) records the exact final local commands and results. New checks cover transactional v3 -> v4 migration/rollback, immutable event replay, atomic projection updates, conflicting writers and stale forms, exact original PTS/window bounds, unknown counts, observation edits/deletion, explicit no-event decisions, all-window totals, run isolation and restart. Evidence invalidation and identical restoration must keep old decisions effectively unreviewed until a fresh explicit verified action. Real Electron tests include loaded source previews, audit reopening, dirty close/reload/quit confirmation and a stopped then killed backend during Save. Successful decoding and persistence are never mocked. No GitHub Actions was used; Slice 4 and ecological acceptance remain out of scope.
