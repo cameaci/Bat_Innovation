@@ -1,6 +1,6 @@
 # Implementation plan
 
-Reviewed 2026-10-19. Status: **Slices 0, 1A, 1B and 2A are merged. Slice 3A is a synthetic Linux manual-review candidate; independent review, Windows and ownership checks remain open**. This is a dependency-ordered sequence, not a promise of dates. The application is built in **small vertical slices**, each delivering observable behavior and tests. No workarounds or speculative infrastructure.
+Reviewed 2026-10-19. Status: **Slices 0, 1A, 1B, 2A and 3A are merged. Early Windows beta Stage A is a feasibility report, not an installer; native Windows, distribution and ownership checks remain open**. This is a dependency-ordered sequence, not a promise of dates. The application is built in **small vertical slices**, each delivering observable behavior and tests. No workarounds or speculative infrastructure.
 
 ## Principles of execution
 
@@ -88,7 +88,7 @@ Reviewed 2026-10-19. Status: **Slices 0, 1A, 1B and 2A are merged. Slice 3A is a
 
 **Goal:** make the first fully useful ecological workflow, without automated bat classification.
 
-**Slice 3A progress (2026-10-19):** [Issue #9](https://github.com/cameaci/Bat_Innovation/issues/9) adds explicit per-run/window first-review decisions, zero-to-many provisional observations with exact single-segment source-PTS spans, local reviewer attribution and an explicit transactional schema 3 -> 4 upgrade. Append-only audit events and their projection commit atomically with stale-save conflicts. All planned windows remain in progress; invalidated evidence retains history and requires a new human verification. The existing list/player gains the form, audit inspection and previous/next/next-unreviewed controls. Dirty edits survive polling, conflicts and backend interruption; normal close/reload requires confirmation. See [validation and limitations](../docs/13-slice-3a-validation.md). This candidate awaits independent review; fuller gallery/keyboard work and multi-span observations remain Slice 3B, and Slice 4 has not begun.
+**Slice 3A progress (2026-10-19):** [Issue #9](https://github.com/cameaci/Bat_Innovation/issues/9) adds explicit per-run/window first-review decisions, zero-to-many provisional observations with exact single-segment source-PTS spans, local reviewer attribution and an explicit transactional schema 3 -> 4 upgrade. Append-only audit events and their projection commit atomically with stale-save conflicts. All planned windows remain in progress; invalidated evidence retains history and requires a new human verification. The existing list/player gains the form, audit inspection and previous/next/next-unreviewed controls. Dirty edits survive polling, conflicts and backend interruption; normal close/reload requires confirmation. See [validation and limitations](../docs/13-slice-3a-validation.md). PR #10 was subsequently independently reviewed, locally revalidated including discarded-actor restoration, and merged as `b4fd13c4325475b413e2072eb539ce00d9a18579`. Fuller gallery/keyboard work and multi-span observations remain Slice 3B; Slice 4 has not begun.
 
 - [ ] Build a summary gallery and time-ordered list in React. Show **all** windows by default, including apparently empty and quality-flagged windows.
 - [ ] Reuse/adapt the reference app's bounded navigation shell and keyboard patterns after licence/ownership checks.
@@ -101,6 +101,20 @@ Reviewed 2026-10-19. Status: **Slices 0, 1A, 1B and 2A are merged. Slice 3A is a
 - [x] Persist every saved action in local SQLite with append-only attribution; reopening reproduces the same review state. Unsaved in-memory drafts are protected on normal navigation/close, not abrupt OS failure.
 
 **Exit:** a reviewer can complete a sample recording, resume after restarting the app, locate an event on the original source and identify unreviewed/flagged intervals without data loss. No species model or cloud storage is involved.
+
+## Early Windows beta feasibility gate
+
+**Progress (2026-10-19):** Slice 3A PR #10 was independently reviewed, locally revalidated and merged as `b4fd13c4325475b413e2072eb539ce00d9a18579`. [Issue #11](https://github.com/cameaci/Bat_Innovation/issues/11) brings forward a narrow feasibility gate without beginning Slice 4 or wholesale Slice 5. No native Windows environment is attached, so Stage B stops. The [report](../docs/14-windows-beta-feasibility.md) records exact source blockers, a hash-pinned availability-only Windows wheel candidate, native procedures/owners and distribution obligations. Runtime source and existing fail-closed guards are unchanged.
+
+- [x] Inventory packaged rejection, backend/worker paths, import containment, native filesystem/SQLite assumptions and current test limitations.
+- [x] Inspect official Windows x64 artifact availability, exact wheel hashes and bundled licence/native-library evidence; distinguish publisher-only runtime checksums from verified wheel bytes.
+- [x] Specify the smallest candidate offline layout and native Job Object/storage/cancellation tests without claiming a working build.
+- [ ] Approve codec/runtime distribution terms, complete notices/source material and a private channel.
+- [ ] Allocate native Windows 10/11 x64 lab machines and verify fixed offline boot without bypassing packaged rejection.
+- [ ] Demonstrate bounded import/preview/summary, process-tree cleanup, file confinement/publication and restart on native Windows before enabling media.
+- [ ] Validate real native dialog, normal Chromium sandbox, clean install/update/uninstall and preservation of originals/review database.
+
+**Stop:** no usable Windows beta until native boot, safe media processing and approved binary distribution pass. Linux tests, cross-target wheel downloads and static inspection do not close native gates.
 
 ## Slice 4 - Minimal ecological QA and exports
 
