@@ -66,7 +66,7 @@ export function App() {
 
   async function createSession(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy) return;
+    if (busy || mediaBusy) return;
     const display_name = displayName.trim();
     const camera_ref = cameraRef.trim();
     setNotice('');
@@ -128,10 +128,10 @@ export function App() {
         <p className="detail">Use synthetic metadata only for this foundation check.</p>
         <form onSubmit={event => void createSession(event)}>
           <label htmlFor="display-name">Display name</label>
-          <input id="display-name" name="display_name" value={displayName} onChange={event => setDisplayName(event.target.value)} required maxLength={120} disabled={busy !== null} />
+          <input id="display-name" name="display_name" value={displayName} onChange={event => setDisplayName(event.target.value)} required maxLength={120} disabled={busy !== null || mediaBusy} />
           <label htmlFor="camera-ref">Camera reference</label>
-          <input id="camera-ref" name="camera_ref" value={cameraRef} onChange={event => setCameraRef(event.target.value)} required maxLength={120} disabled={busy !== null} />
-          <button type="submit" disabled={busy !== null || !health || sessions === null}>
+          <input id="camera-ref" name="camera_ref" value={cameraRef} onChange={event => setCameraRef(event.target.value)} required maxLength={120} disabled={busy !== null || mediaBusy} />
+          <button type="submit" disabled={busy !== null || mediaBusy || !health || sessions === null}>
             {busy === 'saving' ? 'Saving...' : 'Create session'}
           </button>
         </form>

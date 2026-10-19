@@ -1,7 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { BatAPI, NewSession, PreviewRequest, SaveMedia, SummaryRequest } from './contracts';
+import type { BatAPI, NewSession, PreviewRequest, SaveMedia, SummaryRequest, ReviewChange } from './contracts';
 
 const api: BatAPI = {
+  upgradeReviews: (...args: []) => ipcRenderer.invoke('bat:upgrade-reviews', ...args),
+  getWindowReview: (...args: [string]) => ipcRenderer.invoke('bat:get-window-review', ...args),
+  saveReview: (...args: [string, ReviewChange]) => ipcRenderer.invoke('bat:save-review', ...args),
+  reviewHistory: (...args: [string, number]) => ipcRenderer.invoke('bat:review-history', ...args),
+  setDraftDirty: (...args: [boolean]) => ipcRenderer.invoke('bat:set-draft-dirty', ...args),
   upgradeSummaries: (...args: []) => ipcRenderer.invoke('bat:upgrade-summaries', ...args),
   listSummaryRuns: (...args: [string]) => ipcRenderer.invoke('bat:list-summary-runs', ...args),
   startSummaries: (...args: [SummaryRequest]) => ipcRenderer.invoke('bat:start-summaries', ...args),

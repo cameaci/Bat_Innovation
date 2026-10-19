@@ -22,7 +22,7 @@ test('real backend readiness, SQLite session persistence and narrow renderer bri
     }))).toEqual({
       nodeProcess: 'undefined',
       nodeRequire: 'undefined',
-      bridge: ['cancelImport', 'cancelPreview', 'cancelSummaries', 'chooseMedia', 'createSession', 'getMedia', 'health', 'importStatus', 'listSessions', 'listSummaryRuns', 'previewContent', 'previewStatus', 'saveMedia', 'startPreview', 'startSummaries', 'summaryImage', 'summaryRun', 'upgradeMedia', 'upgradeSummaries'],
+      bridge: ['cancelImport', 'cancelPreview', 'cancelSummaries', 'chooseMedia', 'createSession', 'getMedia', 'getWindowReview', 'health', 'importStatus', 'listSessions', 'listSummaryRuns', 'previewContent', 'previewStatus', 'reviewHistory', 'saveMedia', 'saveReview', 'setDraftDirty', 'startPreview', 'startSummaries', 'summaryImage', 'summaryRun', 'upgradeMedia', 'upgradeReviews', 'upgradeSummaries'],
       bridgeFrozen: true,
     });
     expect(await page.evaluate(() => new Promise<string>((resolve) => {

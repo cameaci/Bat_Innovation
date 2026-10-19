@@ -1,6 +1,6 @@
 # Technical design
 
-Reviewed: 2026-10-16. Status: **Slice 0, Slice 1A import and the Slice 1B preview candidate are Linux-tested; motion/review/export sections remain specifications**.
+Reviewed: 2026-10-19. Status: **Slices 0/1A/1B/2A are merged; Slice 3A manual review is a Linux-tested candidate. Fuller review/QA/export sections remain specifications**. The [Slice 3A report](../docs/13-slice-3a-validation.md) records the implemented audit and draft contract.
 
 ## 1. Architecture and boundaries
 
@@ -59,7 +59,7 @@ Use the reference repo only as a **pattern library** for API boundaries, desktop
 
 ## 3. Media and time contracts
 
-**Decoder decision:** test [PyAV](https://github.com/PyAV-Org/PyAV) as the first candidate for reading frames with their actual `pts` and `time_base`, with OpenCV used for pixel masks and FFmpeg/ffprobe for media inspection and preview. Adopt PyAV only after pinned Windows build, codec, PTS and licensing tests; avoid simultaneously maintaining two unsynchronised decoder pipelines.
+**Decoder decision:** PyAV is the single production decode/PTS path for import, bounded preview and summaries. NumPy and Pillow provide motion arrays and published images; no second OpenCV/ffprobe timing pipeline is used. Synthetic Linux PTS/seek checks passed; Windows execution, camera-original compatibility and binary redistribution remain unverified. See [reuse decisions](reuse.md).
 
 **Recording session:** one camera on one survey visit. It contains an explicitly ordered list of original **segments** (e.g. independently recorded clips). Each segment has a source-file ID, path stored **only locally**, checksum, video stream metadata, orientation, field order/interlacing and source PTS timebase.
 

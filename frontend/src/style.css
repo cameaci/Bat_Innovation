@@ -88,3 +88,17 @@ ul.source-warning { padding-left: 32px; }
 .summary-provenance summary { cursor: pointer; font-weight: 600; }
 .summary-provenance pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .85rem; }
 .summary-upgrade { margin-top: 20px; }
+.review-upgrade { margin-top: 20px; }
+.review-panel { margin: 22px 0 0; border-color: #7d8d86; }
+.review-panel > label, .review-panel > input, .review-panel > textarea { display: block; max-width: 580px; }
+.review-panel > button { margin: 8px 0 16px; }
+.review-panel .media-actions { margin-top: 14px; }
+.review-panel textarea { width: 100%; padding: 9px 11px; color: inherit; border: 1px solid #7d8d86; border-radius: 4px; font: inherit; }
+.observation-form { margin: 18px 0; padding: 16px; border: 1px solid #d6dedb; max-width: 620px; }
+.observation-form h4 { margin: 0 0 8px; }
+.checkbox-label { display: flex; align-items: center; gap: 8px; }
+.checkbox-label input { width: auto; margin: 0; }
+.observation-list { padding-left: 24px; }
+.observation-list > li { margin: 14px 0; border-bottom: 1px solid #d6dedb; }
+.review-progress { padding: 12px 16px; background: #edf3f0; border-left: 3px solid #395e51; }
+.review-history pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .85rem; }

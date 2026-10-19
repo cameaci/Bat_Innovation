@@ -6,11 +6,12 @@ import { getAPI } from './api';
 const rational = (value: Rational) => `${value.num}/${value.den}`;
 const unavailable = 'The local backend is unavailable. Close the preview and retry after checking the backend.';
 
-export function SourcePreview({ segment, initialPTS, clockAnchor, onClose }: {
+export function SourcePreview({ segment, initialPTS, clockAnchor, onClose, onReady }: {
   segment: MediaSegment;
   initialPTS?: string;
   clockAnchor: ClockAnchor | null;
   onClose: () => void;
+  onReady?: (previewID: string | null) => void;
 }) {
   const [sourcePTS, setSourcePTS] = useState(initialPTS ?? segment.metadata.first_pts);
   const [job, setJob] = useState<PreviewJob | null>(null);
@@ -26,8 +27,11 @@ export function SourcePreview({ segment, initialPTS, clockAnchor, onClose }: {
   const generation = useRef(0);
   const activeJob = useRef<string | null>(null);
   const clipURL = useRef<string | null>(null);
+  const readyCallback = useRef(onReady);
+  readyCallback.current = onReady;
 
   function clearClip() {
+    readyCallback.current?.(null);
     if (video.current) {
       video.current.pause();
       video.current.removeAttribute('src');
@@ -65,6 +69,7 @@ export function SourcePreview({ segment, initialPTS, clockAnchor, onClose }: {
     heading.current?.focus();
     heading.current?.scrollIntoView({ block: 'start' });
     return () => {
+      readyCallback.current?.(null);
       generation.current += 1;
       releaseJob();
       if (clipURL.current) URL.revokeObjectURL(clipURL.current);
@@ -236,7 +241,7 @@ export function SourcePreview({ segment, initialPTS, clockAnchor, onClose }: {
     </div>
     <p className="preview-status" role="status">{starting ? 'Creating preview...' : job?.state === 'running' ? `Creating preview: ${job.phase}` : url ? loaded ? 'Preview ready' : 'Loading preview...' : notice || 'No preview displayed.'}</p>
     {error && <div className="error" role="alert"><strong>Preview unavailable</strong><p>{error}</p></div>}
-    {url && <video ref={video} src={url} controls preload="auto" aria-label="Derived source preview" onLoadedData={() => setLoaded(true)} onSeeking={() => setDisplayed(null)} onError={() => fail('The derived preview could not be played. Close it and retry; this browser may not support the preview codec.')} />}
+    {url && <video ref={video} src={url} controls preload="auto" aria-label="Derived source preview" onLoadedData={() => { setLoaded(true); if (job?.state === 'ready') readyCallback.current?.(job.id); }} onSeeking={() => setDisplayed(null)} onError={() => fail('The derived preview could not be played. Close it and retry; this browser may not support the preview codec.')} />}
     {displayed && <dl className="preview-timing" aria-label="Displayed original frame">
       <dt>Displayed source PTS</dt><dd>{displayed.source_pts}</dd>
       <dt>Displayed source time (seconds)</dt><dd>{rational(displayed.source_time)}</dd>

@@ -1,6 +1,6 @@
 # Reuse and dependency audit
 
-Reviewed: 2026-10-16. Source: [cameaci/Camera_Trap](https://github.com/cameaci/Camera_Trap) and upstream project documentation already in the [research register](../docs/02-source-register.md). The immutable Slice 2A source revision and dependency artifacts are recorded below.
+Reviewed: 2026-10-19. Source: [cameaci/Camera_Trap](https://github.com/cameaci/Camera_Trap) and upstream project documentation already in the [research register](../docs/02-source-register.md). The immutable Slice 2A source revision and dependency artifacts are recorded below.
 
 ## Reuse policy
 
@@ -48,6 +48,10 @@ For each candidate record: exact path and licence, transitive dependencies, exte
 ### Dependency and binary licence review
 
 Before introducing each dependency or bundling FFmpeg, record exact version, package/binary URL, code and binary licence, bundled codec configuration, network behavior and distribution terms. **FFmpeg licensing can differ by build and codecs. PyAV is published under a BSD-style licence, while its binary wheels may bundle FFmpeg with separate terms.** Verify exact versions and packaged binaries. Camera_Trap licence text does not cover independent new dependencies. Avoid shipping model weights in v1.
+
+### Slice 3A inspection and decision
+
+At the same immutable Camera_Trap commit `176451c272628f4f8e38633db747cb427d587072`, inspected `VerifyDetailShell.tsx`, `useLabelsProgress.ts`, `EventCountPanel.tsx`, `models/audit_log.py`, `models/event_observation.py` and `db/base.py`. The [Slice 3A report](../docs/13-slice-3a-validation.md#source-first-design) records their exact blob IDs and licence notices. Navigation, an all-window denominator and attributed audit concepts are pattern-only reuse. Count-zero hiding, AI/human count merging, taxonomy and cascade deletion do not fit provisional source-PTS observations. No Camera_Trap code was copied; no new dependency, lockfile or binary was added. Existing Bat Innovation `SummaryWindows`, `SourcePreview`, narrow IPC, SQLite transactions and standard triggers supply the implementation. Publication authority and binary redistribution gates remain open.
 
 ### Slice 2A inspection and decision
 

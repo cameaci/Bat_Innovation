@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isSaveMedia, isUUID, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
+import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isReviewCursor, isSaveMedia, isUUID, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
 import type { NewSession } from './contracts';
 
 const UI_URL = 'app://bat/index.html';
@@ -9,6 +9,25 @@ const repoRoot = resolve(__dirname, '../..');
 const backend = new BackendRuntime();
 let window: BrowserWindow | undefined;
 let quitting = false;
+let draftDirty = false;
+let discardApproved = false;
+
+function confirmDiscard(force = false): boolean {
+  if (!draftDirty && !force) return true;
+  const options = {
+    type: 'warning' as const,
+    buttons: ['Keep editing', 'Discard draft'],
+    defaultId: 0, cancelId: 0, noLink: true,
+    title: 'Unsaved manual review',
+    message: 'Discard the unsaved review draft?',
+    detail: 'Changes have not been confirmed in this window. Keep editing to check and save them. Discarding a draft does not undo any action already recorded in the audit history.',
+  };
+  const response = window && !window.isDestroyed() ? dialog.showMessageBoxSync(window, options) : dialog.showMessageBoxSync(options);
+  if (response !== 1) return false;
+  draftDirty = false;
+  discardApproved = true;
+  return true;
+}
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 
@@ -86,7 +105,16 @@ async function open(): Promise<void> {
   window.webContents.on('will-frame-navigate', (event) => { if (!event.isMainFrame || event.url !== UI_URL) event.preventDefault(); });
   window.webContents.on('will-redirect', (event) => event.preventDefault());
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
-  window.on('closed', () => { window = undefined; });
+  window.on('close', event => { if (!confirmDiscard()) event.preventDefault(); });
+  window.webContents.on('will-prevent-unload', event => {
+    // Renderer beforeunload is a second guard if its dirty IPC is still queued.
+    // Electron preventDefault here permits the explicitly approved unload.
+    if (discardApproved || confirmDiscard(true)) {
+      discardApproved = false;
+      event.preventDefault();
+    }
+  });
+  window.on('closed', () => { window = undefined; draftDirty = false; discardApproved = false; });
   handle('bat:health', 0, () => backend.health());
   handle('bat:list-sessions', 0, () => backend.listSessions());
   handle('bat:create-session', 1, ([input]) => backend.createSession(input as NewSession));
@@ -103,6 +131,16 @@ async function open(): Promise<void> {
     const result = await backend.previewContent(id);
     return result.ok && result.value.bytes.byteLength > MAX_PREVIEW_BYTES ? invalid('Preview content exceeds its byte limit.') : result;
   });
+  handle('bat:set-draft-dirty', 1, ([dirty]) => {
+    if (typeof dirty !== 'boolean') return invalid('Use a boolean draft state.');
+    draftDirty = dirty;
+    if (dirty) discardApproved = false;
+    return { ok: true, value: { dirty } };
+  });
+  handle('bat:upgrade-reviews', 0, () => backend.upgradeReviews());
+  handle('bat:get-window-review', 1, ([id]) => isUUID(id) ? backend.getWindowReview(id) : invalid('Select a valid window ID.'));
+  handle('bat:save-review', 2, ([id, input]) => isUUID(id) && isReviewChange(input) ? backend.saveReview(id, input) : invalid('Use only attributed manual review fields and a current revision.'));
+  handle('bat:review-history', 2, ([id, cursor]) => isUUID(id) && isReviewCursor(cursor) ? backend.reviewHistory(id, cursor) : invalid('Select a valid window ID and history revision.'));
   handle('bat:upgrade-summaries', 0, () => backend.upgradeSummaries());
   handle('bat:list-summary-runs', 1, ([id]) => isUUID(id) ? backend.listSummaryRuns(id) : invalid('Select a valid session ID.'));
   handle('bat:start-summaries', 1, ([input]) => isSummaryRequest(input) ? backend.startSummaries(input) : invalid('Select a session ID and an integer window duration from 1 to 120 seconds.'));
@@ -150,6 +188,9 @@ app.on('window-all-closed', () => app.quit());
 app.on('before-quit', (event) => {
   if (quitting) return;
   event.preventDefault();
+  // Close/unload confirmation must finish before backend shutdown. If the
+  // renderer blocks closing, its draft and the running backend stay available.
+  if (window && !window.isDestroyed()) { window.close(); return; }
   quitting = true;
   void backend.stop().then(() => app.quit());
 });

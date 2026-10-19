@@ -4,7 +4,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia, SummaryRequest, SummaryRun, SummaryDetail } from './contracts';
+import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia, SummaryRequest, SummaryRun, SummaryDetail, ReviewChange, WindowReview, ReviewHistory } from './contracts';
 
 const unavailable = (message = 'Backend unavailable. Reopen the app after checking Python, ffmpeg and ffprobe.') =>
   ({ ok: false, error: { code: 'unavailable', message } }) as const;
@@ -15,6 +15,39 @@ export const invalid = (message = 'Invalid application request.') => ({ ok: fals
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const exactKeys = (value: Record<string, unknown>, keys: string[]) => Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 const provenance = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0 && value.length <= 500;
+
+export const MAX_REVIEW_BYTES = 8 * 1024;
+export const isReviewCursor = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value < 2 ** 31;
+const sourcePTS = (value: unknown): value is string => {
+  if (typeof value !== 'string' || !/^-?\d{1,19}$/.test(value)) return false;
+  const pts = BigInt(value);
+  return pts >= -(2n ** 63n) && pts < 2n ** 63n;
+};
+export function isReviewChange(input: unknown): input is ReviewChange {
+  if (!object(input) || !isReviewCursor(input.expected_revision) || typeof input.actor !== 'string' ||
+      input.actor.trim().length < 1 || input.actor.length > 120 || typeof input.action !== 'string') return false;
+  const common = ['actor', 'expected_revision', 'action'];
+  if (input.action === 'set_decision') {
+    if (!exactKeys(input, [...common, 'decision', 'preview_id']) ||
+      (typeof input.decision !== 'string' || !['unreviewed', 'reviewed_with_observations', 'reviewed_no_discernible_event'].includes(input.decision)) ||
+      !(input.preview_id === null || isUUID(input.preview_id))) return false;
+  } else if (input.action === 'unable_to_assess') {
+    if (!exactKeys(input, [...common, 'note']) || typeof input.note !== 'string' || input.note.trim().length < 1 || input.note.length > 2000) return false;
+  } else if (input.action === 'delete_observation') {
+    if (!exactKeys(input, [...common, 'observation_id']) || !isUUID(input.observation_id)) return false;
+  } else if (input.action === 'add_observation' || input.action === 'update_observation') {
+    if (!exactKeys(input, [...common, 'observation', ...(input.action === 'update_observation' ? ['observation_id'] : [])]) ||
+      (input.action === 'update_observation' && !isUUID(input.observation_id))) return false;
+    const row = input.observation;
+    if (!object(row) || !exactKeys(row, ['segment_id', 'start_pts', 'end_pts', 'category', 'activity', 'count', 'uncertain', 'notes']) ||
+      !isUUID(row.segment_id) || !sourcePTS(row.start_pts) || !sourcePTS(row.end_pts) || BigInt(row.start_pts) >= BigInt(row.end_pts) ||
+      (typeof row.category !== 'string' || !['bat', 'insect', 'bird', 'other', 'uncertain'].includes(row.category)) ||
+      !(row.activity === null || (typeof row.activity === 'string' && row.activity.length <= 120)) ||
+      !(row.count === null || (typeof row.count === 'number' && Number.isInteger(row.count) && row.count >= 0 && row.count <= 100000)) ||
+      typeof row.uncertain !== 'boolean' || typeof row.notes !== 'string' || row.notes.length > 2000) return false;
+  } else return false;
+  try { return Buffer.byteLength(JSON.stringify(input), 'utf8') <= MAX_REVIEW_BYTES; } catch { return false; }
+}
 
 export const MAX_SUMMARY_BYTES = 4 * 1024 * 1024;
 export function isSummaryRequest(input: unknown): input is SummaryRequest {
@@ -49,6 +82,13 @@ export function isSaveMedia(input: unknown): input is SaveMedia {
 
 // Only known error codes cross the desktop boundary; arbitrary response text never does.
 const mediaErrors: Record<string, string> = {
+  review_schema_required: 'Use Upgrade review storage before saving manual review.',
+  review_upgrade_failed: 'Review storage could not be upgraded. The existing database was preserved.',
+  review_invalid: 'Check the reviewer label, exact source PTS span and provisional fields.',
+  review_conflict: 'This window changed since the form was loaded. Your draft is retained; discard it and reload before retrying.',
+  review_missing: 'The selected run, window or observation is unavailable. Refresh after saving or discarding your draft.',
+  review_unavailable: 'Original evidence cannot currently be verified. Use unable to assess, or restore valid evidence and create a source preview.',
+  review_busy: 'A media operation is active. Keep your draft and retry after it stops.',
   summary_image_missing: 'The generated image is missing. Its original window remains in the manifest; generate a new run.',
   summary_no_sources: 'Import original recordings before generating summaries.',
   coverage_mismatch: 'Decoded source coverage differs from imported metadata. The run remains incomplete.',
@@ -98,7 +138,7 @@ const mediaErrors: Record<string, string> = {
 function mediaFailure(code: unknown) {
   return typeof code === 'string' && Object.hasOwn(mediaErrors, code) ? { code, message: mediaErrors[code] } : { code: 'backend', message: 'Media request failed. Refresh media and check the selected originals.' };
 }
-type ApiRoute = '/api/health' | '/api/sessions' | '/api/media/upgrade' | '/api/media/import' |
+type ApiRoute = '/api/reviews/upgrade' | `/api/summary-windows/${string}/review` | `/api/summary-windows/${string}/review-actions` | `/api/summary-windows/${string}/review-history?after_revision=${number}` | '/api/health' | '/api/sessions' | '/api/media/upgrade' | '/api/media/import' |
   `/api/sessions/${string}/media` | `/api/media/import/${string}` | `/api/media/import/${string}/cancel` |
   '/api/summaries/upgrade' | '/api/summaries' | `/api/summaries/${string}` | `/api/summaries/${string}/cancel` | `/api/sessions/${string}/summary-runs` |
   '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
@@ -185,7 +225,7 @@ export class BackendClient {
   getMedia(sessionID: string): Promise<ApiResult<MediaSession>> {
     return isUUID(sessionID) ? this.call(`/api/sessions/${sessionID}/media`) : Promise.resolve(invalid());
   }
-  upgradeMedia(): Promise<ApiResult<{ schema_version: 2 | 3 }>> { return this.call('/api/media/upgrade', 'POST'); }
+  upgradeMedia(): Promise<ApiResult<{ schema_version: 2 | 3 | 4 }>> { return this.call('/api/media/upgrade', 'POST'); }
   saveMedia(sessionID: string, input: SaveMedia): Promise<ApiResult<MediaSession>> {
     return isUUID(sessionID) && isSaveMedia(input) ? this.call(`/api/sessions/${sessionID}/media`, 'PUT', input) : Promise.resolve(invalid('Use only selected segment IDs, continuity evidence and an optional UTC clock anchor.'));
   }
@@ -220,7 +260,17 @@ export class BackendClient {
     if (result.ok && result.value.error) result.value.error = mediaFailure(result.value.error.code);
     return result;
   }
-  upgradeSummaries(): Promise<ApiResult<{ schema_version: 3 }>> { return this.call('/api/summaries/upgrade', 'POST'); }
+  upgradeReviews(): Promise<ApiResult<{ schema_version: 4 }>> { return this.call('/api/reviews/upgrade', 'POST'); }
+  getWindowReview(windowID: string): Promise<ApiResult<WindowReview>> {
+    return isUUID(windowID) ? this.call(`/api/summary-windows/${windowID}/review`) : Promise.resolve(invalid());
+  }
+  saveReview(windowID: string, input: ReviewChange): Promise<ApiResult<WindowReview>> {
+    return isUUID(windowID) && isReviewChange(input) ? this.call(`/api/summary-windows/${windowID}/review-actions`, 'POST', input) : Promise.resolve(invalid('Use an attributed review action, current revision and exact source PTS fields only.'));
+  }
+  reviewHistory(windowID: string, afterRevision: number): Promise<ApiResult<ReviewHistory>> {
+    return isUUID(windowID) && isReviewCursor(afterRevision) ? this.call(`/api/summary-windows/${windowID}/review-history?after_revision=${afterRevision}`) : Promise.resolve(invalid());
+  }
+  upgradeSummaries(): Promise<ApiResult<{ schema_version: 3 | 4 }>> { return this.call('/api/summaries/upgrade', 'POST'); }
   async listSummaryRuns(sessionID: string): Promise<ApiResult<SummaryRun[]>> {
     if (!isUUID(sessionID)) return invalid();
     const result = await this.call<SummaryRun[]>(`/api/sessions/${sessionID}/summary-runs`);
@@ -398,7 +448,7 @@ export class BackendRuntime {
     return health.ok && this.client ? operation(this.client) : health as ApiResult<T>;
   }
   getMedia(sessionID: string): Promise<ApiResult<MediaSession>> { return this.ready(client => client.getMedia(sessionID)); }
-  upgradeMedia(): Promise<ApiResult<{ schema_version: 2 | 3 }>> { return this.ready(client => client.upgradeMedia()); }
+  upgradeMedia(): Promise<ApiResult<{ schema_version: 2 | 3 | 4 }>> { return this.ready(client => client.upgradeMedia()); }
   saveMedia(sessionID: string, input: SaveMedia): Promise<ApiResult<MediaSession>> { return this.ready(client => client.saveMedia(sessionID, input)); }
   importSelectedMedia(sessionID: string, paths: string[]): Promise<ApiResult<ImportJob>> { return this.ready(client => client.importSelectedMedia(sessionID, paths)); }
   importStatus(jobID: string): Promise<ApiResult<ImportJob>> { return this.ready(client => client.importStatus(jobID)); }
@@ -408,7 +458,11 @@ export class BackendRuntime {
   cancelPreview(jobID: string): Promise<ApiResult<PreviewJob>> { return this.ready(client => client.cancelPreview(jobID)); }
   previewContent(jobID: string): Promise<ApiResult<{ bytes: Uint8Array }>> { return this.ready(client => client.previewContent(jobID)); }
 
-  upgradeSummaries(): Promise<ApiResult<{ schema_version: 3 }>> { return this.ready(client => client.upgradeSummaries()); }
+  upgradeReviews(): Promise<ApiResult<{ schema_version: 4 }>> { return this.ready(client => client.upgradeReviews()); }
+  getWindowReview(windowID: string): Promise<ApiResult<WindowReview>> { return this.ready(client => client.getWindowReview(windowID)); }
+  saveReview(windowID: string, input: ReviewChange): Promise<ApiResult<WindowReview>> { return this.ready(client => client.saveReview(windowID, input)); }
+  reviewHistory(windowID: string, afterRevision: number): Promise<ApiResult<ReviewHistory>> { return this.ready(client => client.reviewHistory(windowID, afterRevision)); }
+  upgradeSummaries(): Promise<ApiResult<{ schema_version: 3 | 4 }>> { return this.ready(client => client.upgradeSummaries()); }
   listSummaryRuns(sessionID: string): Promise<ApiResult<SummaryRun[]>> { return this.ready(client => client.listSummaryRuns(sessionID)); }
   startSummaries(input: SummaryRequest): Promise<ApiResult<SummaryDetail>> { return this.ready(client => client.startSummaries(input)); }
   summaryRun(runID: string): Promise<ApiResult<SummaryDetail>> { return this.ready(client => client.summaryRun(runID)); }
