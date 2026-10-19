@@ -1,0 +1,220 @@
+{
+  "purpose": "Availability-only candidate; not a runtime lock, native validation or redistribution approval",
+  "target": "CPython 3.14.8 standard-GIL Windows x64",
+  "checked": "2026-10-19",
+  "windows_execution": false,
+  "python_runtime": {
+    "filename": "python-3.14.8-embed-amd64.zip",
+    "url": "https://www.python.org/ftp/python/3.14.8/python-3.14.8-embed-amd64.zip",
+    "sha256": "a93abe456ab01bd96d7a085b3cdb6566b3063f4241360d114142fbdb07f0a310",
+    "verification": "Official release table and artifact SBOM only; not downloaded or executed",
+    "metadata_url": "https://www.python.org/downloads/release/python-3148/",
+    "sbom_url": "https://www.python.org/ftp/python/3.14.8/python-3.14.8-embed-amd64.zip.spdx.json"
+  },
+  "electron_runtime": {
+    "filename": "electron-v44.7.2-win32-x64.zip",
+    "url": "https://github.com/electron/electron/releases/download/v44.7.2/electron-v44.7.2-win32-x64.zip",
+    "sha256": "10a89447ef64ac5cb9f782af48ffd83734a40ae91681259d1048ca3c9e6c5da4",
+    "verification": "Official SHASUMS256.txt downloaded only; ZIP not downloaded or executed",
+    "checksums_url": "https://github.com/electron/electron/releases/download/v44.7.2/SHASUMS256.txt"
+  },
+  "wheels": [
+    {
+      "name": "annotated-doc",
+      "version": "0.0.5",
+      "filename": "annotated_doc-0.0.5-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/3e/30/e900b21425a860e195f32e37657aa1f7c7f2b1bfb26f03ca209b90933c06/annotated_doc-0.0.5-py3-none-any.whl",
+      "sha256": "117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101",
+      "size": 5302,
+      "license_expression": "MIT",
+      "requires_python": ">=3.9",
+      "verification": "Downloaded; SHA256 equals official PyPI metadata; ZIP inspection on Linux only"
+    },
+    {
+      "name": "annotated-types",
+      "version": "0.8.0",
+      "filename": "annotated_types-0.8.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/99/91/8acff4f5e50511b911bbccb72b8628a49c68ce14148cd9f6431094859a90/annotated_types-0.8.0-py3-none-any.whl",
+      "sha256": "f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0",
+      "size": 13427,
+      "license_expression": "MIT",
+      "requires_python": ">=3.10",
+      "verification": "Downloaded; SHA256 equals official PyPI metadata; ZIP inspection on Linux only"
+    },
+    {
+      "name": "anyio",
+      "version": "4.15.1",
+      "filename": "anyio-4.15.1-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/12/b8/4bd346e22b28902df4d651910f5242c28d84e4a5c2435ca5c3f797ed7e2e/anyio-4.15.1-py3-none-any.whl",
+      "sha256": "6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101",
+      "size": 132079,
+      "license_expression": "MIT",
+      "requires_python": ">=3.10",
+      "verification": "Downloaded; SHA256 equals official PyPI metadata; ZIP inspection on Linux only"
+    },
+    {
+      "name": "av",
+      "version": "19.0.1",
+      "filename": "av-19.0.1-cp312-abi3-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/e6/dc/a87a5a5e3ac462734f9befd8bad1447301e5802d8c111e22bf708fba7af3/av-19.0.1-cp312-abi3-win_amd64.whl",
+      "sha256": "906fc3db09288319a75ea23ffefb59961c7dbe0d1c074601507a89de7d8593d8",
+      "size": 28149519,
+      "license_expression": "BSD-3-Clause",
+      "requires_python": ">=3.12",
+      "verification": "Downloaded; SHA256 equals official PyPI metadata; ZIP inspection on Linux only"
+    },
+    {
+      "name": "click",
+      "version": "8.5.0",
+      "filename": "click-8.5.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/58/50/6c0d534c5f134586a8e1ba4e330569e32f057e33372ae556463212fb4cd3/click-8.5.0-py3-none-any.whl",
+      "sha256": "255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360",
+      "size": 125251,
+      "license_expression": "BSD-3-Clause",
+      "requires_python": ">=3.10",
+      "verification": "Downloaded; SHA256 equals official PyPI metadata; ZIP inspection on Linux only"
+    },
+    {
+      "name": "fastapi",
+      "version": "0.128.2",
+      "filename": "fastapi-0.128.2-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/c1/f2/80df24108572630bb2adef3d97f1e774b18ec25bfbab5528f36cba6478c0/fastapi-0.128.2-py3-none-any.whl",
+      "sha256": "55bfd9490ca0125707d80e785583c2dc57840bb66e3a0bbc087d20c364964dc0",
+      "size": 104032,
+      "license_expression": "MIT",
+      "requires_python": ">=3.9",
+      "verification": "Downloaded; SHA256 equals official PyPI metadata; ZIP inspection on Linux only"
+    },
+    {
+      "name": "h11",
+      "version": "0.16.0",
+      "filename": "h11-0.16.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl",
+      "sha256": "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86",
+      "size": 37515,
+      "license_expression": "MIT",
+      "requires_python": ">=3.8",
+      "verification": "Downloaded; SHA256 equals official PyPI metadata; ZIP inspection on Linux only"
+    },
+    {
+      "name": "idna",
+      "version": "3.20",
+      "filename": "idna-3.20-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/58/a2/bb081bab032533a855d44de1d56f8e8426114ff1ba5d1f07a438a0a654f8/idna-3.20-py3-none-any.whl",
+      "sha256": "ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c",
+      "size": 69583,
+      "license_expression": "BSD-3-Clause",
+      "requires_python": ">=3.9",
+      "verification": "Downloaded; SHA256 equals official PyPI metadata; ZIP inspection on Linux only"
+    },
+    {
+      "name": "numpy",
+      "version": "2.4.2",
+      "filename": "numpy-2.4.2-cp314-cp314-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/05/cb/eff72a91b2efdd1bc98b3b8759f6a1654aa87612fc86e3d87d6fe4f948c4/numpy-2.4.2-cp314-cp314-win_amd64.whl",
+      "sha256": "068cdb2d0d644cdb45670810894f6a0600797a69c05f1ac478e8d31670b8ee75",
+      "size": 12443072,
+      "license_expression": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0",
+      "requires_python": ">=3.11",
+      "verification": "Downloaded; SHA256 equals official PyPI metadata; ZIP inspection on Linux only"
+    },
+    {
+      "name": "pillow",
+      "version": "12.1.1",
+      "filename": "pillow-12.1.1-cp314-cp314-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/40/72/4c245f7d1044b67affc7f134a09ea619d4895333d35322b775b928180044/pillow-12.1.1-cp314-cp314-win_amd64.whl",
+      "sha256": "50480dcd74fa63b8e78235957d302d98d98d82ccbfac4c7e12108ba9ecbdba15",
+      "size": 7176748,
+      "license_expression": "MIT-CMU",
+      "requires_python": ">=3.10",
+      "verification": "Downloaded; SHA256 equals official PyPI metadata; ZIP inspection on Linux only"
+    },
+    {
+      "name": "pydantic",
+      "version": "2.13.5",
+      "filename": "pydantic-2.13.5-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/eb/47/c95ffc2009878c7aac0c5e08528022dcb885933252a88b5f170058014464/pydantic-2.13.5-py3-none-any.whl",
+      "sha256": "346a034f080da3755d8e9cb5e00e8b07de1d39e4f6e2c87d8ab7cafa0b269a73",
+      "size": 472589,
+      "license_expression": "MIT",
+      "requires_python": ">=3.9",
+      "verification": "Downloaded; SHA256 equals official PyPI metadata; ZIP inspection on Linux only"
+    },
+    {
+      "name": "pydantic_core",
+      "version": "2.46.5",
+      "filename": "pydantic_core-2.46.5-cp314-cp314-win_amd64.whl",
+      "url": "https://files.pythonhosted.org/packages/f7/3c/60674207246bc0a4009d2391b7c7251c7159f279c8d2ab8aae8ef46f3dee/pydantic_core-2.46.5-cp314-cp314-win_amd64.whl",
+      "sha256": "fa10ef4112775900e7a0661068635eb67b2ab824fbde764de6e0e21982a93db0",
+      "size": 2042648,
+      "license_expression": "MIT",
+      "requires_python": ">=3.9",
+      "verification": "Downloaded; SHA256 equals official PyPI metadata; ZIP inspection on Linux only"
+    },
+    {
+      "name": "starlette",
+      "version": "0.50.0",
+      "filename": "starlette-0.50.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/d9/52/1064f510b141bd54025f9b55105e26d1fa970b9be67ad766380a3c9b74b0/starlette-0.50.0-py3-none-any.whl",
+      "sha256": "9e5391843ec9b6e472eed1365a78c8098cfceb7a74bfd4d6b1c0c0095efb3bca",
+      "size": 74033,
+      "license_expression": "BSD-3-Clause",
+      "requires_python": ">=3.10",
+      "verification": "Downloaded; SHA256 equals official PyPI metadata; ZIP inspection on Linux only"
+    },
+    {
+      "name": "typing_extensions",
+      "version": "4.16.0",
+      "filename": "typing_extensions-4.16.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl",
+      "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+      "size": 45571,
+      "license_expression": "PSF-2.0",
+      "requires_python": ">=3.9",
+      "verification": "Downloaded; SHA256 equals official PyPI metadata; ZIP inspection on Linux only"
+    },
+    {
+      "name": "typing-inspection",
+      "version": "0.4.4",
+      "filename": "typing_inspection-0.4.4-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/67/81/4add07e5172b7ac40d8ed5ff580409a7801a4fe26d529bdd915401dabfbe/typing_inspection-0.4.4-py3-none-any.whl",
+      "sha256": "65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147",
+      "size": 14750,
+      "license_expression": "MIT",
+      "requires_python": ">=3.10",
+      "verification": "Downloaded; SHA256 equals official PyPI metadata; ZIP inspection on Linux only"
+    },
+    {
+      "name": "uvicorn",
+      "version": "0.48.0",
+      "filename": "uvicorn-0.48.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/01/be/72532be3da7acc5fdfbccdb95215cd04f995a0886532a5b423f929cda4cc/uvicorn-0.48.0-py3-none-any.whl",
+      "sha256": "48097851328b87ec36117d3d575234519eb58c2b22d79666e9bbc6c49a761dad",
+      "size": 71410,
+      "license_expression": "BSD-3-Clause",
+      "requires_python": ">=3.10",
+      "verification": "Downloaded; SHA256 equals official PyPI metadata; ZIP inspection on Linux only"
+    }
+  ],
+  "all_marker_requirements_satisfied": true,
+  "source_base_sha": "b4fd13c4325475b413e2072eb539ce00d9a18579",
+  "redistribution_approved": false,
+  "license_fields": "Declared package metadata only; bundled components require separate approval in docs/14-windows-beta-feasibility.md",
+  "marker_environment": {
+    "implementation_name": "cpython",
+    "implementation_version": "3.14.8",
+    "os_name": "nt",
+    "platform_machine": "AMD64",
+    "platform_python_implementation": "CPython",
+    "platform_release": "",
+    "platform_system": "Windows",
+    "platform_version": "",
+    "python_full_version": "3.14.8",
+    "python_version": "3.14",
+    "sys_platform": "win32",
+    "extra": ""
+  },
+  "verified_applicable_dependency_edges": 16,
+  "production_requirements_sha256": "5b2d6114c2799e76bc9c2032883d9c48aace048d6dfcc606b17c153738051947",
+  "npm_lock_sha256": "c5f8257159cf72d27103a7677fcf7c2dddf442b132c0c19c938ffaa8a05bf0f5"
+}

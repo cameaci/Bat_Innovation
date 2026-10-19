@@ -1,6 +1,6 @@
 # Implementation
 
-Status: **Slices 0/1A/1B/2A are merged. Slice 3A manual first review and provisional audit are a synthetic Linux candidate; independent review, Windows and ownership gates remain open**. Reviewed 2026-10-19.
+Status: **Slices 0/1A/1B/2A/3A are merged. Early Windows beta work is a Stage A feasibility report only; native Windows, binary distribution and ownership gates remain open**. Reviewed 2026-10-19.
 
 Build a small, local Windows desktop reviewer for **recorded active-infrared (IR) bat survey video**. Reuse the structure and review ergonomics of [Camera_Trap](https://github.com/cameaci/Camera_Trap), but not its unrelated wildlife models, platform features or entire source tree.
 
@@ -23,7 +23,7 @@ Select a local camera recording session (one or more original video files), insp
 
 ## Selected stack
 
-**Electron -> React/TypeScript -> local FastAPI -> Python FFmpeg/OpenCV -> SQLite + local outputs.**
+**Electron -> React/TypeScript -> local FastAPI -> Python PyAV/NumPy/Pillow -> SQLite + local outputs.**
 
 This is a **small local monolith**, not a multi-service deployment. React and FastAPI can be developed together before Electron is packaged. No cloud API, user account service, trained model, GPU, container orchestration or data lake is needed for v1.
 
@@ -44,7 +44,7 @@ Prove reliable **video playback/seek** for original .MTS/.MP4 media, including s
 
 The backend retains FastAPI and SQLite with authenticated loopback routes. Merged import, bounded source preview and complete motion-window ledger use exact original PTS. Slice 3A adds explicit first-review actions, provisional observations, run-specific progress and an append-only local audit through the existing React list/player and restricted Electron bridge. No automated ecological result is claimed.
 
-See [Slice 3A validation](../docs/13-slice-3a-validation.md) for local test commands, audit evidence and limits. Windows processing limits are not implemented; Windows runtime, camera-original compatibility and binary redistribution/packaging remain unverified. The candidate awaits independent review.
+See [Slice 3A validation](../docs/13-slice-3a-validation.md) for local audit evidence and the [early Windows feasibility report](../docs/14-windows-beta-feasibility.md) for the gated blocker matrix and exact candidate artifacts. Slice 3A merged as `b4fd13c4325475b413e2072eb539ce00d9a18579`. Windows processing limits, native runtime, camera-original compatibility and binary redistribution/packaging remain unverified. No Windows installer exists from this work.
 
 ## Delivery order
 
