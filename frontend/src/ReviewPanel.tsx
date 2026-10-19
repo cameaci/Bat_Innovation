@@ -67,6 +67,9 @@ export function ReviewPanel({ window: selected, previewID, disabled, onDirtyChan
 
   function discard() {
     setEditor(null); setEditingID(null); setCountText(''); setUnableNote('');
+    // The locally edited attribution is part of the draft too. Restoring
+    // the last saved actor prevents a later action from being misattributed.
+    setActor(review?.actor ?? '');
     draft.current = false; setDirty(false); setError(''); setNotice('Unsaved review draft discarded.');
     void load();
   }
