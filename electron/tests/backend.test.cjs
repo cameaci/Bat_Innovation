@@ -7,10 +7,94 @@ const { createServer: httpServer } = require('node:http');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
-const { BackendClient, BackendRuntime, isReviewChange, isReviewCursor, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } = require('../dist/backend.js');
+const { BackendClient, BackendRuntime, isReviewChange, isQAChange, isReviewCursor, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } = require('../dist/backend.js');
 
 const repoRoot = path.resolve(__dirname, '../..');
 const python = process.env.BAT_PYTHON || 'python';
+
+test('QA bridge permits only confirmed bounded ID-based actions and exact revisions', async () => {
+  const id = '12345678-1234-1234-1234-123456789abc';
+  const input = { actor: 'Synthetic QA', expected_revision: 0, expected_first_review_revision: 1,
+    expected_evidence_revision: 0, action: 'set_decision', decision: 'agree', note: '', suggestion: null,
+    preview_id: id, confirmed: true };
+  assert.equal(isQAChange(input), true);
+  for (const extra of [{ confirmed: false }, { actor: ' ' }, { expected_revision: true },
+    { expected_first_review_revision: 2 ** 31 }, { expected_evidence_revision: -1 }, { path: '/unselected' },
+    { decision: 'finalised' }, { note: 'x'.repeat(2001) }, { preview_id: '/private/file.mp4' },
+    { decision: 'disagree', note: '' }, { action: 'retract', decision: null, note: 'Retract', preview_id: id }]) {
+    assert.equal(isQAChange({ ...input, ...extra }), false);
+  }
+  const suggestion = { observation_id: id, observation_revision: 1, note: 'Synthetic uncertainty', category: 'uncertain', count: null };
+  const disagreement = { ...input, decision: 'disagree', note: 'Synthetic reason', suggestion };
+  assert.equal(isQAChange(disagreement), true);
+  for (const extra of [{ observation_id: '/private' }, { observation_revision: 0 }, { count: true },
+    { count: -1 }, { category: 'species' }, { category: { toString: 'uncertain' } }, { note: ' ' }, { path: '/not-allowed' }]) {
+    assert.equal(isQAChange({ ...disagreement, suggestion: { ...suggestion, ...extra } }), false);
+  }
+  assert.equal(isQAChange({ ...disagreement, actor: '😀'.repeat(60), note: '😀'.repeat(1000), suggestion: { ...suggestion, note: '😀'.repeat(1000) } }), false);
+  const client = new BackendClient(1, 'synthetic-not-launched-token');
+  expectFailure(await client.getWindowQA('/private'), 'invalid');
+  expectFailure(await client.saveQA(id, { ...input, path: '/private' }), 'invalid');
+  expectFailure(await client.qaHistory(id, -1), 'invalid');
+});
+
+test('real QA bridge preserves separate audit and source binding across backend restart', { timeout: 45000 }, async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'bat-qa-runtime-'));
+  const dataDir = path.join(directory, 'data');
+  const runtime = new BackendRuntime(), reopened = new BackendRuntime();
+  t.after(async () => { await Promise.all([runtime.stop(), reopened.stop()]); await rm(directory, { recursive: true, force: true }); });
+  const generated = spawnSync(python, ['-m', 'backend.tests.summary_fixtures', path.join(directory, 'originals')], { cwd: repoRoot, encoding: 'utf8', timeout: 15000 });
+  assert.equal(generated.status, 0, generated.stderr);
+  const source = JSON.parse(generated.stdout).quiet_9;
+  const bytes = await readFile(source);
+  const port = await availablePort();
+  assert.equal((await runtime.start({ python, repoRoot, dataDir, port })).ok, true);
+  const unauthorized = new BackendClient(port, 'incorrect-synthetic-token');
+  const id = '12345678-1234-1234-1234-123456789abc';
+  expectFailure(await unauthorized.upgradeQA(), 'unauthorized');
+  expectFailure(await unauthorized.getWindowQA(id), 'unauthorized');
+  expectFailure(await unauthorized.qaHistory(id, 0), 'unauthorized');
+  assert.equal((await runtime.upgradeMedia()).ok, true);
+  const session = await runtime.createSession({ display_name: 'Synthetic QA', camera_ref: 'Synthetic camera' });
+  const imported = await runtime.importSelectedMedia(session.value.id, [source]);
+  assert.equal((await waitUntilTerminal(() => runtime.importStatus(imported.value.id), ['running'])).state, 'complete');
+  assert.equal((await runtime.upgradeSummaries()).ok, true);
+  assert.equal((await runtime.upgradeReviews()).ok, true);
+  assert.deepEqual(await runtime.upgradeQA(), { ok: true, value: { schema_version: 5 } });
+  const started = await runtime.startSummaries({ session_id: session.value.id, window_seconds: 30 });
+  const run = await waitUntilTerminal(() => runtime.summaryRun(started.value.id), ['queued','running']);
+  const row = run.windows[0];
+  assert.equal(run.qa_progress.pending, 1);
+  const preview = await runtime.startPreview({ segment_id: row.segment_id, source_pts: row.preview_pts });
+  assert.equal((await waitUntilTerminal(() => runtime.previewStatus(preview.value.id), ['running'])).state, 'ready');
+  const first = await runtime.saveReview(row.id, { actor: 'Synthetic first reviewer', expected_revision: 0, action: 'set_decision', decision: 'reviewed_no_discernible_event', preview_id: preview.value.id });
+  assert.equal(first.ok, true, JSON.stringify(first));
+  const before = await runtime.reviewHistory(row.id, 0);
+  const state = await runtime.getWindowQA(row.id);
+  const change = { actor: 'Synthetic second reviewer', expected_revision: 0, expected_first_review_revision: 1,
+    expected_evidence_revision: state.value.current_evidence_revision, action: 'set_decision', decision: 'agree', note: '', suggestion: null, preview_id: preview.value.id, confirmed: true };
+  expectFailure(await unauthorized.saveQA(row.id, change), 'unauthorized');
+  expectFailure(await runtime.saveQA(row.id, { ...change, actor: ' SYNTHETIC FIRST REVIEWER ' }), 'qa_same_actor');
+  const saved = await runtime.saveQA(row.id, change);
+  assert.equal(saved.ok, true, JSON.stringify(saved));
+  assert.equal(saved.value.status, 'agree');
+  expectFailure(await runtime.saveQA(row.id, change), 'qa_conflict');
+  assert.deepEqual(await runtime.reviewHistory(row.id, 0), before);
+  const events = await runtime.qaHistory(row.id, 0);
+  assert.equal(events.value.events[0].source_sha256, row.source_sha256);
+  assert.deepEqual(events.value.events[0].interval, row.interval);
+  assert.doesNotMatch(JSON.stringify(events), /source_path|image_path|bat-qa-runtime-/);
+  await runtime.stop();
+  assert.equal((await reopened.start({ python, repoRoot, dataDir })).ok, true);
+  assert.deepEqual(await reopened.getWindowQA(row.id), saved);
+  assert.deepEqual(await reopened.qaHistory(row.id, 0), events);
+  assert.deepEqual(await readFile(source), bytes);
+  const edited = await reopened.saveReview(row.id, { actor: 'Synthetic first reviewer', expected_revision: 1, action: 'unable_to_assess', note: 'Synthetic new uncertainty' });
+  assert.equal(edited.ok, true);
+  assert.equal((await reopened.getWindowQA(row.id)).value.needs_reverification, true);
+  assert.equal((await reopened.summaryRun(run.id)).value.qa_progress.agree, 0);
+  assert.deepEqual(await reopened.qaHistory(row.id, 0), events);
+});
 
 async function availablePort() {
   const server = createServer();

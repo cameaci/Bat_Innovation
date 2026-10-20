@@ -1,6 +1,6 @@
 # Testing and ecological evaluation
 
-Reviewed: 2026-10-19. Status: **Slices 0/1A/1B/2A/3A are merged; Slice 3B is a local synthetic gallery/navigation review candidate. Ecological and Windows acceptance remain open**. Quality requirements are part of implementation, not a later add-on.
+Reviewed: 2026-10-20. Status: **Slices 0/1A/1B/2A/3A/3B are merged; Slice 4A is a local synthetic independent-QA review candidate. Ecological and Windows acceptance remain open**. Quality requirements are part of implementation, not a later add-on.
 
 ## Testing layers
 
@@ -121,3 +121,9 @@ The [Slice 3A report](../docs/13-slice-3a-validation.md) records the exact final
 The [Slice 3B report](../docs/15-slice-3b-validation.md) records exact commands, the paused-seek regression correction and bounds. Final local results: **201 Python tests**, strict TypeScript, **43 Node tests** and **17 Electron E2E tests**, plus `git diff --check`, all exit **0**. Vite/Electron builds passed; no GitHub Actions was used. New cases cover all seven filters with unchanged progress, quiet/failed/incomplete cards, chronological independent-PTS sources, dirty navigation/scoped keys, exact displayed-frame draft copying in both seek directions, audit/restart/source invalidation and real failed processing/retry. Existing review, run-isolation, PTS and worker-cleanup suites remain successful.
 
 The sparse two-hour fixture produces 240 real window records/images and exercises every one of 20 gallery pages. Final observed peak: one binary transfer and seven Blob URLs; 74 URLs created/revoked, zero retained after unmount and zero reservation collisions. This is bounded UI/lifetime evidence, not full-rate media throughput, RSS or ecological acceptance. Existing pre-roll limits remain enforced. Windows, camera-original compatibility, physical picker, OS sandbox and binary redistribution remain unverified; no Slice 4 or packaging change.
+
+## Slice 4A local acceptance
+
+The [Slice 4A report](../docs/16-slice-4a-validation.md) records exact local commands and limitations: **244 Python tests**, strict TypeScript, **45 Node tests**, **19 Electron E2E tests** and `git diff --check`, all exit **0**; Vite/Electron builds passed. No hosted CI. New cases exercise v4 -> v5 preservation/rollback, event replay and append-only guards, concurrent DB/HTTP optimistic conflicts, real killed-writer recovery, actor normalization, exact observation/preview/source bindings, stale evidence/restoration, independent runs and restart. Weak noisy early/middle/late evidence and original MTS/VFR PTS remain intact; QA does not rewrite first-review records.
+
+Real Electron checks cover explicit agreement/disagreement/clarification, unknown-count suggestions, unassessable notes, retraction and retained history; both-stage drafts survive navigation/native close conflicts and actual backend loss. The 240-window scale test now uses v5 and retains 240 QA-pending windows. Final observed peak binary transfers 1, Blob URLs 3, created/revoked 45/45 and zero retained after unmount. This remains synthetic Linux development evidence, not authenticated independence, ecological finalisation, full-rate performance or Windows acceptance. Slice 4B and platform safeguards remain untouched.

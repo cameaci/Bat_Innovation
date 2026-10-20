@@ -135,6 +135,7 @@ export interface SummaryRun {
   counts: { planned: number; pending: number; complete: number; running: number; incomplete: number; failed: number };
 }
 export interface SummaryWindow {
+  qa?: QAHeader;
   review?: ReviewHeader;
   id: string;
   run_id: string;
@@ -151,7 +152,7 @@ export interface SummaryWindow {
   preview_pts: string | null;
   image: { sha256: string; bytes: number } | null;
 }
-export interface SummaryDetail extends SummaryRun { windows: SummaryWindow[]; review_progress?: ReviewProgress }
+export interface SummaryDetail extends SummaryRun { windows: SummaryWindow[]; review_progress?: ReviewProgress; qa_progress?: QAProgress }
 
 export type ReviewDecision = 'unreviewed' | 'reviewed_with_observations' | 'reviewed_no_discernible_event';
 export interface ProvisionalObservationInput {
@@ -239,13 +240,73 @@ export interface ReviewEvent {
 }
 export interface ReviewHistory { events: ReviewEvent[]; next_after_revision: number | null }
 
+export type QAStatus = 'pending' | 'agree' | 'disagree' | 'needs_clarification' | 'unassessable';
+export interface QAHeader {
+  has_disagreement: boolean;
+  revision: number;
+  decision: QAStatus;
+  status: QAStatus;
+  needs_reverification: boolean;
+  warning: string | null;
+  can_decide: boolean;
+  current_evidence_revision: number;
+}
+export interface QASuggestion {
+  observation_id: string;
+  observation_revision: number;
+  note: string;
+  category: ProvisionalObservationInput['category'] | null;
+  count: number | null;
+}
+export interface QAChange {
+  actor: string;
+  expected_revision: number;
+  expected_first_review_revision: number;
+  expected_evidence_revision: number;
+  action: 'set_decision' | 'retract';
+  decision: Exclude<QAStatus, 'pending'> | null;
+  note: string;
+  suggestion: QASuggestion | null;
+  preview_id: string | null;
+  confirmed: boolean;
+}
+export interface WindowQA extends QAHeader {
+  window_id: string;
+  run_id: string;
+  actor: string | null;
+  note: string;
+  suggestion: (QASuggestion & { original_observation: ProvisionalObservation }) | null;
+  updated_at_utc: string | null;
+  first_review_revision: number;
+  evidence_revision: number;
+  binding: ReviewBinding & { evidence_revision: number };
+  first_review: { revision: number; actor: string | null; effective_decision: ReviewDecision; observations: (ProvisionalObservation & { revision: number })[] };
+}
+export interface QAProgress {
+  total: number;
+  agree: number;
+  disagree: number;
+  needs_clarification: number;
+  pending: number;
+  unassessable: number;
+  needs_reverification: number;
+}
+export interface QAHistory {
+  events: { revision: number; utc: string; actor: string; action: string; first_review_revision: number; evidence_revision: number; before: Record<string, unknown>; after: Record<string, unknown> }[];
+  next_after_revision: number | null;
+}
+
 export interface BatAPI {
-  upgradeReviews(): Promise<ApiResult<{ schema_version: 4 }>>;
+  upgradeQA(): Promise<ApiResult<{ schema_version: 5 }>>;
+  getWindowQA(windowID: string): Promise<ApiResult<WindowQA>>;
+  saveQA(windowID: string, input: QAChange): Promise<ApiResult<WindowQA>>;
+  qaHistory(windowID: string, afterRevision: number): Promise<ApiResult<QAHistory>>;
+  upgradeReviews(): Promise<ApiResult<{ schema_version: 4 | 5 }>>;
   getWindowReview(windowID: string): Promise<ApiResult<WindowReview>>;
   saveReview(windowID: string, input: ReviewChange): Promise<ApiResult<WindowReview>>;
   reviewHistory(windowID: string, afterRevision: number): Promise<ApiResult<ReviewHistory>>;
   setDraftDirty(dirty: boolean): Promise<ApiResult<{ dirty: boolean }>>;
-  upgradeSummaries(): Promise<ApiResult<{ schema_version: 3 | 4 }>>;
+  upgradeSummaries(): Promise<ApiResult<{ schema_version: 3 | 4 | 5 }>>;
   listSummaryRuns(sessionID: string): Promise<ApiResult<SummaryRun[]>>;
   startSummaries(input: SummaryRequest): Promise<ApiResult<SummaryDetail>>;
   summaryRun(runID: string): Promise<ApiResult<SummaryDetail>>;
@@ -255,7 +316,7 @@ export interface BatAPI {
   listSessions(): Promise<ApiResult<RecordingSession[]>>;
   createSession(input: NewSession): Promise<ApiResult<RecordingSession>>;
   getMedia(sessionID: string): Promise<ApiResult<MediaSession>>;
-  upgradeMedia(): Promise<ApiResult<{ schema_version: 2 | 3 | 4 }>>;
+  upgradeMedia(): Promise<ApiResult<{ schema_version: 2 | 3 | 4 | 5 }>>;
   chooseMedia(sessionID: string): Promise<ApiResult<ImportJob | null>>;
   importStatus(jobID: string): Promise<ApiResult<ImportJob>>;
   cancelImport(jobID: string): Promise<ApiResult<ImportJob>>;

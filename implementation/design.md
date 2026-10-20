@@ -1,6 +1,6 @@
 # Technical design
 
-Reviewed: 2026-10-19. Status: **Slices 0/1A/1B/2A are merged; Slice 3A manual review is a Linux-tested candidate. Fuller review/QA/export sections remain specifications**. The [Slice 3A report](../docs/13-slice-3a-validation.md) records the implemented audit and draft contract.
+Reviewed: 2026-10-20. Status: **Slices 0/1A/1B/2A/3A/3B are merged; Slice 4A independent QA is a Linux-development review candidate. Finalisation/export sections remain specifications**. The [Slice 3A report](../docs/13-slice-3a-validation.md) records the implemented audit and draft contract.
 
 ## 1. Architecture and boundaries
 
@@ -118,6 +118,8 @@ Use SQLite for final state *and* append-only review history. No JSON file as a c
 An event may be reviewed across window boundaries; store its **source segment/time spans**, not just a gallery tile timestamp. Cross-segment interpretation is allowed only when continuity and corresponding source spans are explicitly established; otherwise flag it for a human rather than assigning a fictitious global timestamp.
 
 **Review stages:** `unreviewed`, `reviewed`, `qa_pending`, `qa_reviewed`, `finalised`, with a visible disagreement/uncertainty flag. Finalisation requires a designated ecological decision maker, not merely the first review click. Local identity attribution is not enterprise authentication.
+
+**Slice 4A candidate:** Explicit schema v4 -> v5 adds separate `qa_event` and `qa_window` tables. A confirmed human action records agree/disagree/needs clarification, an unresolved unassessable note, or retraction, with before/after values and optimistic QA/first-review/evidence revisions. Current original/PNG/preview verification gates affirmative agreement and disagreement. Source/evidence epochs and first-review edits make old decisions stale without changing either history. Optional suggestions cite an observation ID plus its immutable edit revision and retain its original PTS span; they never edit first-review observations. Normalized identical actor labels are rejected; different local labels are not proof of different humans. Separate QA counts retain all planned windows, with no finalisation. See [contracts, local evidence and limits](../docs/16-slice-4a-validation.md).
 
 **Annotation fields:** visual category (bat/insect/bird/other/uncertain), optional activity (commuting/foraging/etc.), ecological decision (possible/confirmed emergence, re-entry, no supported emergence, precautionary, uncertain), count or unknown, original source time, notes, reviewer/QA attribution and provenance. Terms remain provisional until ecologist sign-off.
 

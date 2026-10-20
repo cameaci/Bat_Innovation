@@ -94,7 +94,7 @@ class ReviewService:
         self.activity_lock = activity_lock
 
     def _schema(self) -> None:
-        if store.schema_version(self.db_path) != store.REVIEW_SCHEMA_VERSION:
+        if store.schema_version(self.db_path) not in store.REVIEW_SCHEMA_VERSIONS:
             raise _error("review_schema_required", "Explicitly upgrade the local review database before recording review.")
 
     @staticmethod
@@ -203,7 +203,7 @@ class ReviewService:
                 "binding": evidence["binding"]}
 
     def augment_summary(self, detail: dict) -> dict:
-        if store.schema_version(self.db_path) != store.REVIEW_SCHEMA_VERSION:
+        if store.schema_version(self.db_path) not in store.REVIEW_SCHEMA_VERSIONS:
             return detail
         private = summary_store.private_run(self.db_path, detail["id"])
         headers = review_store.headers(self.db_path, detail["id"])
@@ -290,7 +290,7 @@ def install_routes(app: FastAPI, service: ReviewService, authenticate) -> None:
             raise _error("review_upgrade_failed", "The review schema upgrade failed; the existing database was preserved.") from None
         finally:
             service.activity_lock.release()
-        return {"schema_version": store.REVIEW_SCHEMA_VERSION}
+        return {"schema_version": store.schema_version(service.db_path)}
 
     @app.get("/api/summary-windows/{window_id}/review", dependencies=[Depends(authenticate)])
     def get(window_id: UUID) -> dict:

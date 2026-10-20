@@ -5,6 +5,7 @@ import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia, SummaryRequest, SummaryRun, SummaryDetail, ReviewChange, WindowReview, ReviewHistory } from './contracts';
+import type { QAChange, WindowQA, QAHistory } from './contracts';
 
 const unavailable = (message = 'Backend unavailable. Reopen the app after checking Python, ffmpeg and ffprobe.') =>
   ({ ok: false, error: { code: 'unavailable', message } }) as const;
@@ -18,6 +19,24 @@ const provenance = (value: unknown): value is string => typeof value === 'string
 
 export const MAX_REVIEW_BYTES = 8 * 1024;
 export const isReviewCursor = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value < 2 ** 31;
+export function isQAChange(input: unknown): input is QAChange {
+  if (!object(input) || !exactKeys(input, ['actor', 'expected_revision', 'expected_first_review_revision', 'expected_evidence_revision', 'action', 'decision', 'note', 'suggestion', 'preview_id', 'confirmed']) ||
+      !isReviewCursor(input.expected_revision) || !isReviewCursor(input.expected_first_review_revision) || !isReviewCursor(input.expected_evidence_revision) ||
+      typeof input.actor !== 'string' || !input.actor.trim() || input.actor.length > 120 || input.confirmed !== true ||
+      typeof input.note !== 'string' || input.note.length > 2000 || !(input.preview_id === null || isUUID(input.preview_id))) return false;
+  if (input.action === 'retract') {
+    if (input.decision !== null || !input.note.trim() || input.suggestion !== null || input.preview_id !== null) return false;
+  } else if (input.action !== 'set_decision' || typeof input.decision !== 'string' || !['agree', 'disagree', 'needs_clarification', 'unassessable'].includes(input.decision) || (input.decision !== 'agree' && !input.note.trim())) return false;
+  if (input.suggestion !== null) {
+    const row = input.suggestion;
+    if (!['disagree', 'needs_clarification'].includes(String(input.decision)) || !object(row) ||
+      !exactKeys(row, ['observation_id', 'observation_revision', 'note', 'category', 'count']) || !isUUID(row.observation_id) ||
+      !isReviewCursor(row.observation_revision) || row.observation_revision < 1 || typeof row.note !== 'string' || !row.note.trim() || row.note.length > 2000 ||
+      !(row.category === null || typeof row.category === 'string' && ['bat','insect','bird','other','uncertain'].includes(row.category)) ||
+      !(row.count === null || typeof row.count === 'number' && Number.isInteger(row.count) && row.count >= 0 && row.count <= 100000)) return false;
+  }
+  try { return Buffer.byteLength(JSON.stringify(input), 'utf8') <= MAX_REVIEW_BYTES; } catch { return false; }
+}
 const sourcePTS = (value: unknown): value is string => {
   if (typeof value !== 'string' || !/^-?\d{1,19}$/.test(value)) return false;
   const pts = BigInt(value);
@@ -82,6 +101,13 @@ export function isSaveMedia(input: unknown): input is SaveMedia {
 
 // Only known error codes cross the desktop boundary; arbitrary response text never does.
 const mediaErrors: Record<string, string> = {
+  qa_schema_required: 'Use Upgrade QA storage before independent second review.',
+  qa_upgrade_failed: 'QA storage could not be upgraded. The existing database was preserved.',
+  qa_invalid: 'Confirm a supported QA action, reviewer label, written rationale and observation suggestion.',
+  qa_conflict: 'QA, first review or evidence changed. Your QA draft is retained; discard and reload before retrying.',
+  qa_same_actor: 'QA must use a different normalized first-review label. Distinct labels alone do not prove distinct humans.',
+  qa_unavailable: 'Current complete evidence, a valid first review and an original preview are required. Record an unassessable note if needed.',
+  qa_busy: 'A media or review operation is active. Keep your QA draft and retry when it stops.',
   review_schema_required: 'Use Upgrade review storage before saving manual review.',
   review_upgrade_failed: 'Review storage could not be upgraded. The existing database was preserved.',
   review_invalid: 'Check the reviewer label, exact source PTS span and provisional fields.',
@@ -138,7 +164,7 @@ const mediaErrors: Record<string, string> = {
 function mediaFailure(code: unknown) {
   return typeof code === 'string' && Object.hasOwn(mediaErrors, code) ? { code, message: mediaErrors[code] } : { code: 'backend', message: 'Media request failed. Refresh media and check the selected originals.' };
 }
-type ApiRoute = '/api/reviews/upgrade' | `/api/summary-windows/${string}/review` | `/api/summary-windows/${string}/review-actions` | `/api/summary-windows/${string}/review-history?after_revision=${number}` | '/api/health' | '/api/sessions' | '/api/media/upgrade' | '/api/media/import' |
+type ApiRoute = '/api/qa/upgrade' | `/api/summary-windows/${string}/qa` | `/api/summary-windows/${string}/qa-actions` | `/api/summary-windows/${string}/qa-history?after_revision=${number}` | '/api/reviews/upgrade' | `/api/summary-windows/${string}/review` | `/api/summary-windows/${string}/review-actions` | `/api/summary-windows/${string}/review-history?after_revision=${number}` | '/api/health' | '/api/sessions' | '/api/media/upgrade' | '/api/media/import' |
   `/api/sessions/${string}/media` | `/api/media/import/${string}` | `/api/media/import/${string}/cancel` |
   '/api/summaries/upgrade' | '/api/summaries' | `/api/summaries/${string}` | `/api/summaries/${string}/cancel` | `/api/sessions/${string}/summary-runs` |
   '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
@@ -225,7 +251,7 @@ export class BackendClient {
   getMedia(sessionID: string): Promise<ApiResult<MediaSession>> {
     return isUUID(sessionID) ? this.call(`/api/sessions/${sessionID}/media`) : Promise.resolve(invalid());
   }
-  upgradeMedia(): Promise<ApiResult<{ schema_version: 2 | 3 | 4 }>> { return this.call('/api/media/upgrade', 'POST'); }
+  upgradeMedia(): Promise<ApiResult<{ schema_version: 2 | 3 | 4 | 5 }>> { return this.call('/api/media/upgrade', 'POST'); }
   saveMedia(sessionID: string, input: SaveMedia): Promise<ApiResult<MediaSession>> {
     return isUUID(sessionID) && isSaveMedia(input) ? this.call(`/api/sessions/${sessionID}/media`, 'PUT', input) : Promise.resolve(invalid('Use only selected segment IDs, continuity evidence and an optional UTC clock anchor.'));
   }
@@ -260,7 +286,17 @@ export class BackendClient {
     if (result.ok && result.value.error) result.value.error = mediaFailure(result.value.error.code);
     return result;
   }
-  upgradeReviews(): Promise<ApiResult<{ schema_version: 4 }>> { return this.call('/api/reviews/upgrade', 'POST'); }
+  upgradeQA(): Promise<ApiResult<{ schema_version: 5 }>> { return this.call('/api/qa/upgrade', 'POST'); }
+  getWindowQA(windowID: string): Promise<ApiResult<WindowQA>> {
+    return isUUID(windowID) ? this.call(`/api/summary-windows/${windowID}/qa`) : Promise.resolve(invalid());
+  }
+  saveQA(windowID: string, input: QAChange): Promise<ApiResult<WindowQA>> {
+    return isUUID(windowID) && isQAChange(input) ? this.call(`/api/summary-windows/${windowID}/qa-actions`, 'POST', input) : Promise.resolve(invalid());
+  }
+  qaHistory(windowID: string, afterRevision: number): Promise<ApiResult<QAHistory>> {
+    return isUUID(windowID) && isReviewCursor(afterRevision) ? this.call(`/api/summary-windows/${windowID}/qa-history?after_revision=${afterRevision}`) : Promise.resolve(invalid());
+  }
+  upgradeReviews(): Promise<ApiResult<{ schema_version: 4 | 5 }>> { return this.call('/api/reviews/upgrade', 'POST'); }
   getWindowReview(windowID: string): Promise<ApiResult<WindowReview>> {
     return isUUID(windowID) ? this.call(`/api/summary-windows/${windowID}/review`) : Promise.resolve(invalid());
   }
@@ -270,7 +306,7 @@ export class BackendClient {
   reviewHistory(windowID: string, afterRevision: number): Promise<ApiResult<ReviewHistory>> {
     return isUUID(windowID) && isReviewCursor(afterRevision) ? this.call(`/api/summary-windows/${windowID}/review-history?after_revision=${afterRevision}`) : Promise.resolve(invalid());
   }
-  upgradeSummaries(): Promise<ApiResult<{ schema_version: 3 | 4 }>> { return this.call('/api/summaries/upgrade', 'POST'); }
+  upgradeSummaries(): Promise<ApiResult<{ schema_version: 3 | 4 | 5 }>> { return this.call('/api/summaries/upgrade', 'POST'); }
   async listSummaryRuns(sessionID: string): Promise<ApiResult<SummaryRun[]>> {
     if (!isUUID(sessionID)) return invalid();
     const result = await this.call<SummaryRun[]>(`/api/sessions/${sessionID}/summary-runs`);
@@ -448,7 +484,7 @@ export class BackendRuntime {
     return health.ok && this.client ? operation(this.client) : health as ApiResult<T>;
   }
   getMedia(sessionID: string): Promise<ApiResult<MediaSession>> { return this.ready(client => client.getMedia(sessionID)); }
-  upgradeMedia(): Promise<ApiResult<{ schema_version: 2 | 3 | 4 }>> { return this.ready(client => client.upgradeMedia()); }
+  upgradeMedia(): Promise<ApiResult<{ schema_version: 2 | 3 | 4 | 5 }>> { return this.ready(client => client.upgradeMedia()); }
   saveMedia(sessionID: string, input: SaveMedia): Promise<ApiResult<MediaSession>> { return this.ready(client => client.saveMedia(sessionID, input)); }
   importSelectedMedia(sessionID: string, paths: string[]): Promise<ApiResult<ImportJob>> { return this.ready(client => client.importSelectedMedia(sessionID, paths)); }
   importStatus(jobID: string): Promise<ApiResult<ImportJob>> { return this.ready(client => client.importStatus(jobID)); }
@@ -458,11 +494,15 @@ export class BackendRuntime {
   cancelPreview(jobID: string): Promise<ApiResult<PreviewJob>> { return this.ready(client => client.cancelPreview(jobID)); }
   previewContent(jobID: string): Promise<ApiResult<{ bytes: Uint8Array }>> { return this.ready(client => client.previewContent(jobID)); }
 
-  upgradeReviews(): Promise<ApiResult<{ schema_version: 4 }>> { return this.ready(client => client.upgradeReviews()); }
+  upgradeQA(): Promise<ApiResult<{ schema_version: 5 }>> { return this.ready(client => client.upgradeQA()); }
+  getWindowQA(windowID: string): Promise<ApiResult<WindowQA>> { return this.ready(client => client.getWindowQA(windowID)); }
+  saveQA(windowID: string, input: QAChange): Promise<ApiResult<WindowQA>> { return this.ready(client => client.saveQA(windowID, input)); }
+  qaHistory(windowID: string, afterRevision: number): Promise<ApiResult<QAHistory>> { return this.ready(client => client.qaHistory(windowID, afterRevision)); }
+  upgradeReviews(): Promise<ApiResult<{ schema_version: 4 | 5 }>> { return this.ready(client => client.upgradeReviews()); }
   getWindowReview(windowID: string): Promise<ApiResult<WindowReview>> { return this.ready(client => client.getWindowReview(windowID)); }
   saveReview(windowID: string, input: ReviewChange): Promise<ApiResult<WindowReview>> { return this.ready(client => client.saveReview(windowID, input)); }
   reviewHistory(windowID: string, afterRevision: number): Promise<ApiResult<ReviewHistory>> { return this.ready(client => client.reviewHistory(windowID, afterRevision)); }
-  upgradeSummaries(): Promise<ApiResult<{ schema_version: 3 | 4 }>> { return this.ready(client => client.upgradeSummaries()); }
+  upgradeSummaries(): Promise<ApiResult<{ schema_version: 3 | 4 | 5 }>> { return this.ready(client => client.upgradeSummaries()); }
   listSummaryRuns(sessionID: string): Promise<ApiResult<SummaryRun[]>> { return this.ready(client => client.listSummaryRuns(sessionID)); }
   startSummaries(input: SummaryRequest): Promise<ApiResult<SummaryDetail>> { return this.ready(client => client.startSummaries(input)); }
   summaryRun(runID: string): Promise<ApiResult<SummaryDetail>> { return this.ready(client => client.summaryRun(runID)); }
