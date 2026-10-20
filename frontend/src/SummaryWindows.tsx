@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import type { MediaSegment, Rational, SummaryDetail, SummaryRun, SummaryWindow } from '../../electron/src/contracts';
 import { getAPI } from './api';
@@ -75,7 +75,7 @@ export function SummaryWindows({ sessionID, segments, disabled, reviewDisabled, 
     onBusyChange(busy || reviewDirty);
     return () => onBusyChange(false);
   }, [busy, reviewDirty, onBusyChange]);
-  useEffect(() => { onDraftChange(reviewDirty); return () => onDraftChange(false); }, [reviewDirty, onDraftChange]);
+  useLayoutEffect(() => { onDraftChange(reviewDirty); return () => onDraftChange(false); }, [reviewDirty, onDraftChange]);
 
   async function loadRuns() {
     if (reviewDirty) return;

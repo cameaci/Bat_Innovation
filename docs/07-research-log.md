@@ -1,5 +1,13 @@
 # 07 - Research log
 
+## 2026-10-20 - Slice 4B1 post-review manifest and draft validation
+
+Fetched PR #17 through reviewed `ce14b04097215fc82cee6b5dd2c07cdb203e6a1d`. Real Node export verifies the separate two-CSV disk manifest, three-entry authenticated transport envelope, CSV hashes/lengths and transport-only manifest SHA. Nine locally injected staged-manifest inconsistencies reject publication and remove stages/reservations/intents. The harness stays ignored; successful media/SQLite/download operations are real.
+
+Initial Electron execution found 19 passed/1 failed, exit 1: the disabled Export UI became observable before passive dirty-state notifications reached main, so an immediate IPC export was accepted. The smallest correction uses existing React layout effects for summary-to-media propagation and media-to-main notification before paint, preserving API/data contracts. The existing real Electron export test now checks immediate rejection for first-review, QA and timeline drafts. See the [post-review report](17-slice-4b1-validation.md#post-review-local-validation) for the pre-code five-role check and exact commands. No backend, schema, dependency, lockfile, workflow or Windows-safeguard change.
+
+Final local results: **281 Python passed, 1 existing warning in 68.66s; TypeScript passed; 55 Node passed in 11723.359662 ms; 20 Electron E2E passed in 2.6m; diff check passed**, all exits 0. Focused real Node regression 1 passed; expanded Electron export 1 passed; ad hoc nine-case rejection check 1 passed, all exits 0. Process sampling observed 273 backend/workers, zero remaining; final module scan is empty and owned Xvfb stopped. Exact final SHA and clean-tree status are recorded in the unmerged PR. No generated/client data, credential, database or scratch artifact is committed. No GitHub Actions, ecological finalisation or Windows packaging. Windows, physical picker/Excel, camera originals, ecological/template approval and binary redistribution remain unverified.
+
 ## 2026-10-20 - Slice 4B1 safe provisional CSV exports
 
 **Scope/baseline:** [Issue #16](https://github.com/cameaci/Bat_Innovation/issues/16), new `codex/slice-4b1-provisional-exports` branch from latest `main` at independently reviewed Slice 4A merge `d9660c79dabec3740855e74ae99f5847620bab76`. One unmerged review candidate. No ecological finalisation/template or Windows work. [Validation report](17-slice-4b1-validation.md) records schemas, history retrieval, resource bounds and limits.

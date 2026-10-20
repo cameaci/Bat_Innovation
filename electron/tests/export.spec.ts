@@ -51,9 +51,11 @@ test('provisional native CSV export includes all windows despite filters, protec
     await expect(action).toBeEnabled();
     await shell.page.getByLabel('QA reviewer label',{exact:true}).fill('Unsaved synthetic QA');
     await expect(action).toBeDisabled();
+    expect((await shell.page.evaluate(id=>(window as unknown as {batAPI:BatAPI}).batAPI.startExport(id),run.id)).ok).toBe(false);
     await shell.page.getByRole('button',{name:'Discard QA draft',exact:true}).click();
     await shell.page.getByLabel('Clock anchor segment',{exact:true}).selectOption(run.windows[0]!.segment_id);
     await expect(action).toBeDisabled();
+    expect((await shell.page.evaluate(id=>(window as unknown as {batAPI:BatAPI}).batAPI.startExport(id),run.id)).ok).toBe(false);
     await shell.page.getByRole('button',{name:'Discard unsaved changes',exact:true}).click();
     // Save a genuine provisional observation through the existing review UI.
     await shell.page.getByLabel('Reviewer label',{exact:true}).fill('=Synthetic first reviewer');
