@@ -1,6 +1,6 @@
 # Technical design
 
-Reviewed: 2026-10-20. Status: **Slices 0/1A/1B/2A/3A/3B are merged; Slice 4A independent QA is a Linux-development review candidate. Finalisation/export sections remain specifications**. The [Slice 3A report](../docs/13-slice-3a-validation.md) records the implemented audit and draft contract.
+Reviewed: 2026-10-20. Status: **Slices 0/1A/1B/2A/3A/3B are merged; Slice 4A is independently reviewed and merged; Slice 4B1 provisional CSV exports are a Linux-development review candidate. Ecological finalisation remains a specification**. The [Slice 3A report](../docs/13-slice-3a-validation.md) records the implemented audit and draft contract.
 
 ## 1. Architecture and boundaries
 
@@ -137,9 +137,11 @@ Proposed route families, not a promise of final endpoint naming:
 | List windows | `GET /sessions/{id}/windows` | Time-ordered, **including quiet windows** |
 | Get image/preview | `GET /media/{id}/summary`, `POST /media/{id}/preview` | Only allowlisted source IDs, bounded clips |
 | Review / QA | `POST /windows/{id}/reviews`, `POST /observations/{id}/reviews` | Validated stage transitions, audit |
-| Export | `GET /sessions/{id}/exports/{kind}` | Report CSV or audit CSV, explicit provisional state |
+| Provisional export (implemented candidate) | `POST /api/exports`, `GET /api/exports/{id}`, `POST /api/exports/{id}/cancel`, `GET /api/exports/{id}/files/{observations,audit,manifest}` | Run ID only; bounded read-only v5 snapshot, two provisional CSVs and metadata; native destination stays in Electron main |
 
 Use typed Pydantic requests/responses and a small TypeScript API client. Prefer short polling for processing progress over WebSockets. A single in-process job worker is acceptable for responsiveness; the **job state and completed windows persist** in SQLite, enabling detectable interrupted runs and safe restart.
+
+**Slice 4B1 contract:** Export does not write authoritative SQLite or latch evidence epochs. A private snapshot pins first/QA projections and history upper revisions. Exact source plans enumerate every interval, including explicit missing-row placeholders; invalid/extra coverage fails. Shared read-only evidence validation rejects false current approval, then a second filesystem check and final live coverage/epoch digest guard publication. Human writes either continue under an existing WAL journal with old snapshot revisions retained, or receive explicit busy/retry under rollback journalling. No journal-mode change is made. See [schema, text decoding, bounds and failure behavior](../docs/17-slice-4b1-validation.md).
 
 ## 7. Local security and filesystem rules
 

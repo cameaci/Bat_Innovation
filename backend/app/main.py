@@ -16,7 +16,7 @@ from uuid import UUID
 
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from . import store, summary_store
@@ -25,6 +25,7 @@ from .preview import PreviewJobs
 from .summary_jobs import SummaryJobs
 from .reviews import ReviewService, install_routes as install_review_routes
 from .qa import QAService, install_routes as install_qa_routes
+from .export_jobs import ExportJobs
 
 
 @dataclass(frozen=True)
@@ -76,6 +77,11 @@ class NewImport(BaseModel):
 
 class EmptyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class NewExport(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    run_id: UUID
 
 
 class NewSummary(BaseModel):
@@ -168,10 +174,12 @@ def create_app(settings: Settings) -> FastAPI:
     summaries = SummaryJobs(db_path, settings.data_dir, activity_lock)
     reviews = ReviewService(db_path, summaries, previews, activity_lock)
     qa = QAService(reviews)
+    exports = ExportJobs(db_path, settings.data_dir)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         yield
+        exports.close()
         summaries.close()
         previews.close()
         jobs.close()
@@ -314,6 +322,24 @@ def create_app(settings: Settings) -> FastAPI:
     @app.get("/api/summary-windows/{window_id}/image", dependencies=[Depends(authenticate)])
     def summary_image(window_id: UUID) -> Response:
         return Response(summaries.image(str(window_id)), media_type="image/png", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+
+    @app.post("/api/exports", status_code=202, dependencies=[Depends(authenticate)])
+    def start_export(payload: NewExport) -> dict:
+        return exports.start(str(payload.run_id))
+
+    @app.get("/api/exports/{job_id}", dependencies=[Depends(authenticate)])
+    def export_status(job_id: UUID) -> dict:
+        return exports.get(str(job_id))
+
+    @app.post("/api/exports/{job_id}/cancel", dependencies=[Depends(authenticate)])
+    def cancel_export(job_id: UUID, _payload: EmptyRequest = Body(default_factory=EmptyRequest)) -> dict:
+        return exports.cancel(str(job_id))
+
+    @app.get("/api/exports/{job_id}/files/{kind}", dependencies=[Depends(authenticate)])
+    def export_content(job_id: UUID, kind: Literal["observations", "audit", "manifest"]):
+        chunks, size = exports.content(str(job_id), kind)
+        mime = "application/json" if kind == "manifest" else "text/csv; charset=utf-8"
+        return StreamingResponse(chunks, media_type=mime, headers={"Content-Length": str(size), "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
     install_review_routes(app, reviews, authenticate)
     install_qa_routes(app, qa, authenticate)

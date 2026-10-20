@@ -54,7 +54,9 @@ class QAService:
     @staticmethod
     def header(projection: dict, first: dict, evidence: dict, row: dict) -> dict:
         unavailable = evidence["warning"] or ("summary_not_complete" if row["status"] != "complete" or not row.get("image_sha256") else None)
-        changed = None
+        # Read-only consumers cannot latch a new evidence epoch. A recorded QA
+        # decision still needs re-verification while its evidence is unavailable.
+        changed = unavailable if projection["revision"] and projection["decision"] != "pending" else None
         if projection["revision"] and projection["decision"] != "pending":
             if projection["first_review_revision"] != first["revision"]:
                 changed = "first_review_changed"

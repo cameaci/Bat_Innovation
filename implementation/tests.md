@@ -1,6 +1,6 @@
 # Testing and ecological evaluation
 
-Reviewed: 2026-10-20. Status: **Slices 0/1A/1B/2A/3A/3B are merged; Slice 4A is a local synthetic independent-QA review candidate. Ecological and Windows acceptance remain open**. Quality requirements are part of implementation, not a later add-on.
+Reviewed: 2026-10-20. Status: **Slices 0/1A/1B/2A/3A/3B are merged; Slice 4A is merged; Slice 4B1 is a local synthetic provisional-export review candidate. Ecological and Windows acceptance remain open**. Quality requirements are part of implementation, not a later add-on.
 
 ## Testing layers
 
@@ -127,3 +127,8 @@ The sparse two-hour fixture produces 240 real window records/images and exercise
 The [Slice 4A report](../docs/16-slice-4a-validation.md) records exact local commands and limitations: **244 Python tests**, strict TypeScript, **45 Node tests**, **19 Electron E2E tests** and `git diff --check`, all exit **0**; Vite/Electron builds passed. No hosted CI. New cases exercise v4 -> v5 preservation/rollback, event replay and append-only guards, concurrent DB/HTTP optimistic conflicts, real killed-writer recovery, actor normalization, exact observation/preview/source bindings, stale evidence/restoration, independent runs and restart. Weak noisy early/middle/late evidence and original MTS/VFR PTS remain intact; QA does not rewrite first-review records.
 
 Real Electron checks cover explicit agreement/disagreement/clarification, unknown-count suggestions, unassessable notes, retraction and retained history; both-stage drafts survive navigation/native close conflicts and actual backend loss. The 240-window scale test now uses v5 and retains 240 QA-pending windows. Final observed peak binary transfers 1, Blob URLs 3, created/revoked 45/45 and zero retained after unmount. This remains synthetic Linux development evidence, not authenticated independence, ecological finalisation, full-rate performance or Windows acceptance. Slice 4B and platform safeguards remain untouched.
+
+
+## Slice 4B1 provisional export acceptance
+
+The [Slice 4B1 report](../docs/17-slice-4b1-validation.md) defines the read-only v5 snapshot, fixed CSV schemas, reversible spreadsheet-safe text and numeric/canonical audit contract. Local suites cover every planned window, 65s 30/30/5 and two-hour metadata-only coverage, multiple runs/sources, weak motion, exact MTS/VFR PTS, unknown ends/counts, missing/unreadable evidence, stale QA, immutable histories, simultaneous first/QA saves in rollback/WAL modes and deterministic ordering. Storage/stream tests cover row/byte/time policy, tampering, one delivery, cancellation/restart/thread failure, ENOSPC/rename failure and atomic publication; successful CSV/media flows use real SQLite/API/workers/parsers. Native-dialog result injection is the only successful Electron boundary substitution. Dirty first/QA/timeline workspaces block export, and gallery filters never reduce its denominator. Final results: **281 Python tests, strict TypeScript, 55 Node tests, 20 Electron E2E tests and `git diff --check`, all exit 0**, with exact commands/outputs and limitations in the report and PR. Actual Excel import, Windows, representative originals, redistribution and ecological acceptance remain unverified.

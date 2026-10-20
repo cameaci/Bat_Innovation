@@ -296,7 +296,37 @@ export interface QAHistory {
   next_after_revision: number | null;
 }
 
+export type ExportKind = 'observations' | 'audit' | 'manifest';
+export interface ExportFile { name: string; bytes: number; sha256: string; rows?: number }
+export interface ExportManifest {
+  schema_version: 'bat-provisional-csv-v1';
+  provisional_label: string;
+  as_of_utc: string;
+  run_id: string;
+  manifest_complete: boolean;
+  processing_complete: boolean;
+  counts: { planned: number; actual: number; missing: number; reviewed: number; first_stale: number; qa_stale: number; timestamp_gaps: number; evidence_flagged: number; processing: Record<string, number>; qa: Record<string, number> };
+  files: Record<ExportKind, ExportFile>;
+}
+/** On-disk manifest describes the two payload CSVs. The manifest.json
+ * descriptor (including its SHA256) exists only in the authenticated
+ * transport manifest: a file cannot embed its own content hash. */
+export type ExportDiskManifest = Omit<ExportManifest, 'files'> & {
+  files: Pick<ExportManifest['files'], 'observations' | 'audit'>;
+};
+export interface ExportJob {
+  id: string;
+  run_id: string;
+  state: 'working' | 'ready' | 'failed' | 'cancelled';
+  error: { code: string; message: string } | null;
+  manifest: ExportManifest | null;
+}
+export interface ExportSaved { cancelled: boolean; folder_name: string; files: string[] }
 export interface BatAPI {
+  startExport(runID: string): Promise<ApiResult<ExportJob>>;
+  exportStatus(jobID: string): Promise<ApiResult<ExportJob>>;
+  cancelExport(jobID: string): Promise<ApiResult<ExportJob>>;
+  saveExportBundle(jobID: string): Promise<ApiResult<ExportSaved>>;
   upgradeQA(): Promise<ApiResult<{ schema_version: 5 }>>;
   getWindowQA(windowID: string): Promise<ApiResult<WindowQA>>;
   saveQA(windowID: string, input: QAChange): Promise<ApiResult<WindowQA>>;

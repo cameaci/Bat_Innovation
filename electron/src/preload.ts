@@ -2,6 +2,10 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { BatAPI, NewSession, PreviewRequest, SaveMedia, SummaryRequest, ReviewChange, QAChange } from './contracts';
 
 const api: BatAPI = {
+  startExport: (...args: [string]) => ipcRenderer.invoke('bat:start-export', ...args),
+  exportStatus: (...args: [string]) => ipcRenderer.invoke('bat:export-status', ...args),
+  cancelExport: (...args: [string]) => ipcRenderer.invoke('bat:cancel-export', ...args),
+  saveExportBundle: (...args: [string]) => ipcRenderer.invoke('bat:save-export-bundle', ...args),
   upgradeQA: (...args: []) => ipcRenderer.invoke('bat:upgrade-qa', ...args),
   getWindowQA: (...args: [string]) => ipcRenderer.invoke('bat:get-window-qa', ...args),
   saveQA: (...args: [string, QAChange]) => ipcRenderer.invoke('bat:save-qa', ...args),

@@ -8,7 +8,7 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import sqlite3
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Protocol
 from uuid import UUID
 
 from fastapi import Body, Depends, FastAPI, Query, Request
@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError,
 from . import review_store, store, summary_store, windows
 from .imports import ImportErrorResponse, source_state
 from .preview import PreviewJobs
-from .summary_jobs import MAX_IMAGE_BYTES, SummaryJobs
+from .summary_jobs import MAX_IMAGE_BYTES
 
 MAX_ACTION_BYTES = 8192
 MAX_REVISION = 2 ** 31 - 1
@@ -88,8 +88,12 @@ def _error(code: str, message: str, status: int = 409) -> review_store.ReviewErr
     return review_store.ReviewError(code, message, status)
 
 
+class SummaryEvidence(Protocol):
+    def _image_path(self, row: dict) -> Path: ...
+
+
 class ReviewService:
-    def __init__(self, db_path: Path, summaries: SummaryJobs, previews: PreviewJobs, activity_lock: LockType):
+    def __init__(self, db_path: Path, summaries: SummaryEvidence, previews: PreviewJobs | None, activity_lock: LockType):
         self.db_path, self.summaries, self.previews = db_path, summaries, previews
         self.activity_lock = activity_lock
 
@@ -103,6 +107,13 @@ class ReviewService:
         return {"run_id": row["run_id"], "window_id": row["id"], "segment_id": row["segment_id"],
                 "source_sha256": row["source_sha256"], "parameter_hash": private["run"]["parameter_hash"],
                 "time_base": row["time_base"], "interval": row["interval"], "source_snapshot": source}
+
+    @staticmethod
+    def _source_binding(snapshot: dict, current: dict | None) -> tuple[str, bool]:
+        state = source_state(snapshot)
+        mismatch = current is None or any(current[key] != snapshot[key] for key in
+                                         ("source_path", "sha256", "identity_json", "metadata_json"))
+        return state, mismatch
 
     def _evidence(self, private: dict, row: dict, *, check_image: bool = True,
                   sources: dict | None = None, plans: dict | None = None, latch: bool = False) -> dict:
@@ -120,10 +131,7 @@ class ReviewService:
             sources = {}
         if row["segment_id"] not in sources:
             current = store.segment_by_id(self.db_path, row["segment_id"])
-            state = source_state(snapshot)
-            mismatch = current is None or any(current[key] != snapshot[key] for key in
-                                             ("source_path", "sha256", "identity_json", "metadata_json"))
-            sources[row["segment_id"]] = (state, mismatch)
+            sources[row["segment_id"]] = self._source_binding(snapshot, current)
         state, mismatch = sources[row["segment_id"]]
         if state != "ready":
             warning = state
@@ -229,7 +237,7 @@ class ReviewService:
         return detail
 
     def _receipt(self, preview_id: str | None, row: dict, evidence: dict) -> dict:
-        if evidence["warning"] is not None or preview_id is None:
+        if evidence["warning"] is not None or preview_id is None or self.previews is None:
             raise _error("review_unavailable", "Verify this finite window against its available original preview before completing review.")
         try:
             preview = self.previews.get(preview_id)

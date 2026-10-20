@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { ApiResult, BatAPI, Continuity, ImportJob, MediaMetadata, MediaSegment, MediaSession, Rational, RecordingSession, SaveMedia } from '../../electron/src/contracts';
 import { getAPI } from './api';
@@ -51,7 +51,8 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
     return () => onBusyChange?.(false);
   }, [disabled, dirty, onBusyChange]);
 
-  useEffect(() => {
+  // Notify main before a newly disabled export UI can be observed.
+  useLayoutEffect(() => {
     const unsaved = dirty || reviewDirty;
     void getAPI()?.setDraftDirty(unsaved).catch(() => undefined);
     function preventUnload(event: BeforeUnloadEvent) {
