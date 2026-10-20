@@ -1,6 +1,6 @@
 # Implementation plan
 
-Reviewed 2026-10-19. Status: **Slices 0, 1A, 1B, 2A and 3A are merged. Early Windows beta Stage A is a feasibility report, not an installer; native Windows, distribution and ownership checks remain open**. This is a dependency-ordered sequence, not a promise of dates. The application is built in **small vertical slices**, each delivering observable behavior and tests. No workarounds or speculative infrastructure.
+Reviewed 2026-10-19. Status: **Slices 0, 1A, 1B, 2A and 3A are merged; Slice 3B gallery/navigation is a review candidate. Early Windows beta Stage A is a feasibility report, not an installer; native Windows, distribution and ownership checks remain open**. This is a dependency-ordered sequence, not a promise of dates. The application is built in **small vertical slices**, each delivering observable behavior and tests. No workarounds or speculative infrastructure.
 
 ## Principles of execution
 
@@ -90,11 +90,15 @@ Reviewed 2026-10-19. Status: **Slices 0, 1A, 1B, 2A and 3A are merged. Early Win
 
 **Slice 3A progress (2026-10-19):** [Issue #9](https://github.com/cameaci/Bat_Innovation/issues/9) adds explicit per-run/window first-review decisions, zero-to-many provisional observations with exact single-segment source-PTS spans, local reviewer attribution and an explicit transactional schema 3 -> 4 upgrade. Append-only audit events and their projection commit atomically with stale-save conflicts. All planned windows remain in progress; invalidated evidence retains history and requires a new human verification. The existing list/player gains the form, audit inspection and previous/next/next-unreviewed controls. Dirty edits survive polling, conflicts and backend interruption; normal close/reload requires confirmation. See [validation and limitations](../docs/13-slice-3a-validation.md). PR #10 was subsequently independently reviewed, locally revalidated including discarded-actor restoration, and merged as `b4fd13c4325475b413e2072eb539ce00d9a18579`. Fuller gallery/keyboard work and multi-span observations remain Slice 3B; Slice 4 has not begun.
 
-- [ ] Build a summary gallery and time-ordered list in React. Show **all** windows by default, including apparently empty and quality-flagged windows.
-- [ ] Reuse/adapt the reference app's bounded navigation shell and keyboard patterns after licence/ownership checks.
-- [ ] Click a summary to open its source-video window, zoom and frame-step where playback support allows; show both relative time and optional separately sourced clock time.
+**Slice 3B progress (2026-10-19):** The practical manual-review gallery request extends the merged v4 form/player without backend, schema, dependency or Windows safeguard changes. Twelve-card chronological pages retain all quiet/failed/incomplete windows, seven filters preserve the full denominator, scoped keyboard/navigation protect mounted drafts, and optional displayed-PTS copying uses the existing verified frame ledger. Shared bounded PNG/WebM reads and explicit terminal-run freshness avoid eager full-resolution loading and per-page manifest requests. See [local validation, scale evidence and limits](../docs/15-slice-3b-validation.md). This remains an unmerged independent-review candidate; multi-span observations, zoom/frame-step and Slice 4 are not implemented.
+
+- [x] Build a summary gallery and time-ordered list in React. Show **all** windows by default, including apparently empty and quality-flagged windows.
+- [x] Inspect the reference app's navigation/keyboard patterns and licence; independently implement the small scoped interaction without copying source or adding dependencies.
+- [x] Add seven filters and bounded 12-card pages without changing the all-window review denominator.
+- [x] Select a summary and open its source preview at original PTS; retain relative time, separate clock provenance and exact displayed-PTS draft helpers.
+- [ ] Add zoom and frame-step only when playback support can prove exact behavior; outside this gallery increment.
 - [x] Allow multiple provisional observations within one window, each with one exact original source-PTS span.
-- [ ] Allow a single observation to cite multiple source spans when continuity is validated (Slice 3B).
+- [ ] Allow a single observation to cite multiple source spans when continuity is validated (separate future follow-up, outside this gallery increment).
 - [x] Store provisional visual category, optional activity, uncertain/unknown counts and notes. A movement trace never automatically becomes a confirmed bat.
 - [ ] Add authorised ecological interpretations separately from provisional visual observations (Slice 4).
 - [x] Implement next/previous, next-unreviewed and an all-window reviewed-progress denominator. A quiet window requires an **explicit reviewed/no discernible event** decision to count as reviewed.

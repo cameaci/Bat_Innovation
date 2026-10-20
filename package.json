@@ -9,7 +9,7 @@
     "dev": "npm run build && npm run start --workspace electron",
     "build": "npm run build --workspace frontend && npm run build --workspace electron",
     "typecheck": "npm run typecheck --workspaces && tsc -p tsconfig.tests.json",
-    "test": "npm run build && node --test electron/tests/backend.test.cjs",
+    "test": "npm run build && node --test electron/tests/backend.test.cjs frontend/tests/review.test.cjs",
     "test:e2e": "npm run build && playwright test"
   },
   "devDependencies": {

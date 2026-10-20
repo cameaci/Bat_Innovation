@@ -152,6 +152,7 @@ test('changed originals invalidate displayed derived evidence without removing t
     await expect(shell.page.getByRole('img', { name: 'Reference and motion evidence for window 1', exact: true })).toBeVisible();
     const run = await latestRun(shell, sessionID);
     await appendFile(fixtures.quiet_9, 'Synthetic changed source');
+    await shell.page.getByRole('button', { name: 'Refresh summary runs', exact: true }).click();
     await expect(shell.page.getByRole('article', { name: 'Window 1: summary-quiet-9.mp4', exact: true })).toContainText('changed_source');
     await expect(shell.page.getByRole('img', { name: 'Reference and motion evidence for window 1', exact: true })).not.toBeVisible();
     await expect(shell.page.getByRole('list', { name: 'All planned windows', exact: true }).getByRole('article')).toHaveCount(1);

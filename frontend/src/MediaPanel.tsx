@@ -4,6 +4,7 @@ import type { ApiResult, BatAPI, Continuity, ImportJob, MediaMetadata, MediaSegm
 import { getAPI } from './api';
 import { SourcePreview } from './SourcePreview';
 import { SummaryWindows } from './SummaryWindows';
+import type { DisplayedSourceFrame, WindowSourceFrame } from './sourceFrame';
 
 const unavailable = 'The local backend is unavailable. Retry, or close and reopen the desktop app.';
 const rational = (value: Rational | null) => value ? `${value.num}/${value.den}` : 'Unknown';
@@ -39,6 +40,7 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
   const [notice, setNotice] = useState('');
   const [selectedPreview, setSelectedPreview] = useState<{ segment: MediaSegment; sourcePTS: string; windowID?: string } | null>(null);
   const [previewReceipt, setPreviewReceipt] = useState<{ windowID: string; previewID: string } | null>(null);
+  const [displayedSourceFrame, setDisplayedSourceFrame] = useState<WindowSourceFrame | null>(null);
   const [summaryBusy, setSummaryBusy] = useState(false);
   const [reviewDirty, setReviewDirty] = useState(false);
   const importing = job?.state === 'running';
@@ -194,10 +196,22 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
     const id = selectedPreview?.segment.id;
     setSelectedPreview(null);
     setPreviewReceipt(null);
+    setDisplayedSourceFrame(null);
     if (id) requestAnimationFrame(() => {
       const row = document.getElementById(`segment-${id}`);
       row?.focus();
       row?.scrollIntoView({ block: 'nearest' });
+    });
+  }
+
+  function displayedFrame(frame: DisplayedSourceFrame | null) {
+    const value = frame && selectedPreview?.windowID ? { ...frame, windowID: selectedPreview.windowID } : null;
+    setDisplayedSourceFrame(previous => {
+      if (previous === value || (previous && value && previous.windowID === value.windowID
+          && previous.previewID === value.previewID && previous.segmentID === value.segmentID
+          && previous.sourceSHA256 === value.sourceSHA256 && previous.sourcePTS === value.sourcePTS
+          && previous.timeBase.num === value.timeBase.num && previous.timeBase.den === value.timeBase.den)) return previous;
+      return value;
     });
   }
 
@@ -295,9 +309,9 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
       <p>Manual first review needs an explicit schema 3 to 4 upgrade. Existing source files, processing runs and window provenance are preserved.</p>
       <button type="button" disabled={disabled || dirty} onClick={() => void upgradeReviews()}>Upgrade review storage</button>
     </div>}
-    {(media?.schema_version ?? 0) >= 3 && <SummaryWindows sessionID={session.id} segments={segments} disabled={busy !== null || importing || selectedPreview !== null || dirty} reviewDisabled={busy !== null || importing || dirty} reviewEnabled={(media?.schema_version ?? 0) >= 4} previewReceipt={previewReceipt} onBusyChange={setSummaryBusy} onDraftChange={setReviewDirty} onPreview={(segment, sourcePTS, windowID) => {
-      if (busy === null && !importing && !dirty && selectedPreview === null) { setPreviewReceipt(null); setSelectedPreview({ segment, sourcePTS, windowID }); }
+    {(media?.schema_version ?? 0) >= 3 && <SummaryWindows sessionID={session.id} segments={segments} disabled={busy !== null || importing || selectedPreview !== null || dirty} reviewDisabled={busy !== null || importing || dirty} reviewEnabled={(media?.schema_version ?? 0) >= 4} previewReceipt={previewReceipt} displayedSourceFrame={displayedSourceFrame} onBusyChange={setSummaryBusy} onDraftChange={setReviewDirty} onPreview={(segment, sourcePTS, windowID) => {
+      if (busy === null && !importing && !dirty && selectedPreview === null) { setPreviewReceipt(null); setDisplayedSourceFrame(null); setSelectedPreview({ segment, sourcePTS, windowID }); }
     }} />}
-    {selectedPreview && <SourcePreview key={`${selectedPreview.segment.id}:${selectedPreview.sourcePTS}`} segment={selectedPreview.segment} initialPTS={selectedPreview.sourcePTS} clockAnchor={media?.clock_anchor ?? null} onClose={closePreview} onReady={previewID => setPreviewReceipt(previewID && selectedPreview.windowID ? { windowID: selectedPreview.windowID, previewID } : null)} />}
+    {selectedPreview && <SourcePreview key={`${selectedPreview.segment.id}:${selectedPreview.sourcePTS}`} segment={selectedPreview.segment} initialPTS={selectedPreview.sourcePTS} clockAnchor={media?.clock_anchor ?? null} onClose={closePreview} onReady={previewID => setPreviewReceipt(previewID && selectedPreview.windowID ? { windowID: selectedPreview.windowID, previewID } : null)} onDisplayedFrame={displayedFrame} />}
   </section>;
 }

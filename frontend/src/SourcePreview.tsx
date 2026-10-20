@@ -2,16 +2,19 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { ClockAnchor, MediaSegment, PreviewFrame, PreviewJob, Rational } from '../../electron/src/contracts';
 import { getAPI } from './api';
+import { readMediaBytes } from './binary';
+import type { DisplayedSourceFrame } from './sourceFrame';
 
 const rational = (value: Rational) => `${value.num}/${value.den}`;
 const unavailable = 'The local backend is unavailable. Close the preview and retry after checking the backend.';
 
-export function SourcePreview({ segment, initialPTS, clockAnchor, onClose, onReady }: {
+export function SourcePreview({ segment, initialPTS, clockAnchor, onClose, onReady, onDisplayedFrame }: {
   segment: MediaSegment;
   initialPTS?: string;
   clockAnchor: ClockAnchor | null;
   onClose: () => void;
   onReady?: (previewID: string | null) => void;
+  onDisplayedFrame?: (frame: DisplayedSourceFrame | null) => void;
 }) {
   const [sourcePTS, setSourcePTS] = useState(initialPTS ?? segment.metadata.first_pts);
   const [job, setJob] = useState<PreviewJob | null>(null);
@@ -29,9 +32,18 @@ export function SourcePreview({ segment, initialPTS, clockAnchor, onClose, onRea
   const clipURL = useRef<string | null>(null);
   const readyCallback = useRef(onReady);
   readyCallback.current = onReady;
+  const frameCallback = useRef(onDisplayedFrame);
+  frameCallback.current = onDisplayedFrame;
+  const contentRead = useRef<AbortController | null>(null);
+
+  function clearDisplayed() {
+    setDisplayed(null);
+    frameCallback.current?.(null);
+  }
 
   function clearClip() {
     readyCallback.current?.(null);
+    contentRead.current?.abort();
     if (video.current) {
       video.current.pause();
       video.current.removeAttribute('src');
@@ -41,7 +53,7 @@ export function SourcePreview({ segment, initialPTS, clockAnchor, onClose, onRea
     clipURL.current = null;
     setURL(null);
     setLoaded(false);
-    setDisplayed(null);
+    clearDisplayed();
   }
 
   function releaseJob() {
@@ -70,6 +82,8 @@ export function SourcePreview({ segment, initialPTS, clockAnchor, onClose, onRea
     heading.current?.scrollIntoView({ block: 'start' });
     return () => {
       readyCallback.current?.(null);
+      frameCallback.current?.(null);
+      contentRead.current?.abort();
       generation.current += 1;
       releaseJob();
       if (clipURL.current) URL.revokeObjectURL(clipURL.current);
@@ -111,6 +125,8 @@ export function SourcePreview({ segment, initialPTS, clockAnchor, onClose, onRea
     const ticket = generation.current;
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
+    const controller = new AbortController();
+    contentRead.current = controller;
     const current = () => active && ticket === generation.current;
     async function poll() {
       try {
@@ -130,9 +146,9 @@ export function SourcePreview({ segment, initialPTS, clockAnchor, onClose, onRea
           if (!value.manifest || value.manifest.segment_id !== segment.id || value.manifest.source_sha256 !== segment.metadata.sha256) {
             fail('The preview identity does not match the imported original. Refresh the session media.'); return;
           }
-          const content = await api.previewContent(id);
+          const content = await readMediaBytes(() => api.previewContent(id), { signal: controller.signal, priority: 2 });
           if (!current()) return;
-          if (!content.ok) { fail(content.error.message); return; }
+          if (!content?.ok) { fail(content?.error.message ?? unavailable); return; }
           const bytes = new Uint8Array(content.value.bytes);
           if (bytes.byteLength < 1 || bytes.byteLength > 8 * 1024 * 1024) { fail('The preview content is empty or exceeds its 8 MiB limit.'); return; }
           clipURL.current = URL.createObjectURL(new Blob([bytes.buffer], { type: 'video/webm' }));
@@ -142,7 +158,10 @@ export function SourcePreview({ segment, initialPTS, clockAnchor, onClose, onRea
       } catch { if (current()) fail(unavailable); }
     }
     void poll();
-    return () => { active = false; clearTimeout(timer); };
+    return () => {
+      active = false; clearTimeout(timer); controller.abort();
+      if (contentRead.current === controller) contentRead.current = null;
+    };
   }, [job?.id]);
 
   useEffect(() => {
@@ -179,17 +198,54 @@ export function SourcePreview({ segment, initialPTS, clockAnchor, onClose, onRea
     }
     let active = true;
     let callback: number;
+    let pending: PreviewFrame | null = null;
+    const clipGeneration = generation.current;
+    const previewID = job!.id;
+    const current = () => active && generation.current === clipGeneration && activeJob.current === previewID;
+    function publish(mapped: PreviewFrame) {
+      setDisplayed(mapped);
+      frameCallback.current?.({ previewID, segmentID: manifest!.segment_id,
+        sourceSHA256: manifest!.source_sha256, timeBase: manifest!.time_base, sourcePTS: mapped.source_pts });
+    }
+    function matchesPosition(mapped: PreviewFrame) {
+      const index = manifest!.frames.indexOf(mapped);
+      const end = manifest!.frames[index + 1]?.preview_ms ?? manifest!.preview_duration_ms;
+      const position = player!.currentTime * 1000;
+      // Preview position only rejects stale callbacks; only rVFC supplies a source-PTS candidate.
+      return index >= 0 && mapped.preview_ms <= position && position < end;
+    }
+    function seeking() {
+      clearDisplayed();
+      // A presented-frame callback may precede the seeking event for this same target.
+      if (pending && !matchesPosition(pending)) pending = null;
+    }
+    function seeked() {
+      if (current() && !player!.seeking && pending && matchesPosition(pending)) publish(pending);
+      pending = null;
+    }
     function frame(_now: number, metadata: VideoFrameCallbackMetadata) {
-      if (!active || !player) return;
+      if (!current() || !player) return;
       const milliseconds = metadata.mediaTime * 1000;
       const mapped = manifest!.frames.find(value => Math.abs(value.preview_ms - milliseconds) <= 0.5001);
       if (!mapped) { fail('The displayed frame could not be matched to an original source PTS. Create a new preview.'); return; }
-      setDisplayed(mapped);
+      if (player.seeking) {
+        clearDisplayed();
+        pending = mapped;
+      } else {
+        pending = null;
+        publish(mapped);
+      }
       callback = player.requestVideoFrameCallback(frame);
     }
+    player.addEventListener('seeking', seeking);
+    player.addEventListener('seeked', seeked);
     callback = player.requestVideoFrameCallback(frame);
-    return () => { active = false; player.cancelVideoFrameCallback(callback); };
-  }, [url, manifest]);
+    return () => {
+      active = false; pending = null; player.cancelVideoFrameCallback(callback);
+      player.removeEventListener('seeking', seeking); player.removeEventListener('seeked', seeked);
+    };
+    // A ready clip's ledger is immutable; status polling must not drop an in-progress seek candidate.
+  }, [url, job?.id]);
 
   function target(value: string) {
     invalidate(); setSourcePTS(value); setError(''); setNotice('');
@@ -241,7 +297,7 @@ export function SourcePreview({ segment, initialPTS, clockAnchor, onClose, onRea
     </div>
     <p className="preview-status" role="status">{starting ? 'Creating preview...' : job?.state === 'running' ? `Creating preview: ${job.phase}` : url ? loaded ? 'Preview ready' : 'Loading preview...' : notice || 'No preview displayed.'}</p>
     {error && <div className="error" role="alert"><strong>Preview unavailable</strong><p>{error}</p></div>}
-    {url && <video ref={video} src={url} controls preload="auto" aria-label="Derived source preview" onLoadedData={() => { setLoaded(true); if (job?.state === 'ready') readyCallback.current?.(job.id); }} onSeeking={() => setDisplayed(null)} onError={() => fail('The derived preview could not be played. Close it and retry; this browser may not support the preview codec.')} />}
+    {url && <video ref={video} src={url} controls preload="auto" aria-label="Derived source preview" onLoadedData={() => { setLoaded(true); if (job?.state === 'ready') readyCallback.current?.(job.id); }} onSeeking={clearDisplayed} onError={() => fail('The derived preview could not be played. Close it and retry; this browser may not support the preview codec.')} />}
     {displayed && <dl className="preview-timing" aria-label="Displayed original frame">
       <dt>Displayed source PTS</dt><dd>{displayed.source_pts}</dd>
       <dt>Displayed source time (seconds)</dt><dd>{rational(displayed.source_time)}</dd>
