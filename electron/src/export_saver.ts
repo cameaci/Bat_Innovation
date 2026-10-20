@@ -1,0 +1,117 @@
+/** Native-directory publication of one bounded, verified provisional bundle. */
+import { randomUUID } from 'node:crypto';
+import { lstat, mkdir, open, readFile, readdir, realpath, rename, rm, unlink } from 'node:fs/promises';
+import { join } from 'node:path';
+import { isExternalDataDirectory, isUUID } from './backend';
+import type { BackendRuntime } from './backend';
+import type { ApiResult, ExportManifest, ExportSaved, ExportKind } from './contracts';
+
+export const EXPORT_FILES = { observations: 'provisional-observations.csv', audit: 'technical-window-audit.csv', manifest: 'manifest.json' } as const;
+const failure = () => ({ ok: false, error: { code: 'export_write_failed', message: 'The provisional bundle could not be saved completely. Check storage and retry; no partial CSV bundle was published.' } }) as const;
+const empty = { cancelled: true, folder_name: '', files: [] };
+
+export function validExportManifest(value: ExportManifest | null, runID: string): value is ExportManifest {
+  return !!value && value.schema_version === 'bat-provisional-csv-v1' && value.run_id === runID &&
+    value.provisional_label === 'PROVISIONAL — NOT ECOLOGICALLY FINALISED' && !!value.files &&
+    Object.keys(value.files).length === 3 && (Object.keys(EXPORT_FILES) as ExportKind[]).every(kind => {
+      const file = value.files[kind];
+      return !!file && file.name === EXPORT_FILES[kind] && Number.isSafeInteger(file.bytes) && file.bytes > 0 &&
+        file.bytes <= (kind === 'manifest' ? 65536 : 8 * 1024 * 1024) && /^[0-9a-f]{64}$/.test(file.sha256);
+    });
+}
+
+export class ExportSaver {
+  private operation?: Promise<ApiResult<ExportSaved>>;
+  private controller?: AbortController;
+  private closed = false;
+  private journal: string;
+  constructor(private backend: BackendRuntime, private repoRoot: string, private dataDir: string) {
+    this.journal = join(dataDir, 'export-save-pending.json');
+  }
+  private safeParent(parent: string): boolean {
+    return isExternalDataDirectory(this.repoRoot, parent) && isExternalDataDirectory(this.dataDir, parent);
+  }
+  /** Restart recovery: only our recorded stage and empty reservation are removed.
+   * A nonempty final directory was published atomically and must be retained. */
+  async recover(): Promise<void> {
+    // Output directories are created only after the complete intent is durable.
+    await rm(this.journal + '.part', { force: true });
+    let record: { parent: string; nonce: string };
+    try {
+      if ((await lstat(this.journal)).size > 4096) throw new Error('Invalid recovery record');
+      record = JSON.parse(await readFile(this.journal, 'utf8'));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw new Error('Export save recovery needs local storage attention');
+    }
+    if (typeof record.parent !== 'string' || !isUUID(record.nonce) || !this.safeParent(record.parent) || await realpath(record.parent) !== record.parent) throw new Error('Invalid export recovery');
+    const stage = join(record.parent, `.bat-provisional-${record.nonce}.part`);
+    const target = join(record.parent, `bat-provisional-${record.nonce}`);
+    await rm(stage, { recursive: true, force: true });
+    try { if ((await readdir(target)).length === 0) await rm(target, { recursive: true }); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    await unlink(this.journal);
+  }
+  save(id: string, chooseParent: () => Promise<string | null>): Promise<ApiResult<ExportSaved>> {
+    if (!isUUID(id)) return Promise.resolve({ ok: false, error: { code: 'invalid', message: 'Choose a valid export ID.' } });
+    if (this.closed || this.operation) return Promise.resolve({ ok: false, error: { code: 'export_busy', message: 'Another native export save is active.' } });
+    this.controller = new AbortController();
+    this.operation = this.perform(id, chooseParent, this.controller.signal).catch(failure).finally(() => { this.operation = undefined; this.controller = undefined; });
+    return this.operation;
+  }
+  private async perform(id: string, chooseParent: () => Promise<string | null>, signal: AbortSignal): Promise<ApiResult<ExportSaved>> {
+    let stage: string | undefined, target: string | undefined, published = false, journalOwned = false, intentOwned = false, stageOwned = false, targetOwned = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const state = await this.backend.exportStatus(id);
+      if (!state.ok) return state;
+      if (state.value.state !== 'ready' || !validExportManifest(state.value.manifest, state.value.run_id)) return failure();
+      const selected = await chooseParent();
+      if (selected === null || signal.aborted) return { ok: true, value: empty };
+      const parent = await realpath(selected);
+      if (!this.safeParent(parent) || !(await lstat(parent)).isDirectory()) return failure();
+      const nonce = randomUUID();
+      stage = join(parent, `.bat-provisional-${nonce}.part`);
+      target = join(parent, `bat-provisional-${nonce}`);
+      // Durable intent precedes filesystem mutation, so restart can clean a crash.
+      const journal = await open(this.journal + '.part', 'wx', 0o600);
+      intentOwned = true;
+      try { await journal.writeFile(JSON.stringify({ parent, nonce })); await journal.sync(); }
+      finally { await journal.close(); }
+      await rename(this.journal + '.part', this.journal); intentOwned = false; journalOwned = true;
+      const intentDirectory = await open(this.dataDir, 'r');
+      try { await intentDirectory.sync(); } finally { await intentDirectory.close(); }
+      await mkdir(stage, { mode: 0o700 }); stageOwned = true;
+      await mkdir(target, { mode: 0o700 }); targetOwned = true; // exclusive reservation; never overwrite an existing name
+      timeout = setTimeout(() => this.controller?.abort(), 30000);
+      for (const kind of Object.keys(EXPORT_FILES) as ExportKind[]) {
+        signal.throwIfAborted();
+        const path = join(stage, EXPORT_FILES[kind]);
+        await this.backend.downloadExportFile(id, kind, state.value.manifest.files[kind], path, signal);
+        const file = await open(path, 'r');
+        try { await file.sync(); } finally { await file.close(); }
+      }
+      signal.throwIfAborted();
+      const directory = await open(stage, 'r');
+      try { await directory.sync(); } finally { await directory.close(); }
+      await rename(stage, target); // replaces only the empty directory we just reserved
+      stage = undefined;
+      const directoryParent = await open(parent, 'r');
+      try { await directoryParent.sync(); } finally { await directoryParent.close(); }
+      published = true;
+      await unlink(this.journal); journalOwned = false;
+      return { ok: true, value: { cancelled: false, folder_name: `bat-provisional-${nonce}`, files: Object.values(EXPORT_FILES) } };
+    } catch { return signal.aborted ? { ok: false, error: { code: 'export_cancelled', message: 'Export save cancelled; incomplete files were removed.' } } : failure(); }
+    finally {
+      if (timeout) clearTimeout(timeout);
+      if (stage && stageOwned) await rm(stage, { recursive: true, force: true });
+      if (target && targetOwned && !published) await rm(target, { recursive: true, force: true });
+      if (intentOwned) await rm(this.journal + '.part', { force: true });
+      if (journalOwned) await unlink(this.journal).catch(() => undefined); // recovery retains ownership if deletion fails
+    }
+  }
+  async close(): Promise<void> {
+    this.closed = true; this.controller?.abort();
+    await this.operation;
+  }
+}

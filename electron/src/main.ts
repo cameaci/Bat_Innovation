@@ -2,11 +2,13 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, type IpcM
 import { readFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
+import { ExportSaver } from './export_saver';
 import type { NewSession } from './contracts';
 
 const UI_URL = 'app://bat/index.html';
 const repoRoot = resolve(__dirname, '../..');
 const backend = new BackendRuntime();
+let exportSaver: ExportSaver | undefined;
 let window: BrowserWindow | undefined;
 let quitting = false;
 let draftDirty = false;
@@ -71,6 +73,8 @@ async function open(): Promise<void> {
     return;
   }
   const dataDir = configuredData ?? join(app.getPath('userData'), 'data');
+  exportSaver = new ExportSaver(backend, repoRoot, dataDir);
+  await exportSaver.recover();
   // Same fixed origin for development and eventual packaging. Serve only built UI assets.
   protocol.handle('app', (request) => {
     const url = new URL(request.url);
@@ -115,6 +119,18 @@ async function open(): Promise<void> {
     }
   });
   window.on('closed', () => { window = undefined; draftDirty = false; discardApproved = false; });
+  handle('bat:start-export', 1, ([id]) => isUUID(id) && !draftDirty ? backend.startExport(id) : invalid('Save or discard unsaved drafts before export.'));
+  handle('bat:export-status', 1, ([id]) => isUUID(id) ? backend.exportStatus(id) : invalid());
+  handle('bat:cancel-export', 1, ([id]) => isUUID(id) ? backend.cancelExport(id) : invalid());
+  handle('bat:save-export-bundle', 1, ([id]) => {
+    if (!isUUID(id) || draftDirty || !exportSaver) return invalid('Save or discard unsaved drafts before export.');
+    return exportSaver.save(id, async () => {
+      const owner = window;
+      if (!owner || owner.isDestroyed()) return null;
+      const selected = await dialog.showOpenDialog(owner, { title: 'Save PROVISIONAL CSV bundle in a new folder', properties: ['openDirectory', 'createDirectory'] });
+      return owner.isDestroyed() || selected.canceled || selected.filePaths.length !== 1 ? null : selected.filePaths[0];
+    });
+  });
   handle('bat:health', 0, () => backend.health());
   handle('bat:list-sessions', 0, () => backend.listSessions());
   handle('bat:create-session', 1, ([input]) => backend.createSession(input as NewSession));
@@ -196,7 +212,7 @@ app.on('before-quit', (event) => {
   // renderer blocks closing, its draft and the running backend stay available.
   if (window && !window.isDestroyed()) { window.close(); return; }
   quitting = true;
-  void backend.stop().then(() => app.quit());
+  void (async () => { await exportSaver?.close(); await backend.stop(); app.quit(); })();
 });
 process.on('SIGINT', () => app.quit());
 process.on('SIGTERM', () => app.quit());

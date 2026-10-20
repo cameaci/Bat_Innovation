@@ -5,6 +5,7 @@ import { getAPI } from './api';
 import { readMediaBytes } from './binary';
 import { ReviewPanel } from './ReviewPanel';
 import { QAPanel } from './QAPanel';
+import { ExportPanel } from './ExportPanel';
 import { SummaryGallery } from './SummaryGallery';
 import type { WindowSourceFrame } from './sourceFrame';
 
@@ -46,6 +47,7 @@ export function SummaryWindows({ sessionID, segments, disabled, reviewDisabled, 
   const [detail, setDetail] = useState<SummaryDetail | null>(null);
   const [selectedID, setSelectedID] = useState('');
   const [action, setAction] = useState<'loading' | 'starting' | 'cancelling' | null>('loading');
+  const [exportBusy, setExportBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [verified, setVerified] = useState(false);
@@ -63,7 +65,8 @@ export function SummaryWindows({ sessionID, segments, disabled, reviewDisabled, 
   const imageFailureAt = useRef(0);
   const processing = activeRun(detail);
   const checking = runID !== '' && detail === null;
-  const busy = action !== null || processing || cancelling || checking;
+  const baseBusy = action !== null || processing || cancelling || checking;
+  const busy = baseBusy || exportBusy;
   const currentSelected = detail?.windows.find(window => window.id === selectedID);
   if (currentSelected) selectedSnapshot.current = currentSelected;
   const selected = currentSelected ?? (reviewDirty ? selectedSnapshot.current : null);
@@ -242,6 +245,7 @@ export function SummaryWindows({ sessionID, segments, disabled, reviewDisabled, 
       {runs.map(run => <option key={run.id} value={run.id}>{run.started_at_utc} · {run.state} · {run.id}</option>)}
     </select></>}
     {detail && <>
+      {qaEnabled && <ExportPanel key={runID} runID={runID} disabled={disabled || baseBusy} dirty={reviewDirty || reviewDisabled} onBusyChange={setExportBusy} />}
       <p role="status">Run {detail.state}: {detail.counts.complete}/{detail.counts.planned} windows complete; {detail.counts.failed} failed; {detail.counts.incomplete} incomplete; {detail.counts.pending} pending; {detail.counts.running} running.{cancelling && ' Cancellation requested; waiting for resource cleanup.'}</p>
       {detail.review_progress && <p role="status" className="review-progress">First review progress: {detail.review_progress.reviewed}/{detail.review_progress.total} reviewed; {detail.review_progress.unreviewed} unreviewed; {detail.review_progress.quality_flagged} quality-flagged; {detail.review_progress.failed} failed; {detail.review_progress.incomplete} incomplete; {detail.review_progress.needs_reverification} need re-verification. All planned windows remain in the denominator.</p>}
       {detail.qa_progress && <p role="status" className="review-progress">Second-review QA coverage: {detail.qa_progress.agree}/{detail.qa_progress.total} agreed; {detail.qa_progress.disagree} disagreed; {detail.qa_progress.needs_clarification} need clarification; {detail.qa_progress.pending} pending; {detail.qa_progress.unassessable} unassessable; {detail.qa_progress.needs_reverification} stale. All planned windows remain in the denominator; this is not ecological finalisation.</p>}

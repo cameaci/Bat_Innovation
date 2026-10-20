@@ -65,6 +65,24 @@ def _uuid(value: str) -> bool:
         return False
 
 
+def summary_image_path(directory: Path, row: dict) -> Path:
+    if not _uuid(row["id"]) or not _uuid(row["run_id"]):
+        raise SummaryError("summary_image_invalid")
+    folder = directory / row["run_id"]
+    candidate = folder / f"{row['id']}.png"
+    if (row.get("image_path") != str(candidate) or directory.is_symlink()
+            or folder.is_symlink() or candidate.is_symlink()):
+        raise SummaryError("summary_image_invalid")
+    try:
+        if not candidate.is_file():
+            raise SummaryError("summary_image_missing")
+        if not 0 < candidate.stat().st_size == row["image_bytes"] <= MAX_IMAGE_BYTES:
+            raise SummaryError("summary_image_invalid")
+    except OSError:
+        raise SummaryError("summary_image_missing") from None
+    return candidate
+
+
 class SummaryJobs:
     def __init__(self, db_path: Path, data_dir: Path, activity_lock: LockType):
         self.db_path, self.data_dir = db_path, data_dir.absolute()
@@ -125,21 +143,7 @@ class SummaryJobs:
         return amount
 
     def _image_path(self, row: dict) -> Path:
-        if not _uuid(row["id"]) or not _uuid(row["run_id"]):
-            raise SummaryError("summary_image_invalid")
-        folder = self.directory / row["run_id"]
-        candidate = folder / f"{row['id']}.png"
-        if (row.get("image_path") != str(candidate) or self.directory.is_symlink()
-                or folder.is_symlink() or candidate.is_symlink()):
-            raise SummaryError("summary_image_invalid")
-        try:
-            if not candidate.is_file():
-                raise SummaryError("summary_image_missing")
-            if not 0 < candidate.stat().st_size == row["image_bytes"] <= MAX_IMAGE_BYTES:
-                raise SummaryError("summary_image_invalid")
-        except OSError:
-            raise SummaryError("summary_image_missing") from None
-        return candidate
+        return summary_image_path(self.directory, row)
 
     def _get(self, run_id: str) -> dict:
         private = summary_store.private_run(self.db_path, run_id)

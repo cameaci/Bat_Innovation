@@ -49,6 +49,10 @@ For each candidate record: exact path and licence, transitive dependencies, exte
 
 Before introducing each dependency or bundling FFmpeg, record exact version, package/binary URL, code and binary licence, bundled codec configuration, network behavior and distribution terms. **FFmpeg licensing can differ by build and codecs. PyAV is published under a BSD-style licence, while its binary wheels may bundle FFmpeg with separate terms.** Verify exact versions and packaged binaries. Camera_Trap licence text does not cover independent new dependencies. Avoid shipping model weights in v1.
 
+### Slice 4B1 inspection and decision
+
+Inspected Camera_Trap `frontend/src/lib/download.ts` at `176451c272628f4f8e38633db747cb427d587072`, blob `712f375e1dbdbbc54aac351b6efbb5833e8e0651`. Its whole-Blob renderer download is a pattern reference only, not copied: it does not meet the bounded private main-process export contract. Reuse existing Bat Innovation exact plans, source/PNG evidence fingerprints, pure first/QA status derivation and immutable paginated histories. Python stdlib `sqlite3.backup`, `csv` and `Fraction`, Node backpressure-aware streams and Electron native directory selection supply the export; no dependency or licence-notice change. [Design and validation](../docs/17-slice-4b1-validation.md) preserve all ownership, ecological and redistribution gates.
+
 ### Slice 4A inspection and decision
 
 Inspected Camera_Trap audit model, progress hook and MIT licence at `176451c272628f4f8e38633db747cb427d587072`; exact blobs and five-role constraints are in the [Slice 4A report](../docs/16-slice-4a-validation.md). Reuse is pattern only: attributed before/after history and a stable full-window denominator. No source is copied and no dependency is added. Existing Bat Innovation evidence epochs/fingerprints, exact preview receipts, SQLite transactions, typed ID-only API/IPC and mounted draft/close guards supply the vertical slice. No new worker, identity provider or Windows exception is introduced. Publication/redistribution gates remain open.

@@ -1,11 +1,14 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createWriteStream } from 'node:fs';
+import { Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
 import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia, SummaryRequest, SummaryRun, SummaryDetail, ReviewChange, WindowReview, ReviewHistory } from './contracts';
-import type { QAChange, WindowQA, QAHistory } from './contracts';
+import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory } from './contracts';
 
 const unavailable = (message = 'Backend unavailable. Reopen the app after checking Python, ffmpeg and ffprobe.') =>
   ({ ok: false, error: { code: 'unavailable', message } }) as const;
@@ -101,6 +104,14 @@ export function isSaveMedia(input: unknown): input is SaveMedia {
 
 // Only known error codes cross the desktop boundary; arbitrary response text never does.
 const mediaErrors: Record<string, string> = {
+  export_busy: 'Another export or this processing run is active. Wait or cancel, then retry.',
+  export_too_large: 'Export exceeds a row, byte, CPU, memory, snapshot or time limit. No partial export was published.',
+  export_stale: 'Export evidence or coverage changed or is inconsistent. Refresh and retry.',
+  export_write_failed: 'The provisional export could not be written. Check local storage and retry.',
+  export_missing: 'This export or run is unavailable. Generate the provisional export again.',
+  export_schema_required: 'Explicitly upgrade to QA schema 5 before exporting provisional CSVs.',
+  export_limits_unavailable: 'Safe export process limits are currently verified on Linux only.',
+  export_cancelled: 'Export cancelled. Incomplete managed files were removed.',
   qa_schema_required: 'Use Upgrade QA storage before independent second review.',
   qa_upgrade_failed: 'QA storage could not be upgraded. The existing database was preserved.',
   qa_invalid: 'Confirm a supported QA action, reviewer label, written rationale and observation suggestion.',
@@ -164,7 +175,7 @@ const mediaErrors: Record<string, string> = {
 function mediaFailure(code: unknown) {
   return typeof code === 'string' && Object.hasOwn(mediaErrors, code) ? { code, message: mediaErrors[code] } : { code: 'backend', message: 'Media request failed. Refresh media and check the selected originals.' };
 }
-type ApiRoute = '/api/qa/upgrade' | `/api/summary-windows/${string}/qa` | `/api/summary-windows/${string}/qa-actions` | `/api/summary-windows/${string}/qa-history?after_revision=${number}` | '/api/reviews/upgrade' | `/api/summary-windows/${string}/review` | `/api/summary-windows/${string}/review-actions` | `/api/summary-windows/${string}/review-history?after_revision=${number}` | '/api/health' | '/api/sessions' | '/api/media/upgrade' | '/api/media/import' |
+type ApiRoute = '/api/exports' | `/api/exports/${string}` | `/api/exports/${string}/cancel` | '/api/qa/upgrade' | `/api/summary-windows/${string}/qa` | `/api/summary-windows/${string}/qa-actions` | `/api/summary-windows/${string}/qa-history?after_revision=${number}` | '/api/reviews/upgrade' | `/api/summary-windows/${string}/review` | `/api/summary-windows/${string}/review-actions` | `/api/summary-windows/${string}/review-history?after_revision=${number}` | '/api/health' | '/api/sessions' | '/api/media/upgrade' | '/api/media/import' |
   `/api/sessions/${string}/media` | `/api/media/import/${string}` | `/api/media/import/${string}/cancel` |
   '/api/summaries/upgrade' | '/api/summaries' | `/api/summaries/${string}` | `/api/summaries/${string}/cancel` | `/api/sessions/${string}/summary-runs` |
   '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
@@ -285,6 +296,45 @@ export class BackendClient {
     const result = await this.call<PreviewJob>(route, method, input);
     if (result.ok && result.value.error) result.value.error = mediaFailure(result.value.error.code);
     return result;
+  }
+  startExport(runID: string): Promise<ApiResult<ExportJob>> {
+    return isUUID(runID) ? this.exportJob('/api/exports', 'POST', { run_id: runID }) : Promise.resolve(invalid());
+  }
+  exportStatus(jobID: string): Promise<ApiResult<ExportJob>> {
+    return isUUID(jobID) ? this.exportJob(`/api/exports/${jobID}`) : Promise.resolve(invalid());
+  }
+  cancelExport(jobID: string): Promise<ApiResult<ExportJob>> {
+    return isUUID(jobID) ? this.exportJob(`/api/exports/${jobID}/cancel`, 'POST', {}) : Promise.resolve(invalid());
+  }
+  private async exportJob(route: ApiRoute, method: 'GET' | 'POST' = 'GET', input?: unknown): Promise<ApiResult<ExportJob>> {
+    const result = await this.call<ExportJob>(route, method, input);
+    if (result.ok && result.value.error) result.value.error = mediaFailure(result.value.error.code);
+    return result;
+  }
+  /** Privileged disk sink only. Never exposed through the renderer bridge. */
+  async downloadExportFile(jobID: string, kind: ExportKind, file: ExportFile, destination: string, signal: AbortSignal): Promise<void> {
+    if (!isUUID(jobID) || !['observations', 'audit', 'manifest'].includes(kind) || !Number.isSafeInteger(file.bytes) ||
+        file.bytes < 1 || file.bytes > (kind === 'manifest' ? 65536 : 8 * 1024 * 1024) || !/^[0-9a-f]{64}$/.test(file.sha256)) throw new Error('Invalid export');
+    const req = request({ hostname: '127.0.0.1', port: this.port, path: `/api/exports/${jobID}/files/${kind}`, headers: { 'X-Bat-Token': this.token }, signal });
+    const timeout = setTimeout(() => req.destroy(new Error('Export read timed out')), 30000);
+    try {
+      const res = await new Promise<import('node:http').IncomingMessage>((resolve, reject) => {
+        req.once('response', resolve); req.once('error', reject); req.end();
+      });
+      const mime = kind === 'manifest' ? 'application/json' : 'text/csv; charset=utf-8';
+      if (res.statusCode !== 200 || res.headers['content-type'] !== mime || res.headers['content-length'] !== String(file.bytes)) {
+        res.destroy(); throw new Error('Invalid export response');
+      }
+      let size = 0;
+      const hash = createHash('sha256');
+      const verify = new Transform({ transform(chunk: Buffer, _encoding, callback) {
+        size += chunk.length;
+        if (size > file.bytes) callback(new Error('Export exceeds its byte limit'));
+        else { hash.update(chunk); callback(null, chunk); }
+      } });
+      await pipeline(res, verify, createWriteStream(destination, { flags: 'wx', mode: 0o600, highWaterMark: 65536 }), { signal });
+      if (size !== file.bytes || hash.digest('hex') !== file.sha256) throw new Error('Incomplete export');
+    } finally { clearTimeout(timeout); req.destroy(); }
   }
   upgradeQA(): Promise<ApiResult<{ schema_version: 5 }>> { return this.call('/api/qa/upgrade', 'POST'); }
   getWindowQA(windowID: string): Promise<ApiResult<WindowQA>> {
@@ -494,6 +544,14 @@ export class BackendRuntime {
   cancelPreview(jobID: string): Promise<ApiResult<PreviewJob>> { return this.ready(client => client.cancelPreview(jobID)); }
   previewContent(jobID: string): Promise<ApiResult<{ bytes: Uint8Array }>> { return this.ready(client => client.previewContent(jobID)); }
 
+  startExport(runID: string): Promise<ApiResult<ExportJob>> { return this.ready(client => client.startExport(runID)); }
+  exportStatus(jobID: string): Promise<ApiResult<ExportJob>> { return this.ready(client => client.exportStatus(jobID)); }
+  cancelExport(jobID: string): Promise<ApiResult<ExportJob>> { return this.ready(client => client.cancelExport(jobID)); }
+  async downloadExportFile(jobID: string, kind: ExportKind, file: ExportFile, destination: string, signal: AbortSignal): Promise<void> {
+    const health = await this.health();
+    if (!health.ok || !this.client) throw new Error('Backend unavailable');
+    await this.client.downloadExportFile(jobID, kind, file, destination, signal);
+  }
   upgradeQA(): Promise<ApiResult<{ schema_version: 5 }>> { return this.ready(client => client.upgradeQA()); }
   getWindowQA(windowID: string): Promise<ApiResult<WindowQA>> { return this.ready(client => client.getWindowQA(windowID)); }
   saveQA(windowID: string, input: QAChange): Promise<ApiResult<WindowQA>> { return this.ready(client => client.saveQA(windowID, input)); }

@@ -52,7 +52,7 @@ This is an exploratory project, **not an official WSP publication, endorsed solu
 
 The minimal React/TypeScript UI and Electron development shell now display actual backend readiness and create/list synthetic sessions in the existing SQLite database. Tests verify persistence across reload and full application reopening, fresh per-launch credentials, explicit failure states and backend cleanup. Start with the [development instructions](docs/11-slice-0-development.md); results and decisions are in the [research log](docs/07-research-log.md).
 
-This is a foundation for the [planned workflow](implementation/plan.md). Video import, playback, motion summaries, ecological review, exports and Windows packaging are unfinished. No usable desktop video reviewer or ecological performance result is claimed. The source register remains a scoping review, and ownership/publication rights, approved footage and ecological evaluation remain open.
+This is a foundation for the [planned workflow](implementation/plan.md). The Linux development shell supports source-PTS import/preview, all-window motion evidence, manual review and independent QA. [Provisional CSV exports](docs/17-slice-4b1-validation.md) are an unmerged review candidate. Ecological finalisation, approved output-template mapping and Windows packaging remain gated. No ecological performance result or production-ready desktop app is claimed. The source register remains a scoping review, and ownership/publication rights, approved footage and ecological evaluation remain open.
 
 ## Documentation conventions
 
