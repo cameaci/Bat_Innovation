@@ -7,7 +7,7 @@ const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
 const { BackendClient, BackendRuntime } = require('../dist/backend.js');
-const { ExportSaver, EXPORT_FILES, validExportManifest } = require('../dist/export_saver.js');
+const { ExportSaver, EXPORT_FILES, validExportManifest, validExportDiskManifest } = require('../dist/export_saver.js');
 const repoRoot=path.resolve(__dirname,'../..'), python=process.env.BAT_PYTHON || 'python';
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
 async function terminal(read, active) {
@@ -44,6 +44,18 @@ test('real export runtime saves bounded three-file snapshot atomically, private 
     assert.equal(createHash('sha256').update(bytes).digest('hex'),done.manifest.files[kind].sha256);
     assert.equal(bytes.length,done.manifest.files[kind].bytes);
   }
+  // Regression: the on-disk manifest must be valid offline, while the
+  // transport envelope has one extra self-descriptor (which cannot appear
+  // inside the hashed manifest.json without a recursive hash).
+  const disk=JSON.parse(await readFile(path.join(destination,saved.value.folder_name,'manifest.json'),'utf8'));
+  assert.equal(validExportDiskManifest(disk,run.id),true);
+  assert.deepEqual(Object.keys(disk.files).sort(),['audit','observations']);
+  assert.equal(validExportManifest(disk,run.id),false);
+  for(const kind of ['audit','observations']) {
+    assert.deepEqual(disk.files[kind],done.manifest.files[kind]);
+  }
+  assert.equal(validExportDiskManifest({...disk,files:{...disk.files,manifest:done.manifest.files.manifest}},run.id),false);
+  assert.equal(validExportDiskManifest({...disk,files:{...disk.files,audit:{...disk.files.audit,sha256:'bad'}}},run.id),false);
   assert.deepEqual(await readFile(source),before);
   await saver.close();await runtime.stop();
   assert.deepEqual(await readdir(path.join(dataDir,'exports')),[]);
