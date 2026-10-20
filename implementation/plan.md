@@ -1,6 +1,22 @@
 # Implementation plan
 
-Reviewed 2026-10-20. Status: **Slices 0, 1A, 1B, 2A, 3A and 3B are merged; Slice 4A is independently reviewed and merged; Slice 4B1 provisional CSV exports are a review candidate. Early Windows beta Stage A is a feasibility report, not an installer; native Windows, distribution and ownership checks remain open**. This is a dependency-ordered sequence, not a promise of dates. The application is built in **small vertical slices**, each delivering observable behavior and tests. No workarounds or speculative infrastructure.
+Reviewed 2026-10-20. Status: **Slices 0 (Linux foundation), 1A, 1B, 2A, 3A, 3B, 4A and 4B1 (provisional CSV exports) are merged. Early Windows beta Stage A is a feasibility report, not an installer; native Windows, distribution, ownership and ecological pilot gates remain open**. This is a dependency-ordered sequence, not a promise of dates. The application is built in **small vertical slices**, each delivering observable behavior and tests. No workarounds or speculative infrastructure.
+
+## Fixed-scope completion tracker (checklist, not release readiness)
+
+**Baseline as of 2026-10-20: 44/70 = 62.9% (~63%) checked across the original seven implementation slices (0–6).** The denominator counts each explicit task checkbox in these seven slices once; it does not count prose goals, conditional post-pilot ideas or the early Windows feasibility section. No extra slice is added to this denominator when an existing slice is split into implementation PRs. The early Windows gate is tracked *inside the existing Slice 5 release prerequisites*, separately as 3/7 feasibility checkboxes; never double-count it.
+
+| Original slice | Checked / total |
+| --- | ---: |
+| 0 — Foundation | 11 / 14 |
+| 1 — Source fidelity | 11 / 13 |
+| 2 — Motion summary | 6 / 7 |
+| 3 — Review UI | 8 / 11 |
+| 4 — Ecological QA and exports | 8 / 13 |
+| 5 — Windows packaging/resilience | 0 / 5 |
+| 6 — Authorised ecological pilot | 0 / 7 |
+
+**Interpretation:** This is a reproducible *task-count* completion measure, not an estimate of time remaining, technical difficulty, usable Windows beta readiness or ecological release acceptance. Windows-native testing, binary/legal approval, approved ecological templates, final adjudication and the representative-camera ecological pilot are substantive unmet gates. Do not inflate this metric by creating or subdividing tasks. Only change the numerator when an existing checklist criterion is evidenced and met; change the denominator only after explicit project-owner approval of a formal scope change. In progress reports, always show both the overall fraction/percentage and the current Slice 5/6 release gates.
 
 ## Principles of execution
 
@@ -130,7 +146,7 @@ Reviewed 2026-10-20. Status: **Slices 0, 1A, 1B, 2A, 3A and 3B are merged; Slice
 - [x] Reject identical normalized first/QA labels and stale QA/first-review/evidence revisions; keep failed/incomplete/all planned windows in separate QA coverage.
 - [x] Add transactional rollback-tested schema v4 -> v5, exact observation references, source/PNG/preview validation and restart/kill recovery without rewriting first review.
 - [x] Add a small QA panel, visible retained disagreement, next-QA-pending navigation and mutual draft/close protection.
-**Slice 4B1 progress (2026-10-20):** [Issue #16](https://github.com/cameaci/Bat_Innovation/issues/16) adds two separate provisional CSVs and a schema/count/snapshot manifest from one read-only v5 snapshot. Exact plans reconstruct missing coverage rows; stale decisions stay unresolved and all planned windows remain the denominator. Native ID-only export/save, reversible text protection, bounded worker/streams, atomic fresh-folder publication and draft protection are covered by local synthetic tests. See [validation and constraints](../docs/17-slice-4b1-validation.md). One unmerged independent-review candidate. No approved ecology template, signoff, Windows packaging or ecological finalisation.
+**Slice 4B1 progress (2026-10-20):** [Issue #16](https://github.com/cameaci/Bat_Innovation/issues/16) adds two separate provisional CSVs and a schema/count/snapshot manifest from one read-only v5 snapshot. Exact plans reconstruct missing coverage rows; stale decisions stay unresolved and all planned windows remain the denominator. Native ID-only export/save, reversible text protection, bounded worker/streams, atomic fresh-folder publication and draft protection are covered by local synthetic tests. See [validation and constraints](../docs/17-slice-4b1-validation.md). Independently reviewed, locally revalidated including disk/transport manifest and unsaved-draft protections, and squash-merged as `69882b15f542ed4a67b6f95ea5d4a8add6fff7d3`. No approved ecology template, signoff, Windows packaging or ecological finalisation.
 
 - [x] Export provisional manual observations and an every-planned-window technical audit CSV from one immutable database snapshot, with exact PTS, capped history references and separate review/QA status.
 - [x] Protect all text cells reversibly; parse both CSVs, preserve numeric/canonical provenance and test deterministic ordering, clocks, stale evidence, concurrent saves and publication failures.
