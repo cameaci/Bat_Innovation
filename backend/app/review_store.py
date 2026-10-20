@@ -30,7 +30,7 @@ def _invalid(message: str) -> ReviewError:
 
 
 def _require_schema(connection: sqlite3.Connection) -> None:
-    if connection.execute("PRAGMA user_version").fetchone()[0] != store.REVIEW_SCHEMA_VERSION:
+    if connection.execute("PRAGMA user_version").fetchone()[0] not in store.REVIEW_SCHEMA_VERSIONS:
         raise ReviewError("review_schema_required", "Explicit review schema upgrade is required.", 409)
 
 
@@ -41,7 +41,7 @@ def upgrade(db_path: Path) -> None:
     with closing(store.connect(db_path)) as connection, connection:
         connection.execute("BEGIN IMMEDIATE")
         version = connection.execute("PRAGMA user_version").fetchone()[0]
-        if version == store.REVIEW_SCHEMA_VERSION:
+        if version in store.REVIEW_SCHEMA_VERSIONS:
             return
         if version != store.SUMMARY_SCHEMA_VERSION:
             raise store.DatabaseSchemaError("Review upgrade requires database schema version 3")

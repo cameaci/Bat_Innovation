@@ -319,6 +319,8 @@ test('240 real thirty-second windows keep image requests and Blob lifetimes boun
     shell = await launch(join(directory, 'data'));
     await monitor(shell);
     const sessionID = await prepared(shell, [fixtures.quiet_240]);
+    await shell.page.getByRole('button', { name: 'Upgrade QA storage', exact: true }).click();
+    await expect(shell.page.getByRole('status').filter({ hasText: /^Second-review QA coverage: 0\/240 agreed; 0 disagreed; 0 need clarification; 240 pending;/ })).toBeVisible();
     const run = await latest(shell, sessionID);
     expect(run.counts).toMatchObject({ planned: 240, complete: 240, failed: 0, incomplete: 0 });
     expect(run.windows.at(-1)!.interval.elapsed_end).toEqual({ num: '7200', den: '1' });

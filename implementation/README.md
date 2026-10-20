@@ -1,6 +1,6 @@
 # Implementation
 
-Status: **Slices 0/1A/1B/2A/3A are merged; Slice 3B gallery/navigation is a review candidate. Early Windows beta work is a Stage A feasibility report only; native Windows, binary distribution and ownership gates remain open**. Reviewed 2026-10-19.
+Status: **Slices 0/1A/1B/2A/3A/3B are merged; Slice 4A independent QA is a review candidate. Early Windows beta work is a Stage A feasibility report only; native Windows, binary distribution and ownership gates remain open**. Reviewed 2026-10-20.
 
 Build a small, local Windows desktop reviewer for **recorded active-infrared (IR) bat survey video**. Reuse the structure and review ergonomics of [Camera_Trap](https://github.com/cameaci/Camera_Trap), but not its unrelated wildlife models, platform features or entire source tree.
 
@@ -44,7 +44,9 @@ Prove reliable **video playback/seek** for original .MTS/.MP4 media, including s
 
 The backend retains FastAPI and SQLite with authenticated loopback routes. Merged import, bounded source preview and complete motion-window ledger use exact original PTS. Slice 3A adds explicit first-review actions, provisional observations, run-specific progress and an append-only local audit through the existing React list/player and restricted Electron bridge. No automated ecological result is claimed.
 
-The [Slice 3B candidate](../docs/15-slice-3b-validation.md) adds a paginated all-window gallery, filters, scoped navigation and exact displayed-source-PTS draft helpers. It preserves the existing review/audit contract and Windows guards. Independent review remains required before merge.
+The merged [Slice 3B gallery](../docs/15-slice-3b-validation.md) adds a paginated all-window gallery, filters, scoped navigation and exact displayed-source-PTS draft helpers. It preserves the existing review/audit contract and Windows guards. Slice 3B merged as `2f0332cdd1734691ee9ffb1be6fa275b2c8bb660`.
+
+The [Slice 4A candidate](../docs/16-slice-4a-validation.md) adds explicit v5 storage, separate append-only second-review decisions, observation-linked provisional suggestions, stale-evidence handling and protected QA navigation. Different local labels do not authenticate independent humans. Ecological finalisation and exports remain outside this slice; independent technical review is required before merge.
 
 See [Slice 3A validation](../docs/13-slice-3a-validation.md) for local audit evidence and the [early Windows feasibility report](../docs/14-windows-beta-feasibility.md) for the gated blocker matrix and exact candidate artifacts. Slice 3A merged as `b4fd13c4325475b413e2072eb539ce00d9a18579`. Windows processing limits, native runtime, camera-original compatibility and binary redistribution/packaging remain unverified. No Windows installer exists from this work.
 

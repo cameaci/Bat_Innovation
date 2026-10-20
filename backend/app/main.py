@@ -24,6 +24,7 @@ from .imports import ImportErrorResponse, ImportJobs, source_state
 from .preview import PreviewJobs
 from .summary_jobs import SummaryJobs
 from .reviews import ReviewService, install_routes as install_review_routes
+from .qa import QAService, install_routes as install_qa_routes
 
 
 @dataclass(frozen=True)
@@ -166,6 +167,7 @@ def create_app(settings: Settings) -> FastAPI:
     previews = PreviewJobs(db_path, settings.data_dir, activity_lock)
     summaries = SummaryJobs(db_path, settings.data_dir, activity_lock)
     reviews = ReviewService(db_path, summaries, previews, activity_lock)
+    qa = QAService(reviews)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -299,19 +301,20 @@ def create_app(settings: Settings) -> FastAPI:
     @app.post("/api/summaries", status_code=202, dependencies=[Depends(authenticate)])
     def start_summaries(payload: NewSummary) -> dict:
         require_session(str(payload.session_id))
-        return reviews.augment_summary(summaries.start(str(payload.session_id), payload.window_seconds))
+        return qa.augment_summary(reviews.augment_summary(summaries.start(str(payload.session_id), payload.window_seconds)))
 
     @app.get("/api/summaries/{run_id}", dependencies=[Depends(authenticate)])
     def get_summary(run_id: UUID) -> dict:
-        return reviews.augment_summary(summaries.get(str(run_id)))
+        return qa.augment_summary(reviews.augment_summary(summaries.get(str(run_id))))
 
     @app.post("/api/summaries/{run_id}/cancel", dependencies=[Depends(authenticate)])
     def cancel_summary(run_id: UUID, _payload: EmptyRequest = Body(default_factory=EmptyRequest)) -> dict:
-        return reviews.augment_summary(summaries.cancel(str(run_id)))
+        return qa.augment_summary(reviews.augment_summary(summaries.cancel(str(run_id))))
 
     @app.get("/api/summary-windows/{window_id}/image", dependencies=[Depends(authenticate)])
     def summary_image(window_id: UUID) -> Response:
         return Response(summaries.image(str(window_id)), media_type="image/png", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
     install_review_routes(app, reviews, authenticate)
+    install_qa_routes(app, qa, authenticate)
     return app

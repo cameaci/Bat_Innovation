@@ -1,7 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { BatAPI, NewSession, PreviewRequest, SaveMedia, SummaryRequest, ReviewChange } from './contracts';
+import type { BatAPI, NewSession, PreviewRequest, SaveMedia, SummaryRequest, ReviewChange, QAChange } from './contracts';
 
 const api: BatAPI = {
+  upgradeQA: (...args: []) => ipcRenderer.invoke('bat:upgrade-qa', ...args),
+  getWindowQA: (...args: [string]) => ipcRenderer.invoke('bat:get-window-qa', ...args),
+  saveQA: (...args: [string, QAChange]) => ipcRenderer.invoke('bat:save-qa', ...args),
+  qaHistory: (...args: [string, number]) => ipcRenderer.invoke('bat:qa-history', ...args),
   upgradeReviews: (...args: []) => ipcRenderer.invoke('bat:upgrade-reviews', ...args),
   getWindowReview: (...args: [string]) => ipcRenderer.invoke('bat:get-window-review', ...args),
   saveReview: (...args: [string, ReviewChange]) => ipcRenderer.invoke('bat:save-review', ...args),

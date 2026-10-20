@@ -4,6 +4,7 @@ import type { MediaSegment, Rational, SummaryDetail, SummaryRun, SummaryWindow }
 import { getAPI } from './api';
 import { readMediaBytes } from './binary';
 import { ReviewPanel } from './ReviewPanel';
+import { QAPanel } from './QAPanel';
 import { SummaryGallery } from './SummaryGallery';
 import type { WindowSourceFrame } from './sourceFrame';
 
@@ -27,12 +28,13 @@ const flagMeaning: Record<string, string> = {
   insufficient_comparison_frames: 'There are too few frames to assess motion in this window.',
 };
 
-export function SummaryWindows({ sessionID, segments, disabled, reviewDisabled, reviewEnabled, previewReceipt, displayedSourceFrame, onBusyChange, onDraftChange, onPreview }: {
+export function SummaryWindows({ sessionID, segments, disabled, reviewDisabled, reviewEnabled, qaEnabled, previewReceipt, displayedSourceFrame, onBusyChange, onDraftChange, onPreview }: {
   sessionID: string;
   segments: MediaSegment[];
   disabled: boolean;
   reviewDisabled: boolean;
   reviewEnabled: boolean;
+  qaEnabled: boolean;
   previewReceipt: { windowID: string; previewID: string } | null;
   displayedSourceFrame?: WindowSourceFrame | null;
   onBusyChange: (busy: boolean) => void;
@@ -50,7 +52,9 @@ export function SummaryWindows({ sessionID, segments, disabled, reviewDisabled, 
   const [error, setError] = useState('');
   const [imageURL, setImageURL] = useState<string | null>(null);
   const [imageError, setImageError] = useState('');
-  const [reviewDirty, setReviewDirty] = useState(false);
+  const [firstDirty, setFirstDirty] = useState(false);
+  const [qaDirty, setQADirty] = useState(false);
+  const reviewDirty = firstDirty || qaDirty;
   const [reviewRefresh, setReviewRefresh] = useState(0);
   const draftActive = useRef(false);
   draftActive.current = reviewDirty;
@@ -122,7 +126,7 @@ export function SummaryWindows({ sessionID, segments, disabled, reviewDisabled, 
     void poll();
     document.addEventListener('visibilitychange', visible);
     return () => { current = false; clearTimeout(timer); document.removeEventListener('visibilitychange', visible); };
-  }, [runID, sessionID, refresh, reviewRefresh, reviewEnabled]);
+  }, [runID, sessionID, refresh, reviewRefresh, reviewEnabled, qaEnabled]);
 
   // The inspection retains one full image, separately from the bounded gallery page.
   useEffect(() => {
@@ -195,11 +199,11 @@ export function SummaryWindows({ sessionID, segments, disabled, reviewDisabled, 
     if (!disabled && !busy && (!reviewDirty || window.id === selectedID) && verified && segment?.source_state === 'ready' && window.preview_pts !== null && (!window.source_state || window.source_state === 'ready')) onPreview(segment, window.preview_pts, window.id);
   }
 
-  function navigate(offset: number | 'unreviewed') {
+  function navigate(offset: number | 'unreviewed' | 'qa') {
     if (!detail || disabled || busy || reviewDirty) return;
     const position = detail.windows.findIndex(window => window.id === selectedID);
-    const next = offset === 'unreviewed'
-      ? [...detail.windows.slice(position + 1), ...detail.windows.slice(0, position)].find(window => !window.review || window.review.effective_decision === 'unreviewed')
+    const next = typeof offset === 'string'
+      ? [...detail.windows.slice(position + 1), ...detail.windows.slice(0, position)].find(window => offset === 'qa' ? window.qa?.status !== 'agree' : !window.review || window.review.effective_decision === 'unreviewed')
       : detail.windows[position + offset];
     if (next) inspect(next.id);
   }
@@ -240,6 +244,7 @@ export function SummaryWindows({ sessionID, segments, disabled, reviewDisabled, 
     {detail && <>
       <p role="status">Run {detail.state}: {detail.counts.complete}/{detail.counts.planned} windows complete; {detail.counts.failed} failed; {detail.counts.incomplete} incomplete; {detail.counts.pending} pending; {detail.counts.running} running.{cancelling && ' Cancellation requested; waiting for resource cleanup.'}</p>
       {detail.review_progress && <p role="status" className="review-progress">First review progress: {detail.review_progress.reviewed}/{detail.review_progress.total} reviewed; {detail.review_progress.unreviewed} unreviewed; {detail.review_progress.quality_flagged} quality-flagged; {detail.review_progress.failed} failed; {detail.review_progress.incomplete} incomplete; {detail.review_progress.needs_reverification} need re-verification. All planned windows remain in the denominator.</p>}
+      {detail.qa_progress && <p role="status" className="review-progress">Second-review QA coverage: {detail.qa_progress.agree}/{detail.qa_progress.total} agreed; {detail.qa_progress.disagree} disagreed; {detail.qa_progress.needs_clarification} need clarification; {detail.qa_progress.pending} pending; {detail.qa_progress.unassessable} unassessable; {detail.qa_progress.needs_reverification} stale. All planned windows remain in the denominator; this is not ecological finalisation.</p>}
       {detail.error && <p className="source-warning" role="alert">{detail.error.code}: {detail.error.message}</p>}
       <details className="summary-provenance"><summary>Processing provenance and parameters</summary><dl className="media-timing">
         <dt>Run ID</dt><dd>{detail.id}</dd>
@@ -259,6 +264,7 @@ export function SummaryWindows({ sessionID, segments, disabled, reviewDisabled, 
         <button type="button" disabled={disabled || busy || reviewDirty || detail?.windows[0]?.id === selected.id} onClick={() => navigate(-1)}>Previous window</button>
         <button type="button" disabled={disabled || busy || reviewDirty || detail?.windows.at(-1)?.id === selected.id} onClick={() => navigate(1)}>Next window</button>
         <button type="button" disabled={disabled || busy || reviewDirty || !detail?.windows.some(window => window.id !== selected.id && (!window.review || window.review.effective_decision === 'unreviewed'))} onClick={() => navigate('unreviewed')}>Next unreviewed window</button>
+        {qaEnabled && <button type="button" disabled={disabled || busy || reviewDirty || !detail?.windows.some(window => window.id !== selected.id && window.qa?.status !== 'agree')} onClick={() => navigate('qa')}>Next QA pending window</button>}
       </nav>}
       {selected.flags.length > 0 && <ul className="source-warning" aria-label="Selected window quality warnings">{selected.flags.map(flag => <li key={flag}>{flag}: {flagMeaning[flag] ?? 'Inspect the original recording.'}</li>)}</ul>}
       <p className="detail">Left: source reference/context. Right: motion evidence. Cyan = early third, yellow = middle third, magenta = late third of this window's source-time interval. Overlapping evidence combines colours. These colours do not identify animals.</p>
@@ -281,7 +287,8 @@ export function SummaryWindows({ sessionID, segments, disabled, reviewDisabled, 
       </dl>
       {(selected.stats.gaps?.length ?? 0) > 0 && <details><summary>Timestamp gap examples ({selected.stats.gaps?.length} shown; {selected.stats.gap_examples_recorded ?? selected.stats.gaps?.length} stored; {selected.stats.gap_count} total)</summary><ul>{selected.stats.gaps?.map((gap, index) => <li key={index}>{interval(gap.start, gap.end)} source seconds</li>)}</ul></details>}
       {!currentSelected && reviewDirty && <p role="alert" className="source-warning">The selected window is missing from the latest manifest. Your review draft is retained. Saving is unavailable until the original window is restored.</p>}
-      {reviewEnabled && <ReviewPanel key={selected.id} window={selected} previewID={previewReceipt?.windowID === selected.id ? previewReceipt.previewID : null} displayedSourceFrame={displayedSourceFrame} disabled={reviewDisabled || busy || !verified || !currentSelected} onDirtyChange={setReviewDirty} onSaved={() => setReviewRefresh(value => value + 1)} />}
+      {reviewEnabled && <ReviewPanel key={`review:${selected.id}`} window={selected} previewID={previewReceipt?.windowID === selected.id ? previewReceipt.previewID : null} displayedSourceFrame={displayedSourceFrame} disabled={reviewDisabled || busy || !verified || !currentSelected || qaDirty} onDirtyChange={setFirstDirty} onSaved={() => setReviewRefresh(value => value + 1)} />}
+      {qaEnabled && <QAPanel key={`qa:${selected.id}`} window={selected} previewID={previewReceipt?.windowID === selected.id ? previewReceipt.previewID : null} disabled={reviewDisabled || busy || !verified || !currentSelected || firstDirty} onDirtyChange={setQADirty} onSaved={() => setReviewRefresh(value => value + 1)} />}
     </div>}
   </section>;
 }

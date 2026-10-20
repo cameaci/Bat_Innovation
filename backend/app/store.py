@@ -13,7 +13,9 @@ SCHEMA_VERSION = 1
 MEDIA_SCHEMA_VERSION = 2
 SUMMARY_SCHEMA_VERSION = 3
 REVIEW_SCHEMA_VERSION = 4
-SUMMARY_SCHEMA_VERSIONS = (SUMMARY_SCHEMA_VERSION, REVIEW_SCHEMA_VERSION)
+QA_SCHEMA_VERSION = 5
+REVIEW_SCHEMA_VERSIONS = (REVIEW_SCHEMA_VERSION, QA_SCHEMA_VERSION)
+SUMMARY_SCHEMA_VERSIONS = (SUMMARY_SCHEMA_VERSION, *REVIEW_SCHEMA_VERSIONS)
 MEDIA_SCHEMA_VERSIONS = (MEDIA_SCHEMA_VERSION, *SUMMARY_SCHEMA_VERSIONS)
 
 
@@ -35,7 +37,7 @@ def initialise(db_path: Path) -> None:
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         if version not in (0, SCHEMA_VERSION, *MEDIA_SCHEMA_VERSIONS):
             raise DatabaseSchemaError(
-                f"Unsupported database schema version {version}; expected 1, 2, 3 or 4"
+                f"Unsupported database schema version {version}; expected 1, 2, 3, 4 or 5"
             )
         if version == 0:
             connection.execute("BEGIN IMMEDIATE")
@@ -61,10 +63,14 @@ def initialise(db_path: Path) -> None:
         if version in SUMMARY_SCHEMA_VERSIONS:
             connection.execute("SELECT id, state, source_snapshots_json FROM processing_run LIMIT 1")
             connection.execute("SELECT id, run_id, interval_json, image_sha256 FROM summary_window LIMIT 1")
-        if version == REVIEW_SCHEMA_VERSION:
+        if version in REVIEW_SCHEMA_VERSIONS:
             connection.execute("SELECT evidence_revision,evidence_warning FROM summary_window LIMIT 1")
             connection.execute("SELECT window_id, revision, decision, observations_json FROM review_window LIMIT 1")
             connection.execute("SELECT window_id, revision, before_json, after_json FROM review_event LIMIT 1")
+
+        if version == QA_SCHEMA_VERSION:
+            connection.execute("SELECT window_id, revision, value_json FROM qa_window LIMIT 1")
+            connection.execute("SELECT window_id, revision, before_json, after_json FROM qa_event LIMIT 1")
 
 
 def schema_version(db_path: Path) -> int:

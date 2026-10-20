@@ -1,6 +1,6 @@
 # Implementation plan
 
-Reviewed 2026-10-19. Status: **Slices 0, 1A, 1B, 2A and 3A are merged; Slice 3B gallery/navigation is a review candidate. Early Windows beta Stage A is a feasibility report, not an installer; native Windows, distribution and ownership checks remain open**. This is a dependency-ordered sequence, not a promise of dates. The application is built in **small vertical slices**, each delivering observable behavior and tests. No workarounds or speculative infrastructure.
+Reviewed 2026-10-20. Status: **Slices 0, 1A, 1B, 2A, 3A and 3B are merged; Slice 4A independent QA is a review candidate. Early Windows beta Stage A is a feasibility report, not an installer; native Windows, distribution and ownership checks remain open**. This is a dependency-ordered sequence, not a promise of dates. The application is built in **small vertical slices**, each delivering observable behavior and tests. No workarounds or speculative infrastructure.
 
 ## Principles of execution
 
@@ -124,8 +124,13 @@ Reviewed 2026-10-19. Status: **Slices 0, 1A, 1B, 2A and 3A are merged; Slice 3B 
 
 **Goal:** preserve actual review authority and produce useful reporting artefacts.
 
-- [ ] Implement sequential first-review and second-review actions in the same workspace. Store distinct reviewer/QA attribution, revisions, disagreements, comments and finalisation.
-- [ ] Enforce valid transitions. A first reviewer cannot claim second-review approval merely by toggling a badge; unresolved disagreement cannot silently become `finalised`.
+**Slice 4A progress (2026-10-20):** [Issue #14](https://github.com/cameaci/Bat_Innovation/issues/14), based on Slice 3B merge `2f0332cdd1734691ee9ffb1be6fa275b2c8bb660`, adds explicit v4 -> v5 storage, separate append-only QA decisions, observation-linked suggestions and protected gallery/panel navigation. Three optimistic baselines and existing source/PNG/preview validation prevent stale agreement; disagreement remains visible in history. The [report](../docs/16-slice-4a-validation.md) records local synthetic regression evidence and constraints. One focused unmerged candidate, not ecological finalisation or Slice 4B.
+
+- [x] Implement separate explicit first-review and second-review actions with local attribution, rationale, revisions, disagreement/clarification and retraction history.
+- [x] Reject identical normalized first/QA labels and stale QA/first-review/evidence revisions; keep failed/incomplete/all planned windows in separate QA coverage.
+- [x] Add transactional rollback-tested schema v4 -> v5, exact observation references, source/PNG/preview validation and restart/kill recovery without rewriting first review.
+- [x] Add a small QA panel, visible retained disagreement, next-QA-pending navigation and mutual draft/close protection.
+- [ ] Implement final adjudication/finalisation under designated ecological authority (Slice 4B); unresolved disagreement cannot silently become `finalised`.
 - [ ] Keep observations, ecological interpretations and review status in separate fields. Include commuting, foraging, possible or precautionary emergence, re-entry and uncertainty without forcing unsupported counts.
 - [ ] Export **two separate artefacts** from one authoritative DB: ecology-oriented CSV (mapped to an approved spreadsheet template), plus a technical audit CSV/JSON containing source PTS, file checksums, warnings, processing run and review history.
 - [ ] Support explicit "provisional" and "finalised" output states. Report export must not label unfinished review as final.

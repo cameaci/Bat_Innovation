@@ -49,6 +49,10 @@ For each candidate record: exact path and licence, transitive dependencies, exte
 
 Before introducing each dependency or bundling FFmpeg, record exact version, package/binary URL, code and binary licence, bundled codec configuration, network behavior and distribution terms. **FFmpeg licensing can differ by build and codecs. PyAV is published under a BSD-style licence, while its binary wheels may bundle FFmpeg with separate terms.** Verify exact versions and packaged binaries. Camera_Trap licence text does not cover independent new dependencies. Avoid shipping model weights in v1.
 
+### Slice 4A inspection and decision
+
+Inspected Camera_Trap audit model, progress hook and MIT licence at `176451c272628f4f8e38633db747cb427d587072`; exact blobs and five-role constraints are in the [Slice 4A report](../docs/16-slice-4a-validation.md). Reuse is pattern only: attributed before/after history and a stable full-window denominator. No source is copied and no dependency is added. Existing Bat Innovation evidence epochs/fingerprints, exact preview receipts, SQLite transactions, typed ID-only API/IPC and mounted draft/close guards supply the vertical slice. No new worker, identity provider or Windows exception is introduced. Publication/redistribution gates remain open.
+
 ### Slice 3B inspection and decision
 
 At the same immutable Camera_Trap commit `176451c272628f4f8e38633db747cb427d587072`, inspected `VerifyView.tsx`, `VerifyDetailShell.tsx`, `shortcuts.ts`, `useLabelsProgress.ts` and the MIT licence. Exact blob IDs, dependency decisions and the five-role pre-code challenge are in the [Slice 3B report](../docs/15-slice-3b-validation.md#source-first-design-and-review). Pagination, scoped navigation and a filter-independent denominator are pattern references only. No source is copied and no dependency is added. The existing Bat Innovation review form, verified preview-frame ledger and authenticated PNG/WebM routes are extended directly; hide-empty defaults and camera-trap query/domain layers are not adopted. Ownership/publication and binary redistribution gates remain open.

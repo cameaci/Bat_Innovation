@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isReviewCursor, isSaveMedia, isUUID, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
+import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
 import type { NewSession } from './contracts';
 
 const UI_URL = 'app://bat/index.html';
@@ -137,6 +137,10 @@ async function open(): Promise<void> {
     if (dirty) discardApproved = false;
     return { ok: true, value: { dirty } };
   });
+  handle('bat:upgrade-qa', 0, () => backend.upgradeQA());
+  handle('bat:get-window-qa', 1, ([id]) => isUUID(id) ? backend.getWindowQA(id) : invalid());
+  handle('bat:save-qa', 2, ([id, input]) => isUUID(id) && isQAChange(input) ? backend.saveQA(id, input) : invalid());
+  handle('bat:qa-history', 2, ([id, cursor]) => isUUID(id) && isReviewCursor(cursor) ? backend.qaHistory(id, cursor) : invalid());
   handle('bat:upgrade-reviews', 0, () => backend.upgradeReviews());
   handle('bat:get-window-review', 1, ([id]) => isUUID(id) ? backend.getWindowReview(id) : invalid('Select a valid window ID.'));
   handle('bat:save-review', 2, ([id, input]) => isUUID(id) && isReviewChange(input) ? backend.saveReview(id, input) : invalid('Use only attributed manual review fields and a current revision.'));

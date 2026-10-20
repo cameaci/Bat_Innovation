@@ -192,6 +192,18 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
     setDirty(true);
   }
 
+  async function upgradeQA() {
+    if (disabled || dirty) return;
+    setBusy('upgrading-qa'); setError('');
+    const value = await request(api => api.upgradeQA());
+    if (value) {
+      const latest = await request(api => api.getMedia(session.id));
+      if (latest) replace(latest);
+      setNotice('QA schema 5 enabled explicitly. Existing first-review records are preserved.');
+    }
+    setBusy(null);
+  }
+
   function closePreview() {
     const id = selectedPreview?.segment.id;
     setSelectedPreview(null);
@@ -309,7 +321,8 @@ export function MediaPanel({ session, onBusyChange }: { session: RecordingSessio
       <p>Manual first review needs an explicit schema 3 to 4 upgrade. Existing source files, processing runs and window provenance are preserved.</p>
       <button type="button" disabled={disabled || dirty} onClick={() => void upgradeReviews()}>Upgrade review storage</button>
     </div>}
-    {(media?.schema_version ?? 0) >= 3 && <SummaryWindows sessionID={session.id} segments={segments} disabled={busy !== null || importing || selectedPreview !== null || dirty} reviewDisabled={busy !== null || importing || dirty} reviewEnabled={(media?.schema_version ?? 0) >= 4} previewReceipt={previewReceipt} displayedSourceFrame={displayedSourceFrame} onBusyChange={setSummaryBusy} onDraftChange={setReviewDirty} onPreview={(segment, sourcePTS, windowID) => {
+    {media?.schema_version === 4 && <div className="review-upgrade"><h3>Independent QA storage</h3><p>Second review requires an explicit transactional schema 4 to 5 upgrade. First-review observations and history are preserved.</p><button type="button" disabled={disabled || dirty} onClick={() => void upgradeQA()}>Upgrade QA storage</button></div>}
+    {(media?.schema_version ?? 0) >= 3 && <SummaryWindows sessionID={session.id} segments={segments} disabled={busy !== null || importing || selectedPreview !== null || dirty} reviewDisabled={busy !== null || importing || dirty} reviewEnabled={(media?.schema_version ?? 0) >= 4} qaEnabled={(media?.schema_version ?? 0) >= 5} previewReceipt={previewReceipt} displayedSourceFrame={displayedSourceFrame} onBusyChange={setSummaryBusy} onDraftChange={setReviewDirty} onPreview={(segment, sourcePTS, windowID) => {
       if (busy === null && !importing && !dirty && selectedPreview === null) { setPreviewReceipt(null); setDisplayedSourceFrame(null); setSelectedPreview({ segment, sourcePTS, windowID }); }
     }} />}
     {selectedPreview && <SourcePreview key={`${selectedPreview.segment.id}:${selectedPreview.sourcePTS}`} segment={selectedPreview.segment} initialPTS={selectedPreview.sourcePTS} clockAnchor={media?.clock_anchor ?? null} onClose={closePreview} onReady={previewID => setPreviewReceipt(previewID && selectedPreview.windowID ? { windowID: selectedPreview.windowID, previewID } : null)} onDisplayedFrame={displayedFrame} />}
