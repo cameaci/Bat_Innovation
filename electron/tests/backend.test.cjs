@@ -133,7 +133,19 @@ async function waitUntilTerminal(read, activeStates) {
   assert.fail('Synthetic media operation did not reach a terminal state');
 }
 
-test('real backend persists sessions across runtime restart and rejects unauthorized access', { timeout: 45000 }, async t => {
+test('real backend without media CLI persists sessions across runtime restart and rejects unauthorized access', { timeout: 45000 }, async t => {
+  const resolved = spawnSync(python, ['-c', 'import sys; print(sys.executable)'], {
+    cwd: repoRoot, encoding: 'utf8', timeout: 10000,
+  });
+  assert.equal(resolved.status, 0);
+  const runtimePython = resolved.stdout.trim();
+  assert.ok(path.isAbsolute(runtimePython));
+  const previousPath = process.env.PATH;
+  process.env.PATH = '';
+  t.after(() => {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  });
   const dataDir = await mkdtemp(path.join(tmpdir(), 'bat-runtime-'));
   const first = new BackendRuntime();
   const reopened = new BackendRuntime();
@@ -143,9 +155,9 @@ test('real backend persists sessions across runtime restart and rejects unauthor
   });
 
   const port = await availablePort();
-  const options = { python, repoRoot, dataDir, port };
+  const options = { python: runtimePython, repoRoot, dataDir, port };
   const [ready, sameLaunch] = await Promise.all([first.start(options), first.start(options)]);
-  assert.deepEqual(ready, { ok: true, value: { status: 'ok', storage: 'ready', media_tools: 'ready' } });
+  assert.deepEqual(ready, { ok: true, value: { status: 'ok', storage: 'ready' } });
   assert.deepEqual(sameLaunch, ready);
   const firstPid = first.pid;
   assert.equal(typeof firstPid, 'number');
@@ -174,10 +186,13 @@ test('real backend persists sessions across runtime restart and rejects unauthor
   await first.stop();
   expectExited(firstPid);
   assert.equal(first.pid, undefined);
-  expectFailure(await first.health(), 'unavailable');
+  const unavailable = await first.health();
+  expectFailure(unavailable, 'unavailable');
+  assert.match(unavailable.error.message, /installed backend dependencies/);
+  assert.doesNotMatch(unavailable.error.message, /ffmpeg|ffprobe/i);
   expectFailure(await unauthorized.health(), 'unavailable');
 
-  const restarted = await reopened.start({ python, repoRoot, dataDir });
+  const restarted = await reopened.start({ python: runtimePython, repoRoot, dataDir });
   assert.deepEqual(restarted, ready);
   assert.deepEqual(await reopened.listSessions(), { ok: true, value: [created.value] });
   const reopenedPid = reopened.pid;

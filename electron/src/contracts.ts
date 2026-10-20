@@ -1,7 +1,6 @@
 export interface Health {
   status: 'ok';
   storage: 'ready';
-  media_tools: 'ready';
 }
 
 export interface RecordingSession {

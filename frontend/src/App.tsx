@@ -113,7 +113,7 @@ export function App() {
         <div>
           <h2 id="backend-heading">Local backend</h2>
           <p role="status">{busy === 'loading' ? 'Checking backend readiness...' : health ? 'Backend ready' : 'Backend not ready'}</p>
-          {health && <p className="detail">SQLite storage ready. FFmpeg and ffprobe available.</p>}
+          {health && <p className="detail">SQLite storage ready.</p>}
         </div>
         <button type="button" onClick={() => void refresh()} disabled={busy !== null || mediaBusy}>
           {busy === 'loading' ? 'Checking...' : 'Refresh / retry'}

@@ -4,7 +4,7 @@ This foundation displays authenticated backend readiness, lists recording sessio
 
 ## Run locally
 
-Use Node 24, npm and Python 3.12. The existing backend requires `ffmpeg` and `ffprobe` on `PATH` even though this slice does not decode media. Install a locally approved build; this change does not download or distribute either executable. Check `node --version`, `python --version`, `ffmpeg -version` and `ffprobe -version` first.
+Use Node 24, npm and Python 3.12 with the pinned backend dependencies. Production decoding uses PyAV's linked FFmpeg libraries, not external `ffmpeg` or `ffprobe` executables. Backend startup and health/session operations do not require those executables on `PATH`. Health confirms API and SQLite readiness only, not codec availability or safe media processing. Synthetic fixture generators and decoder comparison tests still require an approved local `ffmpeg` executable; no binary is downloaded or distributed by application startup.
 
 From the repository root on Windows PowerShell:
 

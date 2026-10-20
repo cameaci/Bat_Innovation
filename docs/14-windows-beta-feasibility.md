@@ -4,6 +4,14 @@ Reviewed 2026-10-19 for [Issue #11](https://github.com/cameaci/Bat_Innovation/is
 
 **Outcome: Stage A inventory only; the first installable Windows beta is blocked.** The attached execution environment is Linux x86_64, with no native Windows VM/workstation or runner. Native Windows gates exercised: **zero**. No Windows edition/build, native boot, installer, decode, file dialog or resource-limit result can be reported. No Wine or Linux cross-build is counted as Windows evidence. No Stage B package was built, launched or distributed. No runtime source, platform guard, authentication, processing limit or dependency selection is changed by this report. Slice 4 has not begun.
 
+## 2026-10-20 startup correction candidate
+
+The Stage A findings below describe their recorded base, not this unmerged correction. On native Windows 11 Enterprise x64 build 26200, the existing project Conda Python 3.12.15 environment imports the six pinned production packages' installed native dependencies; Electron 44.7.2 executes natively. Neither this environment nor Miniforge base is the approved embedded CPython 3.14.8 candidate.
+
+Source audit found no production external FFmpeg/ffprobe invocation: media uses PyAV, and processing subprocesses launch Python workers. The correction removes only the obsolete CLI startup check and its settings/error advice. Authenticated health now reports API/SQLite readiness, with no media readiness field or UI claim. Missing startup modules/native loads still reject launch. Existing synthetic FFmpeg fixture/comparison commands, platform guards, token/SQLite protections and packaged-runtime rejection remain unchanged.
+
+Native non-decoding checks passed: 14 foundation tests, strict TypeScript, Vite/Electron build, one real CLI-free backend restart/session/token integration test, and a normal-sandbox Electron UI health/session/reload/close smoke check. Full Linux backend, Node and Electron suites are not run: this session has no Linux execution environment and WSL is not installed. These remain required review gates, not replaced by Windows checks. Exact commands and limitations are in the [research log](07-research-log.md). No W1 approval/staging criterion, offline packaged boot, codec safety or redistribution approval is established.
+
 ## Gated blocker matrix
 
 States are distinct: **supported** means an upstream artifact/API advertises Windows support; **tested** below means Linux regression evidence only; **blocked** identifies an implemented rejection or unmet prerequisite; **unknown** means native behavior has not been exercised. No application feature is marked Windows-tested. Owners below are proposed roles, not assigned individuals. W1-W7 refer to the native procedures following the table.

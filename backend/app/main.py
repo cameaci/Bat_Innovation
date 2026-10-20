@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import json
-import shutil
 import sqlite3
 from threading import Lock
 from contextlib import asynccontextmanager
@@ -32,8 +31,6 @@ from .export_jobs import ExportJobs
 class Settings:
     data_dir: Path
     api_token: str
-    ffmpeg: str = "ffmpeg"
-    ffprobe: str = "ffprobe"
 
     @classmethod
     def from_environment(cls) -> Settings:
@@ -163,9 +160,6 @@ def create_app(settings: Settings) -> FastAPI:
         raise RuntimeError("Application data directory must be absolute")
     if len(settings.api_token) < 32:
         raise RuntimeError("A per-launch API token of at least 32 characters is required")
-    for executable in (settings.ffmpeg, settings.ffprobe):
-        if shutil.which(executable) is None:
-            raise RuntimeError(f"Required media tool is unavailable: {executable}")
     db_path = settings.data_dir / "bat_innovation.sqlite3"
     store.initialise(db_path)
     activity_lock = Lock()
@@ -206,7 +200,7 @@ def create_app(settings: Settings) -> FastAPI:
 
     @app.get("/api/health", dependencies=[Depends(authenticate)])
     def health() -> dict[str, str]:
-        return {"status": "ok", "storage": "ready", "media_tools": "ready"}
+        return {"status": "ok", "storage": "ready"}
 
     @app.get("/api/sessions", response_model=list[Session], dependencies=[Depends(authenticate)])
     def get_sessions() -> list[dict[str, str]]:
