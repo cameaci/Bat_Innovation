@@ -39,7 +39,7 @@ export function validExportDiskManifest(value: unknown, runID: string): value is
     return entry.name === EXPORT_FILES[kind] && typeof entry.bytes === 'number' &&
       Number.isSafeInteger(entry.bytes) && entry.bytes > 0 && entry.bytes <= 8 * 1024 * 1024 &&
       typeof entry.sha256 === 'string' && /^[0-9a-f]{64}$/.test(entry.sha256) &&
-      Number.isSafeInteger(entry.rows) && typeof entry.rows === 'number' &&
+      typeof entry.rows === 'number' && Number.isSafeInteger(entry.rows) &&
       entry.rows >= 0 && entry.rows <= 50000;
   });
 }
