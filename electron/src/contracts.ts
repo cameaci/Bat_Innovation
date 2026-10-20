@@ -308,6 +308,12 @@ export interface ExportManifest {
   counts: { planned: number; actual: number; missing: number; reviewed: number; first_stale: number; qa_stale: number; timestamp_gaps: number; evidence_flagged: number; processing: Record<string, number>; qa: Record<string, number> };
   files: Record<ExportKind, ExportFile>;
 }
+/** On-disk manifest describes the two payload CSVs. The manifest.json
+ * descriptor (including its SHA256) exists only in the authenticated
+ * transport manifest: a file cannot embed its own content hash. */
+export type ExportDiskManifest = Omit<ExportManifest, 'files'> & {
+  files: Pick<ExportManifest['files'], 'observations' | 'audit'>;
+};
 export interface ExportJob {
   id: string;
   run_id: string;
