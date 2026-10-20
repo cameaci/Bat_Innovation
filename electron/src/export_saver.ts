@@ -4,7 +4,7 @@ import { lstat, mkdir, open, readFile, readdir, realpath, rename, rm, unlink } f
 import { join } from 'node:path';
 import { isExternalDataDirectory, isUUID } from './backend';
 import type { BackendRuntime } from './backend';
-import type { ApiResult, ExportManifest, ExportSaved, ExportKind } from './contracts';
+import type { ApiResult, ExportManifest, ExportDiskManifest, ExportSaved, ExportKind } from './contracts';
 
 export const EXPORT_FILES = { observations: 'provisional-observations.csv', audit: 'technical-window-audit.csv', manifest: 'manifest.json' } as const;
 const failure = () => ({ ok: false, error: { code: 'export_write_failed', message: 'The provisional bundle could not be saved completely. Check storage and retry; no partial CSV bundle was published.' } }) as const;
@@ -18,6 +18,30 @@ export function validExportManifest(value: ExportManifest | null, runID: string)
       return !!file && file.name === EXPORT_FILES[kind] && Number.isSafeInteger(file.bytes) && file.bytes > 0 &&
         file.bytes <= (kind === 'manifest' ? 65536 : 8 * 1024 * 1024) && /^[0-9a-f]{64}$/.test(file.sha256);
     });
+}
+
+/** The saved file deliberately has no manifest.json self-hash. That
+ * descriptor is transport-only, computed from the final serialized bytes. */
+export function validExportDiskManifest(value: unknown, runID: string): value is ExportDiskManifest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  if (row.schema_version !== 'bat-provisional-csv-v1' || row.run_id !== runID ||
+      row.provisional_label !== 'PROVISIONAL — NOT ECOLOGICALLY FINALISED' ||
+      typeof row.as_of_utc !== 'string' || !row.as_of_utc ||
+      typeof row.manifest_complete !== 'boolean' || typeof row.processing_complete !== 'boolean' ||
+      !row.counts || typeof row.counts !== 'object' || Array.isArray(row.counts) ||
+      !row.files || typeof row.files !== 'object' || Array.isArray(row.files)) return false;
+  const files = row.files as Record<string, unknown>;
+  return Object.keys(files).length === 2 && (['observations', 'audit'] as const).every(kind => {
+    const file = files[kind];
+    if (!file || typeof file !== 'object' || Array.isArray(file)) return false;
+    const entry = file as Record<string, unknown>;
+    return entry.name === EXPORT_FILES[kind] && typeof entry.bytes === 'number' &&
+      Number.isSafeInteger(entry.bytes) && entry.bytes > 0 && entry.bytes <= 8 * 1024 * 1024 &&
+      typeof entry.sha256 === 'string' && /^[0-9a-f]{64}$/.test(entry.sha256) &&
+      Number.isSafeInteger(entry.rows) && typeof entry.rows === 'number' &&
+      entry.rows >= 0 && entry.rows <= 50000;
+  });
 }
 
 export class ExportSaver {
@@ -92,6 +116,17 @@ export class ExportSaver {
         try { await file.sync(); } finally { await file.close(); }
       }
       signal.throwIfAborted();
+      // Validate the actual saved manifest, not just the three-file API
+      // envelope. Only CSV entries can be embedded without a self-hash.
+      const disk = JSON.parse(await readFile(join(stage, EXPORT_FILES.manifest), 'utf8')) as unknown;
+      if (!validExportDiskManifest(disk, state.value.run_id) ||
+          disk.as_of_utc !== state.value.manifest.as_of_utc ||
+          (['observations', 'audit'] as const).some(kind => {
+            const declared = state.value.manifest!.files[kind];
+            const actual = disk.files[kind];
+            return declared.name !== actual.name || declared.bytes !== actual.bytes ||
+              declared.sha256 !== actual.sha256 || declared.rows !== actual.rows;
+          })) throw new Error('Saved manifest does not match verified CSV descriptors');
       const directory = await open(stage, 'r');
       try { await directory.sync(); } finally { await directory.close(); }
       await rename(stage, target); // replaces only the empty directory we just reserved
