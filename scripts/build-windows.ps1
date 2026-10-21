@@ -17,8 +17,9 @@ function Run([string]$Description, [scriptblock]$Command) {
 
 if ($env:OS -ne 'Windows_NT' -or -not [Environment]::Is64BitOperatingSystem) { throw 'Build on 64-bit Windows.' }
 if (Get-Command py -ErrorAction SilentlyContinue) { $pyExe = 'py'; $pyArgs = @('-3.12') } else { $pyExe = 'python'; $pyArgs = @() }
-$found = (& $pyExe @pyArgs -c 'import sys; print("%d.%d" % sys.version_info[:2], sys.maxsize > 2**32)') | Out-String
-if ($found.Trim() -ne '3.12 True') { throw "Python 3.12 x64 is required, found: $found" }
+# No double quotes inside the -c code: Windows PowerShell 5.1 strips them from native-command arguments.
+$found = (& $pyExe @pyArgs -c 'import sys; print(sys.version_info[0], sys.version_info[1], sys.maxsize > 2**32)') | Out-String
+if ($found.Trim() -ne '3 12 True') { throw "Python 3.12 x64 is required, found: $found" }
 
 # A dedicated build environment keeps the frozen backend limited to the pinned requirements.
 $venv = Join-Path (Get-Location) '.build\venv'
