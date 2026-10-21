@@ -10,6 +10,8 @@ from pathlib import Path
 import sys
 from uuid import UUID
 
+from . import workers
+
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_IMAGE_BYTES = 4 * 1024 * 1024
 MAX_RUN_BYTES = 128 * 1024 * 1024
@@ -30,6 +32,9 @@ class WorkerError(Exception):
 
 def limits(parent_pid: int) -> None:
     """Install limits before importing native codecs, numerical or image libraries."""
+    if sys.platform == "win32":
+        workers.require_limits(WorkerError("summary_limits_unavailable"))
+        return
     if sys.platform != "linux":
         raise WorkerError("summary_limits_unavailable")
     import ctypes
@@ -45,11 +50,11 @@ def limits(parent_pid: int) -> None:
 
 def _disk_bytes(root: Path) -> int:
     amount = 0
-    if root.is_symlink():
+    if workers.is_link(root):
         raise WorkerError("summary_failed")
     if root.exists():
         for candidate in root.rglob("*"):
-            if candidate.is_symlink():
+            if workers.is_link(candidate):
                 raise WorkerError("summary_failed")
             if candidate == root / ".manifest-reserve":
                 continue  # Separate fixed emergency metadata reserve, not image bytes.
@@ -82,7 +87,7 @@ def render(payload: dict) -> None:
     root.mkdir(exist_ok=True)
     initial_bytes = _disk_bytes(root)
     output = root / run_id
-    if output.is_symlink():
+    if workers.is_link(output):
         raise WorkerError("summary_failed")
     output.mkdir(exist_ok=True)
     run_bytes = 0
@@ -112,11 +117,7 @@ def render(payload: dict) -> None:
                 destination.flush()
                 os.fsync(destination.fileno())
             os.replace(part, target)
-            directory = os.open(output, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
+            workers.sync_directory(output, follow=True)
             summary_store.record_window(db, row["id"], evidence.stats(), "complete", target,
                                         sha256(image).hexdigest(), len(image), flags=sorted(evidence.flags))
             run_bytes += len(image)
@@ -262,7 +263,7 @@ def main() -> None:
                "summary_limit", "summary_limits_unavailable", "summary_failed", "unknown_end"}
     result: dict[str, str | None] = {"error": None}
     try:
-        raw = sys.stdin.buffer.read(MAX_REQUEST_BYTES + 1)
+        raw = workers.read_request(MAX_REQUEST_BYTES)
         if len(raw) > MAX_REQUEST_BYTES:
             raise WorkerError("summary_limit")
         payload = json.loads(raw)
@@ -281,7 +282,7 @@ def main() -> None:
         elif isinstance(error, ValueError) and str(error) in allowed:
             code = str(error)
         result["error"] = code if code in allowed else "summary_failed"
-    sys.stdout.write(json.dumps(result))
+    workers.write_response(json.dumps(result))
 
 
 if __name__ == "__main__":

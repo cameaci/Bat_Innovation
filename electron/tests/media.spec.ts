@@ -218,20 +218,19 @@ test('corrupt batches attach nothing and changed or missing originals remain exp
   }
 });
 
-test('Windows import refusal reaches the picker UI without source inspection or worker creation', async () => {
+test('unsupported-platform import refusal reaches the picker UI without source inspection or worker creation', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'bat-import-guard-e2e-'));
   const originalPython = process.env.BAT_PYTHON;
   const resolved = spawnSync(originalPython ?? 'python', ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8' });
   expect(resolved.status, resolved.stderr).toBe(0);
   const wrapper = join(directory, 'guarded-python');
-  // Linux-only negative fixture: override imports' platform view, not sys.platform
-  // globally. Real Electron/token/HTTP/SQLite stay intact; no source may be touched.
+  // Negative fixture: report an unsupported platform (neither Linux nor Windows) through the one
+  // supported() gate, not sys.platform. Real Electron/token/HTTP/SQLite stay intact; no source may be touched.
   await writeFile(wrapper, `#!${resolved.stdout.trim()}
 import os, runpy, sys
-from types import SimpleNamespace
 sys.path.insert(0, os.getcwd())
-from backend.app import imports
-imports.sys = SimpleNamespace(platform="win32")
+from backend.app import imports, workers
+workers.supported = lambda: False
 def forbidden(*args, **kwargs):
     raise AssertionError("Import accessed a source or created a worker")
 imports.selected_sources = forbidden

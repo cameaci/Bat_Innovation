@@ -1,12 +1,16 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, type IpcMainInvokeEvent } from 'electron';
-import { readFileSync, mkdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, readFileSync, mkdirSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
 import { ExportSaver } from './export_saver';
 import type { NewSession } from './contracts';
 
 const UI_URL = 'app://bat/index.html';
 const repoRoot = resolve(__dirname, '../..');
+// A packaged build keeps the frozen backend and the built UI beside the executable, never in the checkout.
+const installRoot = app.isPackaged ? dirname(process.execPath) : repoRoot;
+const uiRoot = app.isPackaged ? join(process.resourcesPath, 'frontend') : join(repoRoot, 'frontend/dist');
+const packagedBackend = join(process.resourcesPath, 'backend', process.platform === 'win32' ? 'bat-backend.exe' : 'bat-backend');
 const backend = new BackendRuntime();
 let exportSaver: ExportSaver | undefined;
 let window: BrowserWindow | undefined;
@@ -33,12 +37,25 @@ function confirmDiscard(force = false): boolean {
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 
+/** Packaged data stays on the local machine (not the roaming profile): reviews, derived images and Chromium state. */
+function localData(): string | undefined {
+  const local = process.env.LOCALAPPDATA;
+  return app.isPackaged && process.platform === 'win32' && local && isAbsolute(local) ? join(local, 'Bat Innovation') : undefined;
+}
+
 // Trusted process configuration only. No renderer operation accepts a path.
 const configuredData = process.env.BAT_APP_DATA_DIR;
 let configError: string | undefined;
+const packagedHome = configuredData === undefined ? localData() : undefined;
+if (packagedHome !== undefined) {
+  try {
+    mkdirSync(join(packagedHome, 'shell'), { recursive: true });
+    app.setPath('userData', join(packagedHome, 'shell'));
+  } catch { configError = 'The application data directory is not writable.'; }
+}
 if (configuredData !== undefined) {
-  if (!isExternalDataDirectory(repoRoot, configuredData)) {
-    configError = 'BAT_APP_DATA_DIR must be an absolute directory outside the repository.';
+  if (!isExternalDataDirectory(installRoot, configuredData)) {
+    configError = 'BAT_APP_DATA_DIR must be an absolute directory outside the installation or repository.';
   } else {
     try {
       const shellData = join(configuredData, 'shell');
@@ -67,13 +84,13 @@ async function open(): Promise<void> {
     app.quit();
     return;
   }
-  if (app.isPackaged) {
-    dialog.showErrorBox('Development shell only', 'A packaged Python runtime is not configured. Windows installer work belongs to Slice 5.');
+  if (app.isPackaged && !existsSync(packagedBackend)) {
+    dialog.showErrorBox('Installation incomplete', 'The Bat Innovation backend is missing. Reinstall the application.');
     app.quit();
     return;
   }
-  const dataDir = configuredData ?? join(app.getPath('userData'), 'data');
-  exportSaver = new ExportSaver(backend, repoRoot, dataDir);
+  const dataDir = configuredData ?? join(localData() ?? app.getPath('userData'), 'data');
+  exportSaver = new ExportSaver(backend, installRoot, dataDir);
   await exportSaver.recover();
   // Same fixed origin for development and eventual packaging. Serve only built UI assets.
   protocol.handle('app', (request) => {
@@ -83,7 +100,7 @@ async function open(): Promise<void> {
       return new Response('Not found', { status: 404 });
     }
     try {
-      const content = readFileSync(join(repoRoot, 'frontend/dist', url.pathname));
+      const content = readFileSync(join(uiRoot, url.pathname));
       return new Response(content, { headers: {
         'Content-Type': url.pathname.endsWith('.js') ? 'text/javascript' : url.pathname.endsWith('.css') ? 'text/css' : 'text/html',
         'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'",
@@ -188,7 +205,7 @@ async function open(): Promise<void> {
     return backend.importSelectedMedia(id, selected.filePaths);
   });
   void backend.start({
-    repoRoot, dataDir, python: process.env.BAT_PYTHON ?? 'python',
+    repoRoot: installRoot, dataDir, ...(app.isPackaged ? { packaged: packagedBackend } : { python: process.env.BAT_PYTHON ?? 'python' }),
     port: process.env.BAT_API_PORT === undefined ? undefined : Number(process.env.BAT_API_PORT),
   });
   await window.loadURL(UI_URL);
@@ -199,7 +216,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', () => { window?.show(); window?.focus(); });
   void app.whenReady().then(open).catch(() => {
-    dialog.showErrorBox('Startup failed', 'The development shell could not load. Run npm run build and check the local data directory.');
+    dialog.showErrorBox('Startup failed', 'Bat Innovation could not load. Check that the local data directory is writable, then restart. A development checkout needs npm run build first.');
     app.quit();
   });
 }

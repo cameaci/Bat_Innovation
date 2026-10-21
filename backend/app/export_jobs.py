@@ -14,8 +14,9 @@ import sys
 from threading import BoundedSemaphore, Event, Lock, Thread
 from uuid import UUID, uuid4
 
-from . import store
+from . import store, workers
 from .csv_export import FILES, MAX_CSV_BYTES, MAX_MANIFEST_BYTES, MAX_SECONDS, readonly
+from .export_worker import REQUEST_BYTES
 from .imports import ImportErrorResponse
 
 ERRORS = {
@@ -25,7 +26,7 @@ ERRORS = {
     "export_write_failed": "Export could not be written or published. Check local storage and retry; incomplete files were removed.",
     "export_missing": "This export or run is unavailable. Generate the provisional export again.",
     "export_schema_required": "Explicitly upgrade to QA schema 5 before exporting provisional CSVs.",
-    "export_limits_unavailable": "Safe export process limits are currently verified on Linux only.",
+    "export_limits_unavailable": "Safe export process limits are unavailable on this platform. Only Linux and Windows are supported.",
     "export_cancelled": "Export cancelled. Incomplete managed files were removed.",
 }
 
@@ -40,7 +41,7 @@ class ExportJobs:
         self.database, self.data_dir = database, data_dir
         self.directory = data_dir / "exports"
         self.directory.mkdir(mode=0o700, exist_ok=True)
-        if self.directory.is_symlink():
+        if workers.is_link(self.directory):
             raise RuntimeError("Managed exports must not be a symbolic link")
         self.lock, self.cancelled = Lock(), Event()
         self.delivery = BoundedSemaphore(1)
@@ -64,7 +65,7 @@ class ExportJobs:
                     shutil.rmtree(folder)
 
     def start(self, run_id: str) -> dict:
-        if sys.platform != "linux":
+        if not workers.supported():
             raise ExportError("export_limits_unavailable")
         with self.lock:
             if self.closed or self.job and self.job["state"] == "working":
@@ -90,26 +91,46 @@ class ExportJobs:
                 raise ExportError("export_write_failed") from None
             return dict(self.job)
 
+    def _contained(self, job_id: str, run_id: str) -> dict:
+        """Windows: one worker in a Job Object (1 GiB, 15 CPU seconds, one process) with a parent wall deadline."""
+        from . import winjob
+
+        with self.lock:
+            if self.closed or self.cancelled.is_set():
+                raise ExportError("export_cancelled")
+        limits = winjob.Limits(1024 ** 3, 15, 1, MAX_SECONDS + 2)
+        try:
+            status, result = workers.run_contained("export_worker", {"data_dir": str(self.data_dir), "job_id": job_id, "run_id": run_id},
+                                                   limits, self.cancelled.is_set, REQUEST_BYTES, MAX_MANIFEST_BYTES * 2)
+        except workers.WorkerFailed:
+            raise ExportError("export_write_failed") from None
+        if status != "ok":
+            raise ExportError("export_cancelled" if status == "cancelled" else "export_too_large")
+        return result
+
     def _run(self, job_id: str, run_id: str) -> None:
         manifest, code = None, None
         try:
-            with self.lock:
-                if self.closed or self.cancelled.is_set():
-                    raise ExportError("export_cancelled")
-                self.process = subprocess.Popen([sys.executable, "-m", "backend.app.export_worker", str(self.data_dir), job_id, run_id, str(os.getpid())],
-                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
-                process = self.process
-            try:
-                output, _ = process.communicate(timeout=MAX_SECONDS + 2)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.communicate()
-                raise ExportError("export_too_large") from None
-            if len(output) > MAX_MANIFEST_BYTES * 2:
-                raise ExportError("export_too_large")
-            if process.returncode:
-                raise ExportError("export_too_large" if process.returncode < 0 else "export_write_failed")
-            result = json.loads(output)
+            if sys.platform == "win32":
+                result = self._contained(job_id, run_id)
+            else:
+                with self.lock:
+                    if self.closed or self.cancelled.is_set():
+                        raise ExportError("export_cancelled")
+                    self.process = subprocess.Popen([*workers.command("export_worker"), str(self.data_dir), job_id, run_id, str(os.getpid())],
+                        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
+                    process = self.process
+                try:
+                    output, _ = process.communicate(timeout=MAX_SECONDS + 2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.communicate()
+                    raise ExportError("export_too_large") from None
+                if len(output) > MAX_MANIFEST_BYTES * 2:
+                    raise ExportError("export_too_large")
+                if process.returncode:
+                    raise ExportError("export_too_large" if process.returncode < 0 else "export_write_failed")
+                result = json.loads(output)
             if not result["ok"]:
                 raise ExportError(result["code"] if result["code"] in ERRORS else "export_write_failed")
             manifest = result["value"]
@@ -166,9 +187,9 @@ class ExportJobs:
             maximum = MAX_MANIFEST_BYTES if kind == "manifest" else MAX_CSV_BYTES
             handle = None
             try:
-                if self.directory.is_symlink() or folder.is_symlink() or path.is_symlink():
+                if workers.is_link(self.directory) or workers.is_link(folder) or workers.is_link(path):
                     raise ExportError("export_stale")
-                handle = os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), "rb")
+                handle = os.fdopen(workers.open_no_follow(path, os.O_RDONLY), "rb")
                 info = os.fstat(handle.fileno())
                 if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size == descriptor["bytes"] <= maximum:
                     raise ExportError("export_stale")

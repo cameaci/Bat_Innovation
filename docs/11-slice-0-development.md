@@ -86,6 +86,8 @@ Exact npm package versions and integrity hashes are recorded in the root `packag
 | [`vite`](https://registry.npmjs.org/vite/7.3.7) | 7.3.7 | MIT | Static UI build; no runtime development server. |
 | [`typescript`](https://registry.npmjs.org/typescript/5.9.3) | 5.9.3 | Apache-2.0 | Strict UI, shell and test typechecking. |
 | [`electron`](https://registry.npmjs.org/electron/44.7.2) | 44.7.2 | MIT | Local development desktop runtime. |
+| [`electron-builder`](https://registry.npmjs.org/electron-builder/26.17.0) | 26.17.0 | MIT | Build-time NSIS packager (2026-10-21, internal beta). Not shipped in the installer. |
+| [`pyinstaller`](https://pypi.org/project/pyinstaller/6.22.3/) | 6.22.3 | GPL-2.0-or-later with bootloader exception | Build-time backend freezer (2026-10-21, internal beta). The exception covers the bootloader copied into the shipped executable; confirm it when the release owner reviews [docs/18](18-windows-beta.md). |
 | [`@playwright/test`](https://registry.npmjs.org/@playwright/test/1.64.1) | 1.64.1 | Apache-2.0 | Real Electron/React/API/SQLite integration tests. |
 | [`@types/node`](https://registry.npmjs.org/@types/node/24.10.1) | 24.10.1 | MIT | Node 24 types. |
 | [`@types/react`](https://registry.npmjs.org/@types/react/19.2.5) | 19.2.5 | MIT | React types. |
@@ -118,3 +120,5 @@ The independent code review identified a specific usability defect: Electron pre
 **Validation performed independently:** The exact GitHub Python sources (\`backend/app/main.py\`, \`backend/app/store.py\`, \`backend/app/__main__.py\`) and existing \`backend/tests/test_foundation.py\` were copied into an isolated local test directory; their Git blob SHA values matched this PR. \`python -m pytest backend/tests -q\`: **6 passed**. Three additional real \`python -m backend.app\` subprocess cases (future-schema, unversioned and corrupt SQLite) each exited with code 1, produced the expected fixed startup code, emitted no traceback or private data-directory path, and left database bytes unchanged. Six isolated Node tests for the updated diagnostic mapping also passed. Three additional Node-to-real-Python subprocess contract tests also passed for unsupported-schema, unversioned and corrupt SQLite inputs, verifying safe messages and unchanged database files.
 
 **Limit:** The complete TypeScript/Vite and Electron integration test suites were **not rerun independently** for these corrections because the local environment has no installed npm/Electron dependencies and cannot fetch them. The original Codex-reported Linux test results apply to the earlier commit only. Windows execution and default Chromium OS sandbox remain unverified. These limitations must not be presented as passing tests.
+
+Packaging (2026-10-21): the PyInstaller onedir plus electron-builder NSIS approach follows Camera_Trap's published pattern. The spec, scripts and configuration are independently written; no Camera_Trap file or snippet was copied.

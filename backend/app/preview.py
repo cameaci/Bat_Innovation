@@ -14,9 +14,9 @@ from _thread import LockType
 import time
 from uuid import uuid4
 
-from . import media, store
+from . import media, store, workers
 from .imports import ImportErrorResponse, source_state
-from .preview_worker import MAX_BYTES, MAX_MANIFEST_BYTES
+from .preview_worker import MAX_BYTES, MAX_MANIFEST_BYTES, MAX_REQUEST_BYTES
 
 WALL_SECONDS = 25
 ERRORS = {
@@ -30,7 +30,7 @@ ERRORS = {
     "outside_source": "Choose an original PTS between the first and last decoded frame PTS.",
     "unseekable_source": "A safe source-time seek could not be established. This source cannot be previewed.",
     "preview_limit": "Preview generation exceeded a configured time, memory, frame, dimension or output-size limit.",
-    "preview_limits_unavailable": "Preview process limits are unavailable on this platform. Linux development previews only are verified.",
+    "preview_limits_unavailable": "Preview process limits are unavailable on this platform. Only Linux and Windows are supported.",
     "preview_failed": "Preview generation failed. No partial preview is available.",
     "cancelled": "Preview cancelled. Its generated files were removed.",
 }
@@ -51,7 +51,7 @@ class PreviewJobs:
         self.db_path = db_path
         self.directory = data_dir / "previews"
         self.directory.mkdir(parents=True, exist_ok=True)
-        if self.directory.is_symlink():
+        if workers.is_link(self.directory):
             raise RuntimeError("Managed preview directory must not be a symbolic link")
         self._lock, self._activity_lock = Lock(), activity_lock
         self._jobs: dict[str, dict] = {}
@@ -68,7 +68,7 @@ class PreviewJobs:
                 path.unlink(missing_ok=True)
 
     def start(self, segment_id: str, source_pts: str) -> dict:
-        if sys.platform != "linux":
+        if not workers.supported():
             raise failure("preview_limits_unavailable")
         row = store.segment_by_id(self.db_path, segment_id)
         if row is None:
@@ -180,6 +180,21 @@ class PreviewJobs:
             thread.join(timeout=3)
         self._cleanup()
 
+    @staticmethod
+    def _contained(payload: dict, cancelled: Event) -> dict:
+        """Windows: one worker in a Job Object (1 GiB, 20 CPU seconds, one process) with a parent wall deadline."""
+        from . import winjob
+
+        limits = winjob.Limits(1024 ** 3, 20, 1, WALL_SECONDS)
+        try:
+            status, result = workers.run_contained("preview_worker", payload, limits, cancelled.is_set,
+                                                   MAX_REQUEST_BYTES, MAX_MANIFEST_BYTES + 1024)
+        except workers.WorkerFailed:
+            raise failure("preview_failed") from None
+        if status != "ok":
+            raise failure("cancelled" if status == "cancelled" else "preview_limit")
+        return result
+
     def _run(self, job_id: str, source_pts: str, cancelled: Event) -> None:
         process = None
         manifest = None
@@ -192,32 +207,35 @@ class PreviewJobs:
                        "identity": json.loads(row["identity_json"]), "metadata": json.loads(row["metadata_json"])}
             if cancelled.is_set():
                 raise failure("cancelled")
-            process = subprocess.Popen([sys.executable, "-m", "backend.app.preview_worker"],
-                                       cwd=Path(__file__).resolve().parents[2], stdin=subprocess.PIPE,
-                                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                       env={key: value for key, value in os.environ.items() if key != "BAT_API_TOKEN"})
-            with self._lock:
-                self._process = process
-            incoming = json.dumps(payload).encode()
-            deadline = time.monotonic() + WALL_SECONDS
-            while True:
+            if sys.platform == "win32":
+                result = self._contained(payload, cancelled)
+            else:
+                process = subprocess.Popen(workers.command("preview_worker"),
+                                           cwd=workers.working_directory(), stdin=subprocess.PIPE,
+                                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                           env={key: value for key, value in os.environ.items() if key != "BAT_API_TOKEN"})
+                with self._lock:
+                    self._process = process
+                incoming = json.dumps(payload).encode()
+                deadline = time.monotonic() + WALL_SECONDS
+                while True:
+                    if cancelled.is_set():
+                        raise failure("cancelled")
+                    if time.monotonic() >= deadline:
+                        raise failure("preview_limit")
+                    try:
+                        output, _ = process.communicate(input=incoming, timeout=0.05)
+                        break
+                    except subprocess.TimeoutExpired:
+                        incoming = None
                 if cancelled.is_set():
                     raise failure("cancelled")
-                if time.monotonic() >= deadline:
+                if process.returncode:
+                    code = "preview_limit" if process.returncode in (-signal.SIGKILL, -signal.SIGXCPU, -signal.SIGXFSZ) else "preview_failed"
+                    raise failure(code)
+                if len(output) > MAX_MANIFEST_BYTES + 1024:
                     raise failure("preview_limit")
-                try:
-                    output, _ = process.communicate(input=incoming, timeout=0.05)
-                    break
-                except subprocess.TimeoutExpired:
-                    incoming = None
-            if cancelled.is_set():
-                raise failure("cancelled")
-            if process.returncode:
-                code = "preview_limit" if process.returncode in (-signal.SIGKILL, -signal.SIGXCPU, -signal.SIGXFSZ) else "preview_failed"
-                raise failure(code)
-            if len(output) > MAX_MANIFEST_BYTES + 1024:
-                raise failure("preview_limit")
-            result = json.loads(output)
+                result = json.loads(output)
             if result["error"]:
                 raise failure(result["error"] if result["error"] in ERRORS else "preview_failed")
             if not 0 < partial.stat().st_size <= MAX_BYTES:

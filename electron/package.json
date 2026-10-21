@@ -1,12 +1,35 @@
 {
   "name": "bat-innovation-desktop",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "start": "electron ."
+    "start": "electron .",
+    "package": "electron-builder --win --publish never"
   },
-  "devDependencies": { "electron": "44.7.2" }
+  "devDependencies": { "electron": "44.7.2", "electron-builder": "26.17.0" },
+  "build": {
+    "appId": "org.batinnovation.reviewer",
+    "productName": "Bat Innovation",
+    "directories": { "output": "dist-build" },
+    "publish": null,
+    "files": ["dist/**/*", "package.json"],
+    "extraResources": [
+      { "from": "../backend/dist/bat-backend", "to": "backend" },
+      { "from": "../frontend/dist", "to": "frontend" },
+      { "from": "../build/notices", "to": "notices" }
+    ],
+    "win": { "target": ["nsis"], "artifactName": "Bat-Innovation-Setup-${version}.${ext}" },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Bat Innovation",
+      "deleteAppDataOnUninstall": false
+    }
+  }
 }

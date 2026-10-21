@@ -35,6 +35,7 @@ This is an exploratory project, **not an official WSP publication, endorsed solu
 | [09 - IR-first app architecture](docs/09-ir-first-architecture-draft.md) | Lean Electron/React/FastAPI/SQLite desktop application, recording sessions, review/QA and exports |
 | [10 - Camera_Trap reference](docs/10-camera-trap-architecture-reference.md) | Reviewed implementation patterns to reuse and avoid |
 | [11 - Slice 0 development shell](docs/11-slice-0-development.md) | Setup, API-origin decision, source reuse, dependency licences and limits |
+| [18 - Windows internal beta](docs/18-windows-beta.md) | Install, build, Windows containment, limits, licence notice and acceptance checklist |
 | [Source review template](docs/source-review-template.md) | Standard format for future source assessments |
 | [Implementation plan](implementation/README.md) | Reviewed delivery sequence, technical contracts, reuse audit and tests |
 | [AGENTS.md](AGENTS.md) | Working rules for AI coding agents and contributors |
@@ -53,6 +54,12 @@ This is an exploratory project, **not an official WSP publication, endorsed solu
 The minimal React/TypeScript UI and Electron development shell now display actual backend readiness and create/list synthetic sessions in the existing SQLite database. Tests verify persistence across reload and full application reopening, fresh per-launch credentials, explicit failure states and backend cleanup. Start with the [development instructions](docs/11-slice-0-development.md); results and decisions are in the [research log](docs/07-research-log.md).
 
 This is a foundation for the [planned workflow](implementation/plan.md). The Linux development shell supports source-PTS import/preview, all-window motion evidence, manual review and independent QA. [Provisional CSV exports](docs/17-slice-4b1-validation.md) are an unmerged review candidate. Ecological finalisation, approved output-template mapping and Windows packaging remain gated. No ecological performance result or production-ready desktop app is claimed. The source register remains a scoping review, and ownership/publication rights, approved footage and ecological evaluation remain open.
+
+## Install (Windows internal beta)
+
+An unsigned Windows installer is built from this repository by `scripts/build-windows.ps1` (or the `Build Windows installer` workflow) and published as a GitHub pre-release. It installs per user, runs offline and keeps your originals untouched. Exports are provisional, and **it has not yet been run on native Windows**: follow the [install notes, limits, codec licence notice and acceptance checklist](docs/18-windows-beta.md) before relying on it.
+
+For development on Linux or Windows: install `backend/requirements-dev.txt`, run `npm ci` and `npm run setup:electron`, then `npm run dev` (set `BAT_PYTHON` to the interpreter that has the requirements).
 
 ## Documentation conventions
 

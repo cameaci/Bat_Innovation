@@ -264,29 +264,6 @@ def test_host_reports_worker_media_error_and_cancellation(tmp_path):
     assert cancelled.value.code == "cancelled"
 
 
-def test_windows_import_ipc_cannot_reach_supervisor(tmp_path, monkeypatch):
-    from fastapi.testclient import TestClient
-    from backend.app.main import Settings, create_app
-
-    def forbidden(*_a, **_k):
-        raise AssertionError("contained import reached")
-
-    token = "synthetic-private-per-launch-token-long-enough"
-    headers = {"X-Bat-Token": token}
-    monkeypatch.setattr(contained_import, "inspect_source", forbidden)
-    monkeypatch.setattr(winjob, "run", forbidden)
-    monkeypatch.setattr(imports, "inspect", forbidden)
-    with TestClient(create_app(Settings(tmp_path / "data", token))) as client:
-        sid = client.post("/api/sessions", headers=headers,
-                          json={"display_name": "Synthetic", "camera_ref": "Test"}).json()["id"]
-        assert client.post("/api/media/upgrade", headers=headers).status_code == 200
-        for name in ("x.mp4", "y.MTS"):
-            response = client.post("/api/media/import", headers=headers, json={
-                "session_id": sid, "paths": [str(tmp_path / "private-site" / name)]})
-            assert response.status_code == 409 and response.json()["detail"]["code"] == "import_limits_unavailable"
-            assert "private-site" not in response.text
-
-
 @pytest.mark.parametrize('changes', [
     {'wall_seconds': float('nan')}, {'wall_seconds': float('inf')}, {'wall_seconds': 0},
     {'memory_bytes': 2 ** 64}, {'cpu_seconds': 2 ** 63}, {'active_processes': 2 ** 32},

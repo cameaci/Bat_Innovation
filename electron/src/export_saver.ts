@@ -44,6 +44,13 @@ export function validExportDiskManifest(value: unknown, runID: string): value is
   });
 }
 
+/** NTFS journals directory metadata itself and Windows cannot flush a directory handle, so only POSIX syncs directories. */
+async function syncDirectory(path: string): Promise<void> {
+  if (process.platform === 'win32') return;
+  const directory = await open(path, 'r');
+  try { await directory.sync(); } finally { await directory.close(); }
+}
+
 export class ExportSaver {
   private operation?: Promise<ApiResult<ExportSaved>>;
   private controller?: AbortController;
@@ -103,10 +110,11 @@ export class ExportSaver {
       try { await journal.writeFile(JSON.stringify({ parent, nonce })); await journal.sync(); }
       finally { await journal.close(); }
       await rename(this.journal + '.part', this.journal); intentOwned = false; journalOwned = true;
-      const intentDirectory = await open(this.dataDir, 'r');
-      try { await intentDirectory.sync(); } finally { await intentDirectory.close(); }
+      await syncDirectory(this.dataDir);
       await mkdir(stage, { mode: 0o700 }); stageOwned = true;
-      await mkdir(target, { mode: 0o700 }); targetOwned = true; // exclusive reservation; never overwrite an existing name
+      // POSIX rename replaces an empty directory, so reserve the name first. Windows rename never replaces a
+      // directory, so the final rename itself refuses an existing name and no reservation is needed.
+      if (process.platform !== 'win32') { await mkdir(target, { mode: 0o700 }); targetOwned = true; }
       timeout = setTimeout(() => this.controller?.abort(), 30000);
       for (const kind of Object.keys(EXPORT_FILES) as ExportKind[]) {
         signal.throwIfAborted();
@@ -127,12 +135,10 @@ export class ExportSaver {
             return declared.name !== actual.name || declared.bytes !== actual.bytes ||
               declared.sha256 !== actual.sha256 || declared.rows !== actual.rows;
           })) throw new Error('Saved manifest does not match verified CSV descriptors');
-      const directory = await open(stage, 'r');
-      try { await directory.sync(); } finally { await directory.close(); }
-      await rename(stage, target); // replaces only the empty directory we just reserved
+      await syncDirectory(stage);
+      await rename(stage, target); // replaces only the empty directory we just reserved (POSIX) or a missing name (Windows)
       stage = undefined;
-      const directoryParent = await open(parent, 'r');
-      try { await directoryParent.sync(); } finally { await directoryParent.close(); }
+      await syncDirectory(parent);
       published = true;
       await unlink(this.journal); journalOwned = false;
       return { ok: true, value: { cancelled: false, folder_name: `bat-provisional-${nonce}`, files: Object.values(EXPORT_FILES) } };

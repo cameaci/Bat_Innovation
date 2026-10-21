@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 import sys
 
+from . import workers
+
 MAX_BYTES = 8 * 1024 * 1024
 MAX_MANIFEST_BYTES = 128 * 1024
 MAX_REQUEST_BYTES = 256 * 1024
@@ -24,6 +26,9 @@ def rational(value: Fraction) -> dict[str, str]:
 
 def limits(parent_pid: int) -> None:
     """Fail closed where hard process limits and a parent-death guard are unavailable."""
+    if sys.platform == "win32":
+        workers.require_limits(RuntimeError("preview_limits_unavailable"))
+        return
     if sys.platform != "linux":
         raise RuntimeError("preview_limits_unavailable")
     import ctypes
@@ -194,7 +199,7 @@ def render(payload: dict) -> dict:
 def main() -> None:
     code = "preview_failed"
     try:
-        raw = sys.stdin.buffer.read(MAX_REQUEST_BYTES + 1)
+        raw = workers.read_request(MAX_REQUEST_BYTES)
         if len(raw) > MAX_REQUEST_BYTES:
             raise RuntimeError("preview_limit")
         payload = json.loads(raw)
@@ -214,7 +219,7 @@ def main() -> None:
             candidate = "preview_limit"
         code = candidate if candidate in allowed | {"unreadable_source"} else code
         result = {"manifest": None, "error": code}
-    sys.stdout.write(json.dumps(result))
+    workers.write_response(json.dumps(result))
 
 
 if __name__ == "__main__":

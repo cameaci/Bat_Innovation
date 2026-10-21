@@ -9,7 +9,7 @@ from pathlib import Path
 from threading import Event, Lock, Thread
 from uuid import uuid4
 
-from . import media, store
+from . import media, store, workers
 
 
 class ImportErrorResponse(Exception):
@@ -42,7 +42,6 @@ def selected_sources(paths: list[str], data_dir: Path) -> list[Path]:
 
 
 def inspect(source: Path, progress: media.Progress, cancelled: Event) -> dict:
-    # start() rejects every non-Linux platform first, so the contained Windows worker is unreachable by requests.
     if sys.platform == "win32":
         from . import contained_import
         return contained_import.inspect_source(source, progress, cancelled.is_set)
@@ -78,9 +77,9 @@ class ImportJobs:
         self._activity_lock = activity_lock if activity_lock is not None else Lock()
 
     def start(self, session_id: str, paths: list[str]) -> dict:
-        if sys.platform != "linux":
+        if not workers.supported():
             raise ImportErrorResponse("import_limits_unavailable",
-                "Media import process limits are unavailable on this platform. Only Linux development imports are verified.", 409)
+                "Media import process limits are unavailable on this platform. Only Linux and Windows are supported.", 409)
         sources = selected_sources(paths, self.data_dir)
         with self._lock:
             if self._closed or any(job["state"] == "running" for job in self._jobs.values()):

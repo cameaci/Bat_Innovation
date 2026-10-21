@@ -14,8 +14,15 @@ import sqlite3
 import time
 from uuid import UUID
 
+from . import workers
+
+REQUEST_BYTES = 4096
+
 
 def limits(parent_pid: int) -> None:
+    if sys.platform == "win32":
+        workers.require_limits(RuntimeError("export_limits_unavailable"))
+        return
     if sys.platform != "linux":
         raise RuntimeError("export_limits_unavailable")
     import ctypes
@@ -53,7 +60,7 @@ def render(data_dir: Path, job_id: str, run_id: str) -> dict:
             raise ExportFailure("export_too_large")
     root = data_dir / "exports"
     stage, target = root / f".{job_id}.part", root / job_id
-    if root.is_symlink() or stage.exists() or target.exists():
+    if workers.is_link(root) or stage.exists() or target.exists():
         raise ExportFailure("export_write_failed")
     stage.mkdir(mode=0o700)
     database = stage / "snapshot.sqlite3"
@@ -74,27 +81,24 @@ def render(data_dir: Path, job_id: str, run_id: str) -> dict:
         handle.write(encoded)
         handle.flush()
         os.fsync(handle.fileno())
+    workers.make_writable(database)
     database.unlink()
-    directory = os.open(stage, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    try:
-        os.fsync(directory)
-    finally:
-        os.close(directory)
+    workers.sync_directory(stage)
     check()
     if target.exists():
         raise ExportFailure("export_write_failed")
     os.rename(stage, target)
-    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+    workers.sync_directory(root)
     return {**manifest, "files": {**manifest["files"], "manifest": {"name": FILES["manifest"], "bytes": len(encoded), "sha256": sha256(encoded).hexdigest()}}}
 
 
 def main() -> None:
     try:
-        data_dir, job_id, run_id, parent_pid = sys.argv[1:]
+        if sys.platform == "win32":
+            request = json.loads(workers.read_request(REQUEST_BYTES))
+            data_dir, job_id, run_id, parent_pid = request["data_dir"], request["job_id"], request["run_id"], 0
+        else:
+            data_dir, job_id, run_id, parent_pid = sys.argv[1:]
         limits(int(parent_pid))
         if str(UUID(job_id)) != job_id or str(UUID(run_id)) != run_id or not Path(data_dir).is_absolute():
             raise ValueError("Invalid trusted export request")
@@ -108,7 +112,7 @@ def main() -> None:
         if code not in {"export_too_large", "export_busy", "export_stale", "export_missing", "export_schema_required", "export_write_failed", "export_limits_unavailable"}:
             code = str(error) if str(error) == "export_limits_unavailable" else "export_write_failed" if isinstance(error, OSError) else "export_stale"
         result = {"ok": False, "code": code}
-    print(json.dumps(result, ensure_ascii=True), flush=True)
+    workers.write_response(json.dumps(result, ensure_ascii=True) + "\n")
 
 
 if __name__ == "__main__":

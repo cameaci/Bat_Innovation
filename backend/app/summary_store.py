@@ -10,7 +10,7 @@ from pathlib import Path
 import sqlite3
 from uuid import uuid4
 
-from . import store, windows
+from . import store, windows, workers
 
 MAX_IMAGE_BYTES = 4 * 1024 * 1024
 RUN_STATES = {"queued", "running", "complete", "incomplete", "failed", "cancelled", "interrupted"}
@@ -226,7 +226,7 @@ def _valid_image(row: dict) -> bool:
         return False
     candidate = Path(path)
     try:
-        if not candidate.is_absolute() or candidate.is_symlink() or not candidate.is_file() or candidate.stat().st_size != amount:
+        if not candidate.is_absolute() or workers.is_link(candidate) or not candidate.is_file() or candidate.stat().st_size != amount:
             return False
         digest = sha256()
         with candidate.open("rb") as source:

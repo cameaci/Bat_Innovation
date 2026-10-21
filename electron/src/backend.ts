@@ -110,7 +110,7 @@ const mediaErrors: Record<string, string> = {
   export_write_failed: 'The provisional export could not be written. Check local storage and retry.',
   export_missing: 'This export or run is unavailable. Generate the provisional export again.',
   export_schema_required: 'Explicitly upgrade to QA schema 5 before exporting provisional CSVs.',
-  export_limits_unavailable: 'Safe export process limits are currently verified on Linux only.',
+  export_limits_unavailable: 'Safe export process limits are unavailable on this platform. Only Linux and Windows are supported.',
   export_cancelled: 'Export cancelled. Incomplete managed files were removed.',
   qa_schema_required: 'Use Upgrade QA storage before independent second review.',
   qa_upgrade_failed: 'QA storage could not be upgraded. The existing database was preserved.',
@@ -137,7 +137,7 @@ const mediaErrors: Record<string, string> = {
   summary_busy: 'A media operation is running. Wait for it or cancel it before starting another.',
   summary_missing: 'This summary run or window is unavailable. Refresh the session.',
   summary_not_ready: 'This window has no complete image. Its coverage record remains visible.',
-  summary_limits_unavailable: 'Summary resource limits are unavailable on this platform. Windows execution remains unverified.',
+  summary_limits_unavailable: 'Summary resource limits are unavailable on this platform. Only Linux and Windows are supported.',
   summary_limit: 'This run exceeds a time, frame, memory, image, source or disk limit. Incomplete windows remain visible.',
   summary_failed: 'Summary processing failed. Inspect the coverage records and original recordings before retrying.',
   summary_image_invalid: 'This derived image is missing or corrupt. Its window remains incomplete; start a new run to regenerate it.',
@@ -149,7 +149,7 @@ const mediaErrors: Record<string, string> = {
   schema_upgrade_failed: 'Media storage could not be upgraded. Close the app and check the local database before retrying.',
   session_missing: 'This session no longer exists. Refresh the session list.',
   job_missing: 'This import is no longer available. Refresh the session media.',
-  import_limits_unavailable: 'Media import process limits are unavailable on this platform. Only Linux development imports are verified.',
+  import_limits_unavailable: 'Media import process limits are unavailable on this platform. Only Linux and Windows are supported.',
   import_busy: 'A media import is already running. Wait for it or cancel it before importing again.',
   invalid_sources: 'Choose readable local .MTS or .MP4 original files using the native picker.',
   invalid_timeline: 'Check segment order, continuity evidence and the optional UTC clock anchor.',
@@ -169,7 +169,7 @@ const mediaErrors: Record<string, string> = {
   preview_busy: 'A preview is running. Wait for it or cancel it before starting another media operation.',
   preview_missing: 'This preview expired or was replaced. Request a new preview from the saved segment.',
   preview_not_ready: 'This preview has no complete content. Wait for it or request a new preview.',
-  preview_limits_unavailable: 'Preview resource limits are not available on this platform. Windows preview execution remains unverified.',
+  preview_limits_unavailable: 'Preview resource limits are unavailable on this platform. Only Linux and Windows are supported.',
   preview_limit: 'This preview exceeds the time, frame, memory, dimensions or byte limit. Choose another source time or supported recording.',
   preview_failed: 'Preview generation failed. Check the original recording and local storage before retrying.',
 };
@@ -448,7 +448,9 @@ export function isExternalDataDirectory(repoRoot: string, dataDir: string): bool
   } catch { return false; }
 }
 
-export interface BackendOptions { python: string; repoRoot: string; dataDir: string; port?: number }
+/** Development runs the Python modules from the checkout; a packaged build runs its frozen backend executable. */
+export type BackendCommand = { python: string } | { packaged: string };
+export type BackendOptions = BackendCommand & { repoRoot: string; dataDir: string; port?: number };
 
 /** Owns exactly one child. Never attaches to, or kills, a process found by port. */
 export class BackendRuntime {
@@ -469,7 +471,7 @@ export class BackendRuntime {
 
   private async launch(options: BackendOptions): Promise<ApiResult<Health>> {
     if (!isExternalDataDirectory(options.repoRoot, options.dataDir)) {
-      this.failure = unavailable('App data must be an absolute directory outside the repository.');
+      this.failure = unavailable('App data must be an absolute directory outside the repository or installation.');
       return this.failure;
     }
     if (options.port !== undefined && (!Number.isInteger(options.port) || options.port < 1 || options.port > 65535)) {
@@ -481,14 +483,15 @@ export class BackendRuntime {
       if (this.stopped) return this.failure;
       const token = randomBytes(32).toString('hex');
       this.client = new BackendClient(port, token);
-      const child = spawn(options.python, ['-m', 'backend.app'], {
-        cwd: options.repoRoot, shell: false, windowsHide: true,
+      const packaged = 'packaged' in options;
+      const child = spawn(packaged ? options.packaged : options.python, packaged ? [] : ['-m', 'backend.app'], {
+        cwd: packaged ? dirname(options.packaged) : options.repoRoot, shell: false, windowsHide: true,
         stdio: ['ignore', 'ignore', 'pipe'],
-        env: { ...process.env, BAT_APP_DATA_DIR: options.dataDir, BAT_API_TOKEN: token, BAT_API_PORT: String(port) },
+        env: { ...process.env, BAT_APP_DATA_DIR: options.dataDir, BAT_API_TOKEN: token, BAT_API_PORT: String(port), BAT_PARENT_PID: String(process.pid) },
       });
       this.child = child;
       this.closed = new Promise<void>((resolve) => {
-        child.once('error', () => { this.failure = unavailable('Backend could not start. Check BAT_PYTHON and the installed Python requirements.'); });
+        child.once('error', () => { this.failure = unavailable(packaged ? 'Backend could not start. Reinstall Bat Innovation; the installed backend is missing or blocked.' : 'Backend could not start. Check BAT_PYTHON and the installed Python requirements.'); });
         child.once('close', () => { this.child = undefined; resolve(); });
       });
       // Do not echo stderr: tracebacks can contain private paths. Surface known prerequisite failures only.
@@ -498,7 +501,8 @@ export class BackendRuntime {
         const diagnostic = safeStartupFailure(stderr);
         if (diagnostic) this.failure = unavailable(diagnostic);
       });
-      const deadline = Date.now() + 15000;
+      // A frozen backend loads its native libraries from disk on first launch and may be scanned by antivirus.
+      const deadline = Date.now() + (packaged ? 60000 : 15000);
       while (!this.stopped && this.child && Date.now() < deadline) {
         const result = await this.client.health();
         if (result.ok && this.child && !this.stopped) return result;

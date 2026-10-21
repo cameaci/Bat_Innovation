@@ -164,6 +164,8 @@ Reviewed 2026-10-20. Status: **Slices 0 (Linux foundation), 1A, 1B, 2A, 3A, 3B, 
 
 ## Slice 5 - Windows packaging and resilience
 
+**Internal beta candidate (2026-10-21, unverified on Windows):** the owner opened the Windows media gates under Job Object limits and an unsigned pre-release channel. [docs/18](../docs/18-windows-beta.md) records the design, accepted risks, Linux evidence (including a frozen Linux build passing the new end-to-end smoke test) and a 10-row native acceptance checklist, all "not run". The boxes below stay unchecked until native Windows evidence exists; the 44/70 baseline is unchanged.
+
 **Goal:** a reproducible local install, not new infrastructure.
 
 - [ ] Implement minimal Electron startup, local backend process management, restrictive preload and native file selection using the actual Camera_Trap pattern.

@@ -1,5 +1,17 @@
 # 07 - Research log
 
+## 2026-10-21 - Internal Windows beta: packaging and Windows worker containment
+
+**Decision (project owner):** open the Windows media gates for an internal beta under Job Object limits, publish an unsigned pre-release, keep exports provisional and defer finalisation. Details and accepted risks are in [18 - Windows internal beta](18-windows-beta.md).
+
+**Design:** one shared `backend/app/workers.py` (command resolution for source and frozen runs, request/response files, junction-aware link checks, reserve and directory-sync helpers). Linux subprocess paths are unchanged. Windows runs each worker through the existing `winjob.run`, and the worker verifies its own job limits (`winjob.enforced`). A single PyInstaller executable re-enters itself with `--worker <name>` for four whitelisted modules. Electron resolves the frozen backend and built UI from `process.resourcesPath` when packaged and keeps data in `%LOCALAPPDATA%`.
+
+**Verified (Linux only):** backend 374 passed and 44 skipped; new worker tests including the Windows branch against a fake supervisor; strict TypeScript, 58 Node tests and the Electron end-to-end suite (20 passed, 1 skipped); a frozen Linux build passes the new end-to-end smoke test; an electron-builder Linux `dir` package ran with `app.isPackaged` true and stopped its frozen backend on close. The smoke test found missing package metadata in the frozen build (versions recorded with each summary run) and the spec now includes it. Old tests that asserted "Windows is refused" now assert "unsupported platform is refused".
+
+**Not verified:** any native Windows execution, the frozen `.exe`, the installer, SmartScreen, the native picker and uninstall. The PowerShell build script and the workflow have not been executed. No ecological performance, real camera original or licence clearance is claimed.
+
+**Changed files:** `backend/app/{workers,winjob,imports,preview,preview_worker,summary_jobs,summary_worker,summary_store,export_jobs,export_worker,contained_import,__main__}.py`, `backend/run_backend.py`, `backend/bat-backend.spec`, `electron/src/{main,backend,export_saver}.ts`, `electron/package.json`, `scripts/*`, `.github/workflows/build-windows.yml`, tests and docs.
+
 ## 2026-10-21 - PR 19 independent Linux review and corrections
 
 Verified the requested remote head `f7e5b910594e7e47d105adb6c18620c1797b6691`. Before editing, reproduced worker error path disclosure and acceptance of contradictory PTS, a negative timebase and wrong metadata types. Reuse the existing read-only PyAV metadata contract and fixed error mapping, not another decoder or dependency. Review of Microsoft's CreateProcessW, Job Object limit/termination and WaitForSingleObject contracts also identified unchecked wait/exit results and nonfinite/overflowing limit inputs. Corrections are restricted to these boundaries, bounded JSON serialization and regression tests. Logical JSON limits do not cap worker scratch/disk use. The interval between suspended creation and job assignment is not covered by kill-on-job-close on abrupt owner death; this remains a native acceptance blocker, not a claim of complete containment.

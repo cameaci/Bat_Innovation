@@ -13,7 +13,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 import pytest
 
-from backend.app import imports, media, store
+from backend.app import imports, media, store, workers
 from backend.app.main import Settings, create_app
 from backend.tests.media_fixtures import generate_media
 
@@ -428,9 +428,7 @@ def test_import_thread_start_failure_leaves_no_running_job_or_reservation(
     jobs.close()
 
 
-@pytest.mark.parametrize('platform_name', ['win32', 'darwin'])
-def test_import_limits_guard_precedes_sources_workers_and_reservation(tmp_path, monkeypatch, platform_name):
-    from types import SimpleNamespace
+def test_import_limits_guard_precedes_sources_workers_and_reservation(tmp_path, monkeypatch):
     from unittest.mock import Mock
 
     database = tmp_path / 'data' / 'bat_innovation.sqlite3'
@@ -440,8 +438,8 @@ def test_import_limits_guard_precedes_sources_workers_and_reservation(tmp_path, 
     original = database.read_bytes()
     reservation = Lock()
     jobs = imports.ImportJobs(database, database.parent, reservation)
-    # Replace only this module's platform view, never the host Python platform.
-    monkeypatch.setattr(imports, 'sys', SimpleNamespace(platform=platform_name))
+    # Model an unsupported platform (neither Linux nor Windows) without touching the host Python platform.
+    monkeypatch.setattr(workers, 'supported', lambda: False)
     forbidden = Mock(side_effect=AssertionError('Import must reject before source access or worker creation'))
     monkeypatch.setattr(imports, 'selected_sources', forbidden)
     monkeypatch.setattr(imports, 'Thread', forbidden)
@@ -468,7 +466,6 @@ def test_import_limits_guard_precedes_sources_workers_and_reservation(tmp_path, 
 def test_windows_authenticated_import_api_is_fail_closed_and_preserves_records(
     tmp_path, videos, monkeypatch, existing_media,
 ):
-    from types import SimpleNamespace
     from unittest.mock import Mock
 
     settings = Settings(tmp_path / 'data', TOKEN)
@@ -481,8 +478,8 @@ def test_windows_authenticated_import_api_is_fail_closed_and_preserves_records(
         before = inventory(client, session_id)
         original_database = database.read_bytes()
         with monkeypatch.context() as patch:
-            patch.setattr(imports, 'sys', SimpleNamespace(platform='win32'))
-            forbidden = Mock(side_effect=AssertionError('Windows import reached source or worker code'))
+            patch.setattr(workers, 'supported', lambda: False)
+            forbidden = Mock(side_effect=AssertionError('Unsupported-platform import reached source or worker code'))
             patch.setattr(imports, 'selected_sources', forbidden)
             patch.setattr(imports, 'Thread', forbidden)
             patch.setattr(imports, 'Event', forbidden)
@@ -496,7 +493,7 @@ def test_windows_authenticated_import_api_is_fail_closed_and_preserves_records(
                 assert response.status_code == 409, response.text
                 assert response.json()['detail'] == {
                     'code': 'import_limits_unavailable',
-                    'message': 'Media import process limits are unavailable on this platform. Only Linux development imports are verified.',
+                    'message': 'Media import process limits are unavailable on this platform. Only Linux and Windows are supported.',
                 }
                 assert str(tmp_path) not in response.text and 'synthetic-private' not in response.text
             forbidden.assert_not_called()

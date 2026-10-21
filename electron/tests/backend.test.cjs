@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const { createHash } = require('node:crypto');
-const { access, mkdtemp, readFile, readdir, rm, symlink } = require('node:fs/promises');
+const { access, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } = require('node:fs/promises');
 const { createServer } = require('node:net');
 const { createServer: httpServer } = require('node:http');
 const { tmpdir } = require('node:os');
@@ -665,6 +665,34 @@ test('missing Python produces an explicit startup failure and leaves no child', 
   assert.match(result.error.message, /could not start.*Python/i);
   assert.equal(runtime.pid, undefined);
   expectFailure(await runtime.health(), 'unavailable');
+});
+
+test('missing packaged backend produces an explicit reinstall failure and leaves no child', { timeout: 10000 }, async t => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'bat-packaged-missing-'));
+  const runtime = new BackendRuntime();
+  t.after(async () => { await runtime.stop(); await rm(dataDir, { recursive: true, force: true }); });
+  const result = await runtime.start({ packaged: path.join(dataDir, 'missing-backend.exe'), repoRoot, dataDir });
+  expectFailure(result, 'unavailable');
+  assert.match(result.error.message, /Reinstall Bat Innovation/);
+  assert.equal(runtime.pid, undefined);
+});
+
+test('packaged launch runs the frozen executable with its own working directory and stops with it', { timeout: 30000, skip: process.platform === 'win32' }, async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'bat-packaged-'));
+  const dataDir = path.join(directory, 'data');
+  // Stand-in for the frozen executable: a launcher script that runs the same backend module.
+  const install = path.join(directory, 'install');
+  await mkdir(install);
+  const executable = path.join(install, 'bat-backend');
+  await writeFile(executable, `#!/bin/sh\ncd "${repoRoot}" && exec "${python}" -m backend.app\n`, { mode: 0o755 });
+  const runtime = new BackendRuntime();
+  t.after(async () => { await runtime.stop(); await rm(directory, { recursive: true, force: true }); });
+  const result = await runtime.start({ packaged: executable, repoRoot: install, dataDir });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const pid = runtime.pid;
+  assert.ok(pid);
+  await runtime.stop();
+  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
 });
 
 test('data directory symlink into the repository is rejected without creating app data', { timeout: 10000 }, async t => {
