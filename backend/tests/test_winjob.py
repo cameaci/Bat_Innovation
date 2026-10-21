@@ -196,12 +196,14 @@ def test_worker_environment_has_no_application_secrets(monkeypatch):
 
 
 def good_result(path: Path) -> dict:
-    rate = {"num": "30", "den": "1"}
+    first, last = {"num": "0", "den": "1"}, {"num": "1", "den": "1000"}
+    end, rate = {"num": "1", "den": "500"}, {"num": "30", "den": "1"}
     return {
-        "filename": path.name, "size_bytes": 5, "sha256": "a" * 64, "container": "mpegts", "streams": [],
+        "filename": path.name, "size_bytes": 5, "sha256": "a" * 64, "container": "mpegts",
+        "streams": [{"index": 0, "type": "video", "codec": "h264", "time_base": {"num": "1", "den": "90000"}}],
         "video_stream_index": 0, "codec": "h264", "width": 4, "height": 4, "time_base": {"num": "1", "den": "90000"},
-        "first_pts": "0", "last_pts": "90", "first_time": rate, "last_time": rate, "elapsed_last_time": rate,
-        "end_time": rate, "elapsed_end": rate, "frame_count": 3, "reported_duration": None, "average_rate": rate,
+        "first_pts": "0", "last_pts": "90", "first_time": first, "last_time": last, "elapsed_last_time": last,
+        "end_time": end, "elapsed_end": end, "frame_count": 3, "reported_duration": None, "average_rate": rate,
         "base_rate": rate, "rotation": 0, "field_order": None, "interlaced": False, "warnings": [],
         "_identity": {"device": 1, "inode": 2, "size_bytes": 5, "mtime_ns": 3, "ctime_ns": 4},
     }
@@ -253,10 +255,10 @@ def test_host_rejects_bad_responses_without_leaking_paths(tmp_path, body):
 
 def test_host_reports_worker_media_error_and_cancellation(tmp_path):
     from backend.app import media
-    err = "import sys,os,json\nopen(os.path.join(sys.argv[1],'response.json'),'w').write(json.dumps({'error':{'code':'unsupported_media','message':'No.'}}))\nsys.exit(2)"
+    err = "import sys,os,json\nopen(os.path.join(sys.argv[1],'response.json'),'w').write(json.dumps({'error':{'code':'unsupported_codec','message':'No.'}}))\nsys.exit(2)"
     with pytest.raises(media.MediaError) as caught:
         contained(tmp_path, err)
-    assert caught.value.code == "unsupported_media"
+    assert caught.value.code == "unsupported_codec"
     with pytest.raises(media.MediaError) as cancelled:
         contained_import.inspect_source(Path("a.MTS"), lambda *_: None, lambda: True)
     assert cancelled.value.code == "cancelled"
@@ -283,3 +285,58 @@ def test_windows_import_ipc_cannot_reach_supervisor(tmp_path, monkeypatch):
                 "session_id": sid, "paths": [str(tmp_path / "private-site" / name)]})
             assert response.status_code == 409 and response.json()["detail"]["code"] == "import_limits_unavailable"
             assert "private-site" not in response.text
+
+
+@pytest.mark.parametrize('changes', [
+    {'wall_seconds': float('nan')}, {'wall_seconds': float('inf')}, {'wall_seconds': 0},
+    {'memory_bytes': 2 ** 64}, {'cpu_seconds': 2 ** 63}, {'active_processes': 2 ** 32},
+    {'active_processes': True}, {'memory_bytes': 1.5},
+])
+def test_invalid_limits_rejected_before_native_field_conversion(changes):
+    with pytest.raises(ValueError):
+        limits(**changes)
+
+
+@pytest.mark.parametrize('poll', [float('nan'), float('inf'), 0, -1])
+def test_invalid_poll_interval_does_not_start_child(tmp_path, poll):
+    with pytest.raises(ValueError):
+        start('sleep', tmp_path, poll_seconds=poll)
+    assert not (tmp_path / 'started.marker').exists()
+
+
+@pytest.mark.parametrize('api,code', [('WaitForSingleObject', 'wait_failed'), ('GetExitCodeProcess', 'exit_code_failed')])
+def test_native_status_failure_is_not_success_and_still_reaps(tmp_path, monkeypatch, api, code):
+    real_wait = winjob._K.WaitForSingleObject
+    if api == 'WaitForSingleObject':
+        # Fail only the first running wait; retain the real wait during cleanup.
+        calls = []
+        def wait(handle, milliseconds):
+            calls.append(1)
+            return 0xFFFFFFFF if len(calls) == 1 else real_wait(handle, milliseconds)
+        monkeypatch.setattr(winjob._K, api, wait)
+    else:
+        monkeypatch.setattr(winjob._K, api, lambda *_: 0)
+    with pytest.raises(winjob.ContainmentError) as caught:
+        start('exit', tmp_path, '0')
+    assert caught.value.code == code
+    marker = tmp_path / 'started.marker'
+    if marker.exists():
+        assert identity(int(marker.read_text())) is None
+
+
+def test_poll_interval_cannot_overrun_wall_deadline(tmp_path):
+    outcome = start('sleep', tmp_path, limits=limits(wall_seconds=1), poll_seconds=60)
+    assert outcome.state == 'deadline' and outcome.wall_seconds < 10
+    assert identity(int((tmp_path / 'started.marker').read_text())) is None
+
+
+def test_failed_job_termination_is_reported_even_when_worker_has_exited(tmp_path, monkeypatch):
+    real = winjob._K.TerminateJobObject
+    def terminate(job, code):
+        assert real(job, code)  # actually clean up; inject only the reported API failure
+        return 0
+    monkeypatch.setattr(winjob._K, 'TerminateJobObject', terminate)
+    with pytest.raises(winjob.ContainmentError) as caught:
+        start('exit', tmp_path, '0')
+    assert caught.value.code == 'termination_failed'
+    assert identity(int((tmp_path / 'started.marker').read_text())) is None

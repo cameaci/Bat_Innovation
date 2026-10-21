@@ -7,6 +7,9 @@ when the owning process dies. Jobs limit committed memory, cumulative user CPU a
 they do not bound disk use, and the CPU and memory limits are enforced with measurable overshoot, so the
 wall-clock deadline here is independent and mandatory. conhost.exe helpers join the job but are not
 counted against the active-process limit.
+
+Abrupt owner death before assignment can leave a suspended, unassigned child. This helper alone is
+not an atomic process-ownership boundary; Windows media must remain disabled pending native acceptance.
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ import ctypes
 from ctypes import wintypes as W
 from dataclasses import dataclass
 import os
+import math
 import subprocess
 import sys
 import time
@@ -107,8 +111,12 @@ class Limits:
     wall_seconds: float
 
     def __post_init__(self) -> None:
-        if min(self.memory_bytes, self.cpu_seconds, self.active_processes) < 1 or self.wall_seconds <= 0:
-            raise ValueError("Containment limits must be positive")
+        maxima = ((1 << (8 * ctypes.sizeof(_SIZE_T))) - 1, (2 ** 63 - 1) // 10_000_000, 2 ** 32 - 1)
+        if (any(type(value) is not int or not 1 <= value <= maximum for value, maximum in
+                zip((self.memory_bytes, self.cpu_seconds, self.active_processes), maxima))
+                or type(self.wall_seconds) not in (int, float)
+                or not 0 < self.wall_seconds <= sys.float_info.max):
+            raise ValueError("Containment limits must be finite, positive and fit native fields")
 
 
 @dataclass(frozen=True)
@@ -128,7 +136,7 @@ def worker_environment() -> dict[str, str]:
 
 def _create_suspended(argv: Sequence[str], cwd: Path, environment: Mapping[str, str]) -> tuple[int, int]:
     command = ctypes.create_unicode_buffer(subprocess.list2cmdline(list(argv)))
-    block = ctypes.create_unicode_buffer("".join(f"{k}={v}\0" for k, v in environment.items()) + "\0")
+    block = ctypes.create_unicode_buffer("".join(f"{k}={environment[k]}\0" for k in sorted(environment, key=str.upper)) + "\0")
     startup, info = _StartupInfo(), _ProcessInfo()
     startup.cb = ctypes.sizeof(_StartupInfo)
     # No handle inheritance and no CREATE_BREAKAWAY_FROM_JOB.
@@ -184,7 +192,7 @@ def _peak_memory(job: int) -> int:
 
 def _reap(job: int, process: int) -> None:
     """Terminate everything in the job, then require the worker and all members to be gone."""
-    _K.TerminateJobObject(job, 1)
+    terminated = _K.TerminateJobObject(job, 1)
     if _K.WaitForSingleObject(process, int(REAP_SECONDS * 1000)) != 0:
         raise ContainmentError("reap_failed")
     end = time.monotonic() + REAP_SECONDS
@@ -192,11 +200,15 @@ def _reap(job: int, process: int) -> None:
         if time.monotonic() >= end:
             raise ContainmentError("reap_failed")
         time.sleep(0.01)
+    if not terminated:
+        raise ContainmentError("termination_failed")
 
 
 def run(argv: Sequence[str], cwd: Path, limits: Limits, cancelled: Callable[[], bool] = lambda: False,
         environment: Mapping[str, str] | None = None, poll_seconds: float = 0.05) -> Outcome:
     """Run one worker tree to completion, cancellation or the wall-clock deadline, then reap all of it."""
+    if not math.isfinite(poll_seconds) or poll_seconds <= 0:
+        raise ValueError("Polling interval must be finite and positive")
     started = time.monotonic()
     process = thread = job = None
     try:
@@ -220,7 +232,12 @@ def run(argv: Sequence[str], cwd: Path, limits: Limits, cancelled: Callable[[], 
         raise
     try:
         state, deadline = "exited", started + limits.wall_seconds
-        while _K.WaitForSingleObject(process, int(poll_seconds * 1000)) != 0:
+        while True:
+            waited = _K.WaitForSingleObject(process, int(min(poll_seconds, 1, max(0, deadline - time.monotonic())) * 1000))
+            if waited == 0:
+                break
+            if waited != 258:  # WAIT_TIMEOUT; WAIT_FAILED must never become an exit or timeout success.
+                raise ContainmentError("wait_failed")
             if cancelled():
                 state = "cancelled"
                 break
@@ -229,7 +246,8 @@ def run(argv: Sequence[str], cwd: Path, limits: Limits, cancelled: Callable[[], 
                 break
         code = W.DWORD()
         if state == "exited":
-            _K.GetExitCodeProcess(process, ctypes.byref(code))
+            if not _K.GetExitCodeProcess(process, ctypes.byref(code)):
+                raise ContainmentError("exit_code_failed")
         accounting, peak = _accounting(job), _peak_memory(job)
         return Outcome(state, code.value if state == "exited" else 1, peak,
                        accounting.TotalUserTime / 1e7, time.monotonic() - started)

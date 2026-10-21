@@ -1,5 +1,11 @@
 # 07 - Research log
 
+## 2026-10-21 - PR 19 independent Linux review and corrections
+
+Verified the requested remote head `f7e5b910594e7e47d105adb6c18620c1797b6691`. Before editing, reproduced worker error path disclosure and acceptance of contradictory PTS, a negative timebase and wrong metadata types. Reuse the existing read-only PyAV metadata contract and fixed error mapping, not another decoder or dependency. Review of Microsoft's CreateProcessW, Job Object limit/termination and WaitForSingleObject contracts also identified unchecked wait/exit results and nonfinite/overflowing limit inputs. Corrections are restricted to these boundaries, bounded JSON serialization and regression tests. Logical JSON limits do not cap worker scratch/disk use. The interval between suspended creation and job assignment is not covered by kill-on-job-close on abrupt owner death; this remains a native acceptance blocker, not a claim of complete containment.
+
+Pre-code five-role check: vision requires exact internally consistent source PTS and unchanged read-only inspection; ecology requires no media or release acceptance claim; desktop QA requires cancellation/failure cleanup and explicit Linux skips for native tests; security/licensing requires fixed messages and fail-closed native API results without downloads; maintenance keeps the existing worker design, guard and seven-slice plan at 44/70. No upstream code is copied. Native Windows API tests cannot run on this Linux host; the final commands, counts, skips and cleanup evidence will be recorded on PR 19.
+
 ## 2026-10-21 - Issue 11 W4 disposable-worker process containment (disabled)
 
 Native Windows 11 experiments showed a Job Object can contain synthetic Python worker trees. Added `winjob.py` (suspended start, verified limits and assignment, wall deadline, cancellation, kill-on-close) and `contained_import.py` (bounded request/response, strict validation, no path leakage) with text-only native tests. Windows import, preview, summary and export stay fail-closed; ordinary requests cannot reach the new code. Memory and CPU limits overshoot, disk and scratch capacity is not bounded, and no real media was decoded. The 44/70 plan count is unchanged.
