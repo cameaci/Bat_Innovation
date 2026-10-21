@@ -217,3 +217,47 @@ test('corrupt batches attach nothing and changed or missing originals remain exp
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('Windows import refusal reaches the picker UI without source inspection or worker creation', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'bat-import-guard-e2e-'));
+  const originalPython = process.env.BAT_PYTHON;
+  const resolved = spawnSync(originalPython ?? 'python', ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8' });
+  expect(resolved.status, resolved.stderr).toBe(0);
+  const wrapper = join(directory, 'guarded-python');
+  // Linux-only negative fixture: override imports' platform view, not sys.platform
+  // globally. Real Electron/token/HTTP/SQLite stay intact; no source may be touched.
+  await writeFile(wrapper, `#!${resolved.stdout.trim()}
+import os, runpy, sys
+from types import SimpleNamespace
+sys.path.insert(0, os.getcwd())
+from backend.app import imports
+imports.sys = SimpleNamespace(platform="win32")
+def forbidden(*args, **kwargs):
+    raise AssertionError("Import accessed a source or created a worker")
+imports.selected_sources = forbidden
+imports.Thread = forbidden
+imports.media.inspect_source = forbidden
+runpy.run_module("backend.app", run_name="__main__")
+`, { mode: 0o700 });
+  let shell: RunningShell | undefined;
+  try {
+    process.env.BAT_PYTHON = wrapper;
+    shell = await launch(join(directory, 'data'));
+    const sessionID = await createAndOpenMedia(shell);
+    const before = await getMedia(shell, sessionID);
+    await nativeSelection(shell, [join(directory, 'synthetic-private-missing.mp4')]);
+    await shell.page.getByRole('button', { name: 'Choose original videos', exact: true }).click();
+    await expect(shell.page.getByRole('alert')).toContainText('Media import process limits are unavailable');
+    await expect(shell.page.locator('body')).not.toContainText('synthetic-private-missing');
+    expect((await pickerSpy(shell)).calls).toBe(1);
+    expect(await getMedia(shell, sessionID)).toEqual(before);
+    expect(before.segments).toEqual([]);
+    expect(before.active_import).toBeNull();
+    await quit(shell); shell = undefined;
+  } finally {
+    if (originalPython === undefined) delete process.env.BAT_PYTHON;
+    else process.env.BAT_PYTHON = originalPython;
+    await cleanup(shell);
+    await rm(directory, { recursive: true, force: true });
+  }
+});

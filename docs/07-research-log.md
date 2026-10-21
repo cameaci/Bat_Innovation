@@ -1,5 +1,11 @@
 # 07 - Research log
 
+## 2026-10-21 - PR #18 Windows import safety correction
+
+**Review and design before code:** At reviewed `cde09db089c82ce74fda5438986836b73170e0a7`, removing the obsolete media-CLI startup gate makes unbounded import reachable on Windows. Reuse the existing preview/summary/export platform-guard pattern and sanitized API/desktop error mapping. Put `import_limits_unavailable` rejection first in `ImportJobs.start`, before selected-file validation, locks/job state or worker creation. Keep Linux import behavior and all other guards unchanged. No new abstraction, dependency, decoder, schema or upstream copied code.
+
+**Five-role check:** Vision preserves the sole original-PTS decoder and Linux fixtures; ecology makes no media-readiness or release claim; desktop QA checks direct authenticated requests, picker error display and zero side effects; security/licensing requires a backend boundary and fixed redacted message, without installing binaries; maintenance adds one local guard and focused tests. Platform simulation tests run on Linux and cannot establish native Windows acceptance. The seven-slice plan stays byte-for-byte unchanged at 44/70, Slice 5 at 0/5 and Slice 6 at 0/7. Focused Linux execution: `python -m pytest backend/tests/test_import.py -q` passed 21 tests with one existing Starlette/AnyIO warning in 2.49s, exit 0; `npm run typecheck` passed, exit 0. The final complete-suite counts, corrected SHA, cleanup and draft/unmerged status are recorded on PR #18 after execution.
+
 ## 2026-10-20 - Issue 11 minimal startup readiness correction
 
 **Base and scope:** `fix/issue-11-startup-readiness` from verified remote/local `main` at `6370bb0ac37cb03a7d5eeb1359354145c35d2242`. No dependency, lockfile, schema, workflow, media algorithm, resource guard or packaged-runtime change. No new slice; progress stays 44/70, Slice 5 0/5 and Slice 6 0/7.

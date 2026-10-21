@@ -744,3 +744,21 @@ test('incompatible SQLite databases fail with safe actionable messages', { timeo
     });
   }
 });
+
+test('import limits refusal stays specific and strips backend paths at the desktop boundary', async () => {
+  const id = '00000000-0000-4000-8000-000000000000';
+  const server = httpServer((req, response) => {
+    assert.equal(req.url, '/api/media/import');
+    assert.equal(req.method, 'POST');
+    response.writeHead(409, { 'Content-Type': 'application/json' });
+    response.end(JSON.stringify({ detail: { code: 'import_limits_unavailable', message: 'Traceback at C:\\private\\synthetic.mp4' } }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const client = new BackendClient(server.address().port, 'synthetic-redaction-token');
+    const result = await client.importSelectedMedia(id, [path.join(tmpdir(), 'synthetic', 'missing.mp4')]);
+    expectFailure(result, 'import_limits_unavailable');
+    assert.match(result.error.message, /Media import process limits are unavailable/);
+    assert.doesNotMatch(result.error.message, /private|Traceback|\.mp4/);
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});

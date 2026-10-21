@@ -426,3 +426,82 @@ def test_import_thread_start_failure_leaves_no_running_job_or_reservation(
     assert reservation.acquire(blocking=False)
     reservation.release()
     jobs.close()
+
+
+@pytest.mark.parametrize('platform_name', ['win32', 'darwin'])
+def test_import_limits_guard_precedes_sources_workers_and_reservation(tmp_path, monkeypatch, platform_name):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    database = tmp_path / 'data' / 'bat_innovation.sqlite3'
+    store.initialise(database)
+    store.upgrade_media(database)
+    session_id = store.create_session(database, 'Synthetic blocked import', 'Synthetic camera')['id']
+    original = database.read_bytes()
+    reservation = Lock()
+    jobs = imports.ImportJobs(database, database.parent, reservation)
+    # Replace only this module's platform view, never the host Python platform.
+    monkeypatch.setattr(imports, 'sys', SimpleNamespace(platform=platform_name))
+    forbidden = Mock(side_effect=AssertionError('Import must reject before source access or worker creation'))
+    monkeypatch.setattr(imports, 'selected_sources', forbidden)
+    monkeypatch.setattr(imports, 'Thread', forbidden)
+    monkeypatch.setattr(imports, 'Event', forbidden)
+    monkeypatch.setattr(media, 'identity_info', forbidden)
+    monkeypatch.setattr(media, 'inspect_source', forbidden)
+    monkeypatch.setattr(store, 'commit_segments', forbidden)
+    try:
+        with pytest.raises(imports.ImportErrorResponse) as error:
+            jobs.start(session_id, [r'C:\synthetic-private\nonexistent.mp4'])
+        assert error.value.code == 'import_limits_unavailable' and error.value.status == 409
+        assert 'synthetic-private' not in error.value.message
+        forbidden.assert_not_called()
+        assert jobs._jobs == {} and jobs._cancel == {} and jobs._thread is None
+        assert jobs.active(session_id) is None
+        assert reservation.acquire(blocking=False)
+        reservation.release()
+        assert database.read_bytes() == original
+    finally:
+        jobs.close()
+
+
+@pytest.mark.parametrize('existing_media', [False, True])
+def test_windows_authenticated_import_api_is_fail_closed_and_preserves_records(
+    tmp_path, videos, monkeypatch, existing_media,
+):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    settings = Settings(tmp_path / 'data', TOKEN)
+    database = settings.data_dir / 'bat_innovation.sqlite3'
+    with TestClient(create_app(settings)) as client:
+        session_id = session(client)
+        upgraded(client)
+        if existing_media:
+            assert import_files(client, session_id, [videos['cfr_mp4']])['state'] == 'complete'
+        before = inventory(client, session_id)
+        original_database = database.read_bytes()
+        with monkeypatch.context() as patch:
+            patch.setattr(imports, 'sys', SimpleNamespace(platform='win32'))
+            forbidden = Mock(side_effect=AssertionError('Windows import reached source or worker code'))
+            patch.setattr(imports, 'selected_sources', forbidden)
+            patch.setattr(imports, 'Thread', forbidden)
+            patch.setattr(imports, 'Event', forbidden)
+            patch.setattr(media, 'identity_info', forbidden)
+            patch.setattr(media, 'inspect_source', forbidden)
+            patch.setattr(store, 'commit_segments', forbidden)
+            for paths in ([str(videos['cfr_mp4'])], [str(tmp_path / 'missing.mp4')], [r'C:\synthetic-private\missing.MTS']):
+                payload = {'session_id': session_id, 'paths': paths}
+                assert client.post('/api/media/import', json=payload).status_code == 401
+                response = client.post('/api/media/import', headers=HEADERS, json=payload)
+                assert response.status_code == 409, response.text
+                assert response.json()['detail'] == {
+                    'code': 'import_limits_unavailable',
+                    'message': 'Media import process limits are unavailable on this platform. Only Linux development imports are verified.',
+                }
+                assert str(tmp_path) not in response.text and 'synthetic-private' not in response.text
+            forbidden.assert_not_called()
+            assert database.read_bytes() == original_database
+        assert inventory(client, session_id) == before
+        # Rejection cannot poison the shared reservation or the existing Linux path.
+        assert import_files(client, session_id, [videos['short_mp4']])['state'] == 'complete'
+        assert len(inventory(client, session_id)['segments']) == int(existing_media) + 1

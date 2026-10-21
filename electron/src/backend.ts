@@ -149,6 +149,7 @@ const mediaErrors: Record<string, string> = {
   schema_upgrade_failed: 'Media storage could not be upgraded. Close the app and check the local database before retrying.',
   session_missing: 'This session no longer exists. Refresh the session list.',
   job_missing: 'This import is no longer available. Refresh the session media.',
+  import_limits_unavailable: 'Media import process limits are unavailable on this platform. Only Linux development imports are verified.',
   import_busy: 'A media import is already running. Wait for it or cancel it before importing again.',
   invalid_sources: 'Choose readable local .MTS or .MP4 original files using the native picker.',
   invalid_timeline: 'Check segment order, continuity evidence and the optional UTC clock anchor.',
