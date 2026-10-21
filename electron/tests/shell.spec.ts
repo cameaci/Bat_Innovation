@@ -13,6 +13,8 @@ test('real backend readiness, SQLite session persistence and narrow renderer bri
   try {
     shell = await launch(dataDir);
     const { page } = shell;
+    await expect(page.getByText('SQLite storage ready.', { exact: true })).toBeVisible();
+    await expect(page.getByText(/FFmpeg and ffprobe available/)).toHaveCount(0);
     expect(page.url()).toBe('app://bat/index.html');
     expect(await page.evaluate(() => ({
       nodeProcess: typeof (globalThis as { process?: unknown }).process,

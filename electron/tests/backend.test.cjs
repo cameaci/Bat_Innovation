@@ -133,7 +133,19 @@ async function waitUntilTerminal(read, activeStates) {
   assert.fail('Synthetic media operation did not reach a terminal state');
 }
 
-test('real backend persists sessions across runtime restart and rejects unauthorized access', { timeout: 45000 }, async t => {
+test('real backend without media CLI persists sessions across runtime restart and rejects unauthorized access', { timeout: 45000 }, async t => {
+  const resolved = spawnSync(python, ['-c', 'import sys; print(sys.executable)'], {
+    cwd: repoRoot, encoding: 'utf8', timeout: 10000,
+  });
+  assert.equal(resolved.status, 0);
+  const runtimePython = resolved.stdout.trim();
+  assert.ok(path.isAbsolute(runtimePython));
+  const previousPath = process.env.PATH;
+  process.env.PATH = '';
+  t.after(() => {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  });
   const dataDir = await mkdtemp(path.join(tmpdir(), 'bat-runtime-'));
   const first = new BackendRuntime();
   const reopened = new BackendRuntime();
@@ -143,9 +155,9 @@ test('real backend persists sessions across runtime restart and rejects unauthor
   });
 
   const port = await availablePort();
-  const options = { python, repoRoot, dataDir, port };
+  const options = { python: runtimePython, repoRoot, dataDir, port };
   const [ready, sameLaunch] = await Promise.all([first.start(options), first.start(options)]);
-  assert.deepEqual(ready, { ok: true, value: { status: 'ok', storage: 'ready', media_tools: 'ready' } });
+  assert.deepEqual(ready, { ok: true, value: { status: 'ok', storage: 'ready' } });
   assert.deepEqual(sameLaunch, ready);
   const firstPid = first.pid;
   assert.equal(typeof firstPid, 'number');
@@ -174,10 +186,13 @@ test('real backend persists sessions across runtime restart and rejects unauthor
   await first.stop();
   expectExited(firstPid);
   assert.equal(first.pid, undefined);
-  expectFailure(await first.health(), 'unavailable');
+  const unavailable = await first.health();
+  expectFailure(unavailable, 'unavailable');
+  assert.match(unavailable.error.message, /installed backend dependencies/);
+  assert.doesNotMatch(unavailable.error.message, /ffmpeg|ffprobe/i);
   expectFailure(await unauthorized.health(), 'unavailable');
 
-  const restarted = await reopened.start({ python, repoRoot, dataDir });
+  const restarted = await reopened.start({ python: runtimePython, repoRoot, dataDir });
   assert.deepEqual(restarted, ready);
   assert.deepEqual(await reopened.listSessions(), { ok: true, value: [created.value] });
   const reopenedPid = reopened.pid;
@@ -728,4 +743,22 @@ test('incompatible SQLite databases fail with safe actionable messages', { timeo
       assert.deepEqual(await readFile(dbPath), original, 'Refused databases must remain unchanged');
     });
   }
+});
+
+test('import limits refusal stays specific and strips backend paths at the desktop boundary', async () => {
+  const id = '00000000-0000-4000-8000-000000000000';
+  const server = httpServer((req, response) => {
+    assert.equal(req.url, '/api/media/import');
+    assert.equal(req.method, 'POST');
+    response.writeHead(409, { 'Content-Type': 'application/json' });
+    response.end(JSON.stringify({ detail: { code: 'import_limits_unavailable', message: 'Traceback at C:\\private\\synthetic.mp4' } }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const client = new BackendClient(server.address().port, 'synthetic-redaction-token');
+    const result = await client.importSelectedMedia(id, [path.join(tmpdir(), 'synthetic', 'missing.mp4')]);
+    expectFailure(result, 'import_limits_unavailable');
+    assert.match(result.error.message, /Media import process limits are unavailable/);
+    assert.doesNotMatch(result.error.message, /private|Traceback|\.mp4/);
+  } finally { await new Promise(resolve => server.close(resolve)); }
 });

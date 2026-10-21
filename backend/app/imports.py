@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from _thread import LockType
 from pathlib import Path
 from threading import Event, Lock, Thread
@@ -69,6 +70,9 @@ class ImportJobs:
         self._activity_lock = activity_lock if activity_lock is not None else Lock()
 
     def start(self, session_id: str, paths: list[str]) -> dict:
+        if sys.platform != "linux":
+            raise ImportErrorResponse("import_limits_unavailable",
+                "Media import process limits are unavailable on this platform. Only Linux development imports are verified.", 409)
         sources = selected_sources(paths, self.data_dir)
         with self._lock:
             if self._closed or any(job["state"] == "running" for job in self._jobs.values()):

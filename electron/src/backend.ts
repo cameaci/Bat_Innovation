@@ -10,7 +10,7 @@ import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia, SummaryRequest, SummaryRun, SummaryDetail, ReviewChange, WindowReview, ReviewHistory } from './contracts';
 import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory } from './contracts';
 
-const unavailable = (message = 'Backend unavailable. Reopen the app after checking Python, ffmpeg and ffprobe.') =>
+const unavailable = (message = 'Backend unavailable. Reopen the app after checking Python and the installed backend dependencies.') =>
   ({ ok: false, error: { code: 'unavailable', message } }) as const;
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -149,6 +149,7 @@ const mediaErrors: Record<string, string> = {
   schema_upgrade_failed: 'Media storage could not be upgraded. Close the app and check the local database before retrying.',
   session_missing: 'This session no longer exists. Refresh the session list.',
   job_missing: 'This import is no longer available. Refresh the session media.',
+  import_limits_unavailable: 'Media import process limits are unavailable on this platform. Only Linux development imports are verified.',
   import_busy: 'A media import is already running. Wait for it or cancel it before importing again.',
   invalid_sources: 'Choose readable local .MTS or .MP4 original files using the native picker.',
   invalid_timeline: 'Check segment order, continuity evidence and the optional UTC clock anchor.',
@@ -182,8 +183,6 @@ type ApiRoute = '/api/exports' | `/api/exports/${string}` | `/api/exports/${stri
 
 /** Read only known, redacted startup codes from the Python process. */
 function safeStartupFailure(output: string): string | undefined {
-  const mediaTool = output.match(/Required media tool is unavailable: (ffmpeg|ffprobe)\b/);
-  if (mediaTool) return 'Required media tool is unavailable: ' + mediaTool[1] + '. Install it on PATH and reopen the app.';
   if (output.includes('BAT_STARTUP_ERROR:database_schema')) {
     return 'The local database has an unsupported schema version. Open it with a compatible app version or restore a supported backup. The database was not changed.';
   }
@@ -245,7 +244,7 @@ export class BackendClient {
 
   async health(): Promise<ApiResult<Health>> {
     const result = await this.call<Health>('/api/health');
-    if (result.ok && (result.value?.status !== 'ok' || result.value.storage !== 'ready' || result.value.media_tools !== 'ready')) {
+    if (result.ok && (result.value?.status !== 'ok' || result.value.storage !== 'ready')) {
       return { ok: false, error: { code: 'backend', message: 'Backend readiness response was not recognised.' } };
     }
     return result;
