@@ -1,6 +1,6 @@
 # 18 - Windows internal beta
 
-Status: **candidate, not yet run on Windows.** Reviewed 2026-10-21. The code, build script and installer configuration exist; no installer has been built or launched on native Windows, so every Windows result below is "not run".
+Status: **built and smoke-tested on one native Windows 11 machine; installer not yet installed or run.** Reviewed 2026-10-21. Every row of the acceptance checklist below is "Not run" except where a result is stated.
 
 ## Owner decisions (2026-10-21)
 
@@ -61,7 +61,9 @@ Do not describe the installer as simply BSD or MIT. It bundles the PyAV wheel, w
 
 On Linux, in this repository's development environment (Python 3.13 here, 3.12 is the build target): 374 backend tests pass (44 skipped, Windows-only), including the new worker-launch tests whose Windows branch runs against a fake supervisor; strict TypeScript passes; 58 Node tests pass; the Electron end-to-end suite passes (20 passed, 1 skipped). A **PyInstaller-frozen Linux build** passes `scripts/smoke_backend.py` (health, import, preview, 2 of 2 summary windows, export covering every planned window, original video unchanged). An electron-builder Linux `dir` package started with `app.isPackaged` true, ran the frozen backend from `resources/backend`, served the UI from `resources/frontend`, showed backend and storage ready, and left no backend process after closing. The frozen build caught a real defect, missing package metadata for the toolchain versions recorded with each run, now fixed in the spec. Reading the export save code for Windows also found two POSIX-only steps (directory fsync, rename over an empty directory), now made platform-aware.
 
-Not verified: everything on Windows, including the Job Object path with real workers, the frozen `.exe`, the NSIS installer, SmartScreen behaviour, the native file picker and uninstall.
+**Native Windows evidence (owner's machine, Windows 11 build 26200, Python 3.12.10, from the pasted `build-windows.ps1` output; not independently reproduced):** the script completed end to end. The frozen `bat-backend.exe` passed `scripts/smoke_backend.py` with synthetic media (health, schema upgrades, import, preview, 2 of 2 summary windows, provisional export covering every planned window, original unchanged), so import, preview, summaries and export ran as Job Object workers on Windows. electron-builder produced `Bat-Innovation-Setup-0.1.0.exe` (SHA256 `db07072a43232a171c7febbf20c92bc5bc44e94165741724602486e6be987562`, unsigned). The first smoke run exposed a real Windows defect, a false `changed_source` because `fstat().st_ctime_ns` differs from `stat()` for the same file; the owner fixed it with `st_birthtime_ns` and a Windows regression test (see the research log). Build warnings seen and not acted on: PyInstaller "Hidden import tzdata not found", `npm audit` reports 8 moderate issues in build tooling, electron-builder notes the missing icon, description and author.
+
+Not verified: the full backend test suite on Windows (only `test_media.py` is reported), the installed application (NSIS install, launch, native file picker, offline behaviour), process cleanup after closing during a summary run, SmartScreen behaviour and uninstall.
 
 ## Acceptance checklist (run on a Windows machine with networking disabled after install)
 
@@ -70,7 +72,7 @@ Record the Windows build, the installer SHA256 and the result of each row. A ski
 | # | Check | Result |
 | --- | --- | --- |
 | 1 | `pytest backend/tests -rs` passes with no Windows tests skipped | Not run |
-| 2 | `scripts\build-windows.ps1` completes, including the frozen smoke test | Not run |
+| 2 | `scripts\build-windows.ps1` completes, including the frozen smoke test | Passed on the owner's Windows 11 machine (reported output) |
 | 3 | Install, start: health ready, no outbound connection attempts | Not run |
 | 4 | Real file picker imports a synthetic `.mp4` and `.MTS`; SHA256 of each original is identical before and after | Not run |
 | 5 | Preview shows the marker frame at the selected original PTS | Not run |
