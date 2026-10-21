@@ -1,5 +1,9 @@
 # 07 - Research log
 
+## 2026-10-21 - Issue 11 W4 disposable-worker process containment (disabled)
+
+Native Windows 11 experiments showed a Job Object can contain synthetic Python worker trees. Added `winjob.py` (suspended start, verified limits and assignment, wall deadline, cancellation, kill-on-close) and `contained_import.py` (bounded request/response, strict validation, no path leakage) with text-only native tests. Windows import, preview, summary and export stay fail-closed; ordinary requests cannot reach the new code. Memory and CPU limits overshoot, disk and scratch capacity is not bounded, and no real media was decoded. The 44/70 plan count is unchanged.
+
 ## 2026-10-21 - PR #18 Windows import safety correction
 
 **Review and design before code:** At reviewed `cde09db089c82ce74fda5438986836b73170e0a7`, removing the obsolete media-CLI startup gate makes unbounded import reachable on Windows. Reuse the existing preview/summary/export platform-guard pattern and sanitized API/desktop error mapping. Put `import_limits_unavailable` rejection first in `ImportJobs.start`, before selected-file validation, locks/job state or worker creation. Keep Linux import behavior and all other guards unchanged. No new abstraction, dependency, decoder, schema or upstream copied code.
