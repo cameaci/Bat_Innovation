@@ -42,8 +42,10 @@ def _check_cancelled(cancelled: Cancelled) -> None:
 def _identity(status: os.stat_result) -> dict[str, int]:
     if not stat.S_ISREG(status.st_mode):
         raise MediaError("missing_source", "Select an existing regular source video file.")
+    # On Windows, fstat().st_ctime is not stable against stat(); birthtime is.
+    ctime_ns = getattr(status, "st_birthtime_ns", status.st_ctime_ns)
     return {"device": status.st_dev, "inode": status.st_ino, "size_bytes": status.st_size,
-            "mtime_ns": status.st_mtime_ns, "ctime_ns": status.st_ctime_ns}
+            "mtime_ns": status.st_mtime_ns, "ctime_ns": ctime_ns}
 
 
 def identity_info(path: Path) -> dict[str, int]:

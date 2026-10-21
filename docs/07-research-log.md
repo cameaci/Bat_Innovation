@@ -1,5 +1,11 @@
 # 07 - Research log
 
+## 2026-10-21 - Windows source identity timestamp correction
+
+The frozen Windows smoke test exposed a false `changed_source` result on an unchanged synthetic MP4: Windows `stat().st_ctime_ns` reported creation time, while `fstat().st_ctime_ns` differed for the open handle. `_identity` now uses Python 3.12's stable `st_birthtime_ns` when available, retaining the existing `ctime_ns` storage key and POSIX behavior. The Windows regression test compares path and open-handle identities.
+
+**Verified on Windows 11:** the regression test passed; all 19 `test_media.py` tests passed; a rebuilt frozen backend passed synthetic import, preview, both summary windows, provisional export coverage, and source-unchanged checks. This does not validate representative camera originals, ecological performance, installer distribution, or release approval.
+
 ## 2026-10-21 - Internal Windows beta: packaging and Windows worker containment
 
 **Decision (project owner):** open the Windows media gates for an internal beta under Job Object limits, publish an unsigned pre-release, keep exports provisional and defer finalisation. Details and accepted risks are in [18 - Windows internal beta](18-windows-beta.md).
