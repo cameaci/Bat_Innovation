@@ -41,6 +41,14 @@ def selected_sources(paths: list[str], data_dir: Path) -> list[Path]:
     return sources
 
 
+def inspect(source: Path, progress: media.Progress, cancelled: Event) -> dict:
+    # start() rejects every non-Linux platform first, so the contained Windows worker is unreachable by requests.
+    if sys.platform == "win32":
+        from . import contained_import
+        return contained_import.inspect_source(source, progress, cancelled.is_set)
+    return media.inspect_source(source, progress, cancelled.is_set)
+
+
 def source_state(row: dict) -> str:
     path = Path(row["source_path"])
     try:
@@ -142,7 +150,7 @@ class ImportJobs:
                     raise media.MediaError("cancelled", "Import cancelled. No sources were added.")
                 with self._lock:
                     self._jobs[job_id].update(filename=source.name, progress_value=0)
-                inspected.append((source, media.inspect_source(source, progress, cancelled.is_set)))
+                inspected.append((source, inspect(source, progress, cancelled)))
                 with self._lock:
                     self._jobs[job_id]["files_done"] += 1
             # Verify earlier files did not change while subsequent files were inspected.
