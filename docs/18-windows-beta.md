@@ -15,6 +15,8 @@ Status: **built and smoke-tested on one native Windows 11 machine; installer not
 3. Start **Bat Innovation**. Data lives in `%LOCALAPPDATA%\Bat Innovation\data`. Original videos stay where they are and are never copied, moved or deleted. Uninstalling keeps the data folder and your originals.
 4. Workflow: create a recording session, choose the original `.MTS`/`.MP4` files (in order), generate summaries (every time window is planned and kept), review windows and verify them against the original video, add a second QA decision if needed, then export the provisional CSV bundle.
 
+To try the app without real footage, generate a synthetic infrared-style clip with `python scripts/make_test_video.py <output.mp4>` (needs PyAV, for example the build environment `.build\venv\Scripts\python.exe`). Save it outside the repository and the app data folder. It has three 30 s windows: moving dots in the first two and none in the last. The motion-evidence image of the first window shows two trails, the last window none.
+
 The app is offline: it downloads nothing at runtime and only talks to its own loopback API with a per-launch token.
 
 ## Build (native Windows 10/11 x64)
