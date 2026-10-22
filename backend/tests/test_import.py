@@ -121,6 +121,11 @@ def test_new_database_starts_at_the_current_schema(tmp_path: Path) -> None:
     with TestClient(create_app(settings)) as client:
         session_id = session(client)
         assert inventory(client, session_id)["schema_version"] == store.QA_SCHEMA_VERSION
+        # The explicit upgrade routes stay safe to call on a current database (the frozen smoke test does).
+        for route in ("/api/media/upgrade", "/api/summaries/upgrade", "/api/reviews/upgrade", "/api/qa/upgrade"):
+            response = client.post(route, headers=HEADERS)
+            assert response.status_code == 200, (route, response.json())
+        assert inventory(client, session_id)["schema_version"] == store.QA_SCHEMA_VERSION
 
 
 def test_real_import_reorder_and_anchor_survive_restart_without_invented_time(tmp_path: Path, videos: dict[str, Path]) -> None:

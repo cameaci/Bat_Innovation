@@ -1,6 +1,6 @@
 # 18 - Windows internal beta
 
-Status: **built and smoke-tested on one native Windows 11 machine; installer not yet installed or run.** Reviewed 2026-10-21. Every row of the acceptance checklist below is "Not run" except where a result is stated.
+Status: **built and smoke-tested on one native Windows 11 machine; the owner installed and opened the first installer (screen recording, 2026-10-22). The Camera_Trap-style interface (2026-10-22) has not yet been built or run on Windows.** Reviewed 2026-10-22. Every row of the acceptance checklist below is "Not run" except where a result is stated.
 
 ## Owner decisions (2026-10-21)
 
@@ -13,7 +13,12 @@ Status: **built and smoke-tested on one native Windows 11 machine; installer not
 1. Download `Bat-Innovation-Setup-<version>.exe` and `SHA256SUMS.txt` from the release and compare the hash.
 2. Run the installer. It is per-user and needs no administrator rights. Windows SmartScreen will warn because the build is unsigned: choose "More info", then "Run anyway".
 3. Start **Bat Innovation**. Data lives in `%LOCALAPPDATA%\Bat Innovation\data`. Original videos stay where they are and are never copied, moved or deleted. Uninstalling keeps the data folder and your originals.
-4. Workflow: create a recording session, choose the original `.MTS`/`.MP4` files (in order), generate summaries (every time window is planned and kept), review windows and verify them against the original video, add a second QA decision if needed, then export the provisional CSV bundle.
+4. Workflow:
+   - **Surveys:** "New survey" creates one recording session (a name and the camera). Each survey card shows its videos, windows and review progress.
+   - **Process:** "Add videos" selects the original `.MTS`/`.MP4` files. Check their order (arrows) and save. "Generate motion summaries" plans every time window; thumbnails appear as each window finishes and can be opened at once. Review and original-video previews unlock when processing ends.
+   - **Review:** every window is a card. Filters (not reviewed, with observations, flagged, failed or incomplete, needs re-check, QA pending) never change the progress count. Opening a card shows the motion summary and plays two seconds of the original video from the window start. Enter your name once, then choose "No activity seen" (key N) or "Add observation" (key O); pause the video on a frame and use "Use current frame as start/end". Arrow keys move between windows and U jumps to the next unreviewed one. A decision is only saved after the original preview of that window is ready. A second person can add a QA decision under "Second review (QA)".
+   - **Export:** tick the provisional confirmation, "Export provisional CSVs", then "Save provisional CSV bundle..." to choose a folder.
+   - An older data folder shows one "Upgrade storage" button; nothing is upgraded without that click.
 
 To try the app without real footage, generate a synthetic infrared-style clip with `python scripts/make_test_video.py <output.mp4>` (needs PyAV, for example the build environment `.build\venv\Scripts\python.exe`). Save it outside the repository and the app data folder. It has three 30 s windows: moving dots in the first two and none in the last. The motion-evidence image of the first window shows two trails, the last window none.
 
@@ -60,6 +65,9 @@ The job is killed when the backend exits, and the backend exits when the desktop
 Do not describe the installer as simply BSD or MIT. It bundles the PyAV wheel, whose FFmpeg and codec libraries include **x264 and x265 (GPL-2.0-or-later or separate commercial terms)**, although the FFmpeg libraries self-report LGPL-3.0-or-later. The application does not use these encoders, but they are present in the shipped binaries. `notices/NOTICE.txt` in the install folder lists every Python component with its licence files and points to the PyAV and `pyav-ffmpeg` sources. The release publisher must provide the corresponding source and notices where required. A cleaner alternative is a PyAV/FFmpeg build without GPL encoders, which would need a fresh decode, VP9 encode and exact-PTS verification. Build-time tools (PyInstaller with its bootloader exception, electron-builder) are not shipped. Electron's own `LICENSE.electron.txt` and `LICENSES.chromium.html` are installed beside the executable. Code ownership and the licence of this project's source are still undetermined.
 
 ## Verified so far
+
+**Camera_Trap-style interface (2026-10-22, Linux only):** 375 backend tests pass (45 skipped, Windows-only); strict TypeScript passes; 58 Node tests pass; the rewritten Electron end-to-end suite passes (20 passed, 1 skipped), covering survey persistence, import and ordering, live summary output, exact-PTS preview, review and QA audit, draft protection, filters at 240-window scale and the export bundle. `scripts/collect_notices.py` now also lists the bundled JavaScript packages and the Camera_Trap notice. Not yet rebuilt or run on Windows.
+
 
 On Linux, in this repository's development environment (Python 3.13 here, 3.12 is the build target): 374 backend tests pass (44 skipped, Windows-only), including the new worker-launch tests whose Windows branch runs against a fake supervisor; strict TypeScript passes; 58 Node tests pass; the Electron end-to-end suite passes (20 passed, 1 skipped). A **PyInstaller-frozen Linux build** passes `scripts/smoke_backend.py` (health, import, preview, 2 of 2 summary windows, export covering every planned window, original video unchanged). An electron-builder Linux `dir` package started with `app.isPackaged` true, ran the frozen backend from `resources/backend`, served the UI from `resources/frontend`, showed backend and storage ready, and left no backend process after closing. The frozen build caught a real defect, missing package metadata for the toolchain versions recorded with each run, now fixed in the spec. Reading the export save code for Windows also found two POSIX-only steps (directory fsync, rename over an empty directory), now made platform-aware.
 

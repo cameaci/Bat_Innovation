@@ -1,6 +1,6 @@
-"""Collect licence texts for the Python packages shipped inside the backend executable.
+"""Collect licence texts for the Python packages in the backend executable and the JavaScript bundled into the UI.
 
-Run in the build environment after `pip install -r backend/requirements.txt`, before packaging:
+Run in the build environment after `pip install -r backend/requirements.txt` and `npm ci`, before packaging:
     python scripts/collect_notices.py build/notices
 It copies each shipped distribution's licence files and writes NOTICE.txt. It does not decide that a component
 may be redistributed; the release owner remains responsible for that (see docs/18-windows-beta.md).
@@ -8,6 +8,7 @@ may be redistributed; the release owner remains responsible for that (see docs/1
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import sys
@@ -23,7 +24,8 @@ HEADER = """Bat Innovation - third-party notices (internal beta)
 Bat Innovation is an exploratory local review tool. It is not an official WSP publication. Code ownership and the
 licence for this project's own source have not been determined; do not infer one from its public visibility.
 
-This installer bundles the components below. Their licence files are in the python/ folder beside this file.
+This installer bundles the components below. Their licence files are in the python/ and js/ folders beside this file.
+The user interface adapts components from Camera_Trap (MIT, Copyright (c) 2026 WSP); see js/camera-trap-ui-NOTICE.txt.
 The Electron runtime also installs LICENSE.electron.txt and LICENSES.chromium.html in the application folder.
 
 IMPORTANT - video codecs: the PyAV wheel bundles FFmpeg shared libraries and codec libraries, including x264 and
@@ -54,6 +56,27 @@ def shipped_distributions() -> list[metadata.Distribution]:
     return sorted(found.values(), key=lambda item: item.metadata["Name"].lower())
 
 
+def bundled_packages() -> list[Path]:
+    """Folders of the frontend's runtime npm dependencies and their transitive dependencies (bundled by Vite).
+
+    Tailwind is a build tool, but its preflight base styles are emitted into the shipped stylesheet."""
+    roots = [ROOT / "frontend/node_modules", ROOT / "node_modules"]
+    pending = [(name, True) for name in json.loads((ROOT / "frontend/package.json").read_text())["dependencies"]]
+    pending.append(("tailwindcss", False))
+    found: dict[str, Path] = {}
+    while pending:
+        name, recurse = pending.pop()
+        if name in found:
+            continue
+        folder = next((root / name for root in roots if (root / name / "package.json").is_file()), None)
+        if folder is None:
+            raise SystemExit(f"Bundled npm package {name} is not installed; run npm ci before collecting notices.")
+        found[name] = folder
+        if recurse:
+            pending.extend((child, True) for child in json.loads((folder / "package.json").read_text()).get("dependencies", {}))
+    return [found[name] for name in sorted(found)]
+
+
 def main(output: Path) -> None:
     if output.exists():
         shutil.rmtree(output)
@@ -73,8 +96,22 @@ def main(output: Path) -> None:
                 copied += 1
         if copied == 0:
             raise SystemExit(f"No licence file found for {name} {version}; resolve this before packaging.")
+    (output / "js").mkdir()
+    shutil.copyfile(ROOT / "frontend/src/components/ui/NOTICE", output / "js/camera-trap-ui-NOTICE.txt")
+    lines += ["", "JavaScript package | Version | Declared licence", "--- | --- | ---"]
+    for folder in bundled_packages():
+        package = json.loads((folder / "package.json").read_text())
+        name, version = package["name"], package["version"]
+        lines.append(f"{name} | {version} | {package.get('license', 'see licence files')}")
+        files = [entry for entry in folder.iterdir() if entry.is_file() and LICENCE_FILE.search(entry.name)]
+        if not files:
+            raise SystemExit(f"No licence file found for {name} {version}; resolve this before packaging.")
+        target = output / "js" / f"{name.replace('/', '__')}-{version}"
+        target.mkdir(parents=True)
+        for entry in files:
+            shutil.copyfile(entry, target / entry.name)
     (output / "NOTICE.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"Wrote {len(lines) - 3} component notices to {output}")
+    print(f"Wrote {len(lines) - 6} component notices to {output}")
 
 
 if __name__ == "__main__":

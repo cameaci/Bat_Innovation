@@ -1,5 +1,17 @@
 # 07 - Research log
 
+## 2026-10-22 - Camera_Trap-style interface and one-step storage for new data
+
+**Decision (project owner):** after a screen recording of the first installed beta, the owner asked for the Camera_Trap interface adapted to the bat workflow, with live output while processing, and WSP branding as in Camera_Trap. The recording showed why: one long engineering page, four separate "Upgrade ... storage" buttons on a fresh install (the review form stayed hidden until all were clicked), and a preview that needed a typed integer PTS before any decision could be saved.
+
+**Design:** Tailwind and shadcn-style components, layout and theme adapted from Camera_Trap `176451c` (MIT, WSP; see `frontend/src/components/ui/NOTICE`). Hash-routed Surveys, Process, Review and Export pages; a window dialog with the motion summary, an automatically started original preview, the review form, collapsed QA and technical details (exact PTS, hashes, parameters). Native `<dialog>`, `<select>` and checkbox replace Radix to keep `style-src 'self'`. The bridge, API, evidence rules and preview receipt are unchanged. New data folders are created at schema v5 in one step; existing databases still need an explicit "Upgrade storage" click, which runs the missing transactional steps in order. Branding: Camera_Trap's WSP red theme only. The WSP logo file is not added to this public repository because publishing a trademark asset here is not cleared; a local, uncommitted build-time asset is possible if the owner wants it.
+
+**Defects found by the rewritten end-to-end tests:** (1) saving a review or QA action while the automatic preview was encoding returned `review_busy`/`qa_busy`; saves now wait up to about 5 s for that lock (the same bounded wait already used for `preview_busy`) and then show the error. (2) The Review page QA line omitted unassessable windows, so its counts did not add up to the total. (3) The export card did not expose its region role. A media test reloaded before the UI had cleared a saved timeline draft; the test now waits for the saved state.
+
+**Verified (Linux only):** backend 375 passed, 45 skipped (Windows-only), including a new-database and no-op-upgrade test; strict TypeScript; 58 Node tests (upgrade-path tests now start from an explicit v1 database); Electron end-to-end 20 passed, 1 skipped, with review/preview specs repeated three times without failure; the notice collector lists 11 bundled npm packages.
+
+**Not verified:** the new interface on native Windows or in a rebuilt installer; usability with ecological reviewers; representative camera originals. No ecological performance is claimed.
+
 ## 2026-10-21 - Windows source identity timestamp correction
 
 The frozen Windows smoke test exposed a false `changed_source` result on an unchanged synthetic MP4: Windows `stat().st_ctime_ns` reported creation time, while `fstat().st_ctime_ns` differed for the open handle. `_identity` now uses Python 3.12's stable `st_birthtime_ns` when available, retaining the existing `ctime_ns` storage key and POSIX behavior. The Windows regression test compares path and open-handle identities.

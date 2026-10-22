@@ -102,7 +102,7 @@ Preview generation runs in one disposable Linux process with hard CPU/memory/fil
 
 ## 5. SQLite domain model (minimum viable persistence)
 
-Use Python standard-library `sqlite3` initially, foreign keys enabled, transactions for each operation and a schema version checked on startup. Do not silently reinterpret an incompatible DB. Introduce SQLAlchemy/Alembic only if evolving schema makes the additional dependencies worthwhile.
+Use Python standard-library `sqlite3` initially, foreign keys enabled, transactions for each operation and a schema version checked on startup. Do not silently reinterpret an incompatible DB. A new, empty data folder is created directly at the current schema; an existing database is upgraded only by an explicit user action (one "Upgrade storage" button that runs the missing transactional steps in order). Introduce SQLAlchemy/Alembic only if evolving schema makes the additional dependencies worthwhile.
 
 | Entity | Purpose | Required invariant |
 | --- | --- | --- |

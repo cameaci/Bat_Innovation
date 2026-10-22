@@ -57,7 +57,9 @@ This is a foundation for the [planned workflow](implementation/plan.md). The Lin
 
 ## Install (Windows internal beta)
 
-An unsigned Windows installer is built from this repository by `scripts/build-windows.ps1` (or the `Build Windows installer` workflow) and published as a GitHub pre-release. It installs per user, runs offline and keeps your originals untouched. Exports are provisional, and **it has not yet been run on native Windows**: follow the [install notes, limits, codec licence notice and acceptance checklist](docs/18-windows-beta.md) before relying on it.
+An unsigned Windows installer is built from this repository by `scripts/build-windows.ps1` (or the `Build Windows installer` workflow) and published as a GitHub pre-release. It installs per user, runs offline and keeps your originals untouched. Exports are provisional, and the Windows acceptance checklist has not been run: follow the [install notes, limits, codec licence notice and checklist](docs/18-windows-beta.md) before relying on it.
+
+**How to use:** create a survey, add the original videos on the Process page and generate motion summaries (thumbnails appear while it runs), then open each window on the Review page, watch the original clip and record "No activity seen" or observations. Export the provisional CSV bundle from the Export page. The [step-by-step guide](docs/18-windows-beta.md#install-and-use) has details.
 
 For development on Linux or Windows: install `backend/requirements-dev.txt`, run `npm ci` and `npm run setup:electron`, then `npm run dev` (set `BAT_PYTHON` to the interpreter that has the requirements).
 
