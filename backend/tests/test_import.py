@@ -35,7 +35,8 @@ def session(client: TestClient) -> str:
 
 def upgraded(client: TestClient) -> None:
     response = client.post("/api/media/upgrade", headers=HEADERS)
-    assert response.status_code == 200 and response.json() == {"schema_version": 2}
+    # Idempotent: a new database already starts at the current schema.
+    assert response.status_code == 200 and response.json()["schema_version"] in store.MEDIA_SCHEMA_VERSIONS
 
 
 def inventory(client: TestClient, session_id: str) -> dict:
@@ -115,8 +116,17 @@ def test_upgrade_rolls_back_every_ddl_statement_when_a_later_statement_fails(tmp
         assert connection.execute("SELECT * FROM session_media").fetchall() == [("preserve",)]
 
 
+def test_new_database_starts_at_the_current_schema(tmp_path: Path) -> None:
+    settings = Settings(tmp_path / "app-data", TOKEN)
+    with TestClient(create_app(settings)) as client:
+        session_id = session(client)
+        assert inventory(client, session_id)["schema_version"] == store.QA_SCHEMA_VERSION
+
+
 def test_real_import_reorder_and_anchor_survive_restart_without_invented_time(tmp_path: Path, videos: dict[str, Path]) -> None:
     settings = Settings(tmp_path / "app-data", TOKEN)
+    # An existing version 1 database is never upgraded silently on startup.
+    store.initialise(settings.data_dir / "bat_innovation.sqlite3")
     with TestClient(create_app(settings)) as client:
         session_id = session(client)
         assert inventory(client, session_id) == {"session_id": session_id, "schema_version": 1,

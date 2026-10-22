@@ -1,22 +1,32 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
-import type { ClockAnchor, MediaSegment, PreviewFrame, PreviewJob, Rational } from '../../electron/src/contracts';
-import { getAPI } from './api';
-import { readMediaBytes } from './binary';
-import type { DisplayedSourceFrame } from './sourceFrame';
+import { ChevronLeft, ChevronRight, Loader2, RotateCcw } from 'lucide-react';
+import type { MediaSegment, PreviewFrame, PreviewJob } from '../../../electron/src/contracts';
+import { getAPI } from '../api';
+import { readMediaBytes } from '../binary';
+import type { DisplayedSourceFrame } from '../sourceFrame';
+import { clock, ptsAfter, ptsSeconds, rational } from '../lib/time';
+import { Button } from './ui/button';
 
-const rational = (value: Rational) => `${value.num}/${value.den}`;
-const unavailable = 'The local backend is unavailable. Close the preview and retry after checking the backend.';
+const unavailable = 'The local backend is unavailable. Close the window and retry after checking the backend.';
+const STEP_MS = 2000;
+const BUSY_RETRIES = 20, BUSY_WAIT_MS = 250;
 
-export function SourcePreview({ segment, initialPTS, clockAnchor, onClose, onReady, onDisplayedFrame }: {
+/**
+ * Two-second derived WebM preview of the original, started at `initialPTS` when `enabled`. Displayed frames are
+ * mapped to exact original PTS through the preview manifest (requestVideoFrameCallback), never a browser timer.
+ */
+export function SourcePreview({ segment, initialPTS, minPTS, maxPTS, enabled, disabledReason, onReady, onDisplayedFrame }: {
   segment: MediaSegment;
-  initialPTS?: string;
-  clockAnchor: ClockAnchor | null;
-  onClose: () => void;
+  initialPTS: string;
+  /** Stepping stays inside this window: [minPTS, maxPTS). */
+  minPTS: string;
+  maxPTS: string | null;
+  enabled: boolean;
+  disabledReason: string;
   onReady?: (previewID: string | null) => void;
   onDisplayedFrame?: (frame: DisplayedSourceFrame | null) => void;
 }) {
-  const [sourcePTS, setSourcePTS] = useState(initialPTS ?? segment.metadata.first_pts);
+  const [sourcePTS, setSourcePTS] = useState(initialPTS);
   const [job, setJob] = useState<PreviewJob | null>(null);
   const [starting, setStarting] = useState(false);
   const [pendingCancellation, setPendingCancellation] = useState<string | null>(null);
@@ -26,7 +36,6 @@ export function SourcePreview({ segment, initialPTS, clockAnchor, onClose, onRea
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const video = useRef<HTMLVideoElement>(null);
-  const heading = useRef<HTMLHeadingElement>(null);
   const generation = useRef(0);
   const activeJob = useRef<string | null>(null);
   const clipURL = useRef<string | null>(null);
@@ -78,8 +87,6 @@ export function SourcePreview({ segment, initialPTS, clockAnchor, onClose, onRea
   }
 
   useEffect(() => {
-    heading.current?.focus();
-    heading.current?.scrollIntoView({ block: 'start' });
     return () => {
       readyCallback.current?.(null);
       frameCallback.current?.(null);
@@ -91,21 +98,23 @@ export function SourcePreview({ segment, initialPTS, clockAnchor, onClose, onRea
     };
   }, []);
 
-  async function start(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function start(requested: string) {
     invalidate();
     setError(''); setNotice('');
-    const requested = sourcePTS.trim();
-    if (!/^-?\d+$/.test(requested)) {
-      setError('Enter an integer source PTS using the imported source timebase.');
-      return;
-    }
+    setSourcePTS(requested);
     const ticket = generation.current;
     setStarting(true);
     try {
       const api = getAPI();
       if (!api) { fail(unavailable); return; }
-      const result = await api.startPreview({ segment_id: segment.id, source_pts: requested });
+      let result = await api.startPreview({ segment_id: segment.id, source_pts: requested });
+      // Moving to another window cancels the previous preview, whose worker may still be stopping.
+      // Wait a bounded time for that release instead of failing the new window's preview.
+      for (let attempt = 0; !result.ok && result.error.code === 'preview_busy' && attempt < BUSY_RETRIES; attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, BUSY_WAIT_MS));
+        if (ticket !== generation.current) return;
+        result = await api.startPreview({ segment_id: segment.id, source_pts: requested });
+      }
       if (ticket !== generation.current) {
         if (result.ok) void api.cancelPreview(result.value.id).catch(() => undefined);
         return;
@@ -117,6 +126,8 @@ export function SourcePreview({ segment, initialPTS, clockAnchor, onClose, onRea
       setStarting(false);
     } catch { if (ticket === generation.current) fail(unavailable); }
   }
+
+  useEffect(() => { if (enabled) void start(initialPTS); }, [enabled]);
 
   // Status revalidates source identity even after bytes have been loaded into the player.
   useEffect(() => {
@@ -247,10 +258,6 @@ export function SourcePreview({ segment, initialPTS, clockAnchor, onClose, onRea
     // A ready clip's ledger is immutable; status polling must not drop an in-progress seek candidate.
   }, [url, job?.id]);
 
-  function target(value: string) {
-    invalidate(); setSourcePTS(value); setError(''); setNotice('');
-  }
-
   async function cancel() {
     const id = activeJob.current;
     if (!pendingCancellation) generation.current += 1;
@@ -273,46 +280,37 @@ export function SourcePreview({ segment, initialPTS, clockAnchor, onClose, onRea
     }
   }
 
-  function close() { invalidate(); onClose(); }
+  const timeBase = segment.metadata.time_base;
+  const clipStart = manifest?.actual_pts ?? sourcePTS;
+  const previous = ptsAfter(clipStart, -STEP_MS, timeBase);
+  const next = ptsAfter(clipStart, STEP_MS, timeBase);
+  const canPrevious = BigInt(clipStart) > BigInt(minPTS);
+  const canNext = maxPTS === null ? BigInt(next) <= BigInt(segment.metadata.last_pts) : BigInt(next) < BigInt(maxPTS);
+  const busy = starting || job?.state === 'running' || pendingCancellation !== null;
+  const offset = (pts: string) => clock(ptsSeconds(pts, minPTS, timeBase));
 
-  return <section className="source-preview" aria-labelledby="preview-heading">
-    <h2 id="preview-heading" ref={heading} tabIndex={-1}>Source preview</h2>
-    <p><strong>{segment.metadata.filename}</strong></p>
-    <p className="detail">Derived VP9/WebM display clip, limited to 2 seconds and 8 MiB. The original is unchanged. The player timer is preview-relative; original-speed provenance remains unverified.</p>
-    <p className="detail">Continuity before this segment: {segment.continuity.replaceAll('_', ' ')}{segment.continuity_provenance && ` · ${segment.continuity_provenance}`}. Segments are never joined automatically.</p>
-    <form onSubmit={event => void start(event)}>
-      <label htmlFor="preview-source-pts">Source PTS</label>
-      <input id="preview-source-pts" value={sourcePTS} onChange={event => target(event.target.value)} inputMode="numeric" autoComplete="off" disabled={pendingCancellation !== null} />
-      <p className="detail">Integer PTS in timebase {rational(segment.metadata.time_base)} seconds. Imported decoded range: {segment.metadata.first_pts} to {segment.metadata.last_pts}. A target between frames selects the first frame at or after it.</p>
-      <div className="preview-controls">
-        <button type="button" disabled={pendingCancellation !== null} onClick={() => target(segment.metadata.first_pts)}>First frame</button>
-        <button type="button" disabled={pendingCancellation !== null} onClick={() => target(segment.metadata.last_pts)}>Last frame</button>
-        <button type="submit" disabled={starting || job?.state === 'running' || pendingCancellation !== null}>Create preview</button>
-      </div>
-    </form>
-    <div className="preview-controls">
-      {(starting || job || pendingCancellation) && <button type="button" onClick={() => void cancel()}>Cancel preview</button>}
-      <button type="button" onClick={close}>Close preview</button>
-      <button type="button" onClick={close}>Back to segment</button>
+  return <section aria-label="Original video" className="flex min-h-0 flex-col gap-2">
+    <div className="relative flex min-h-[180px] flex-1 items-center justify-center overflow-hidden rounded-md bg-black">
+      {url ? <video ref={video} src={url} controls preload="auto" aria-label="Derived source preview" className="max-h-full max-w-full"
+        onLoadedData={() => { setLoaded(true); if (job?.state === 'ready') readyCallback.current?.(job.id); }} onSeeking={clearDisplayed}
+        onError={() => fail('The preview could not be played. Close the window and retry.')} />
+        : <p className="flex items-center gap-2 px-4 text-center text-sm text-slate-300" role="status">
+          {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+          {!enabled ? disabledReason : starting ? 'Creating preview...' : job?.state === 'running' ? `Creating preview: ${job.phase}` : error ? 'Preview unavailable.' : notice || 'Preview not loaded.'}
+        </p>}
     </div>
-    <p className="preview-status" role="status">{starting ? 'Creating preview...' : job?.state === 'running' ? `Creating preview: ${job.phase}` : url ? loaded ? 'Preview ready' : 'Loading preview...' : notice || 'No preview displayed.'}</p>
-    {error && <div className="error" role="alert"><strong>Preview unavailable</strong><p>{error}</p></div>}
-    {url && <video ref={video} src={url} controls preload="auto" aria-label="Derived source preview" onLoadedData={() => { setLoaded(true); if (job?.state === 'ready') readyCallback.current?.(job.id); }} onSeeking={clearDisplayed} onError={() => fail('The derived preview could not be played. Close it and retry; this browser may not support the preview codec.')} />}
-    {displayed && <dl className="preview-timing" aria-label="Displayed original frame">
-      <dt>Displayed source PTS</dt><dd>{displayed.source_pts}</dd>
-      <dt>Displayed source time (seconds)</dt><dd>{rational(displayed.source_time)}</dd>
-      <dt>Displayed segment elapsed (seconds)</dt><dd>{rational(displayed.elapsed)}</dd>
-    </dl>}
-    {manifest && <><dl className="preview-timing">
-      <dt>Requested / actual first source PTS</dt><dd>{manifest.requested_pts} / {manifest.actual_pts}</dd>
-      <dt>Source timebase</dt><dd>{rational(manifest.time_base)}</dd>
-      <dt>Seek delta (seconds)</dt><dd>{rational(manifest.seek_error)}</dd>
-      <dt>Clip source first / last / end (seconds)</dt><dd>{rational(manifest.source_start)} / {rational(manifest.source_last)} / {rational(manifest.source_end)}</dd>
-      <dt>Clip segment elapsed start / end (seconds)</dt><dd>{rational(manifest.elapsed_start)} / {rational(manifest.elapsed_end)}</dd>
-      <dt>Preview duration / dimensions</dt><dd>{manifest.preview_duration_ms} ms · {manifest.width} × {manifest.height}</dd>
-    </dl><p className="detail">Displayed-frame mapping uses measured preview timestamps with at most 0.5 ms timestamp quantisation. No frame-number/FPS clock conversion is used.</p>
-      {manifest.warnings.length > 0 && <ul className="source-warning" aria-label="Preview fidelity warnings">{manifest.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul>}
-    </>}
-    {clockAnchor?.segment_id === segment.id ? <p className="detail">Saved original-clock anchor: {clockAnchor.utc} at source PTS {clockAnchor.source_pts}, timebase {rational(clockAnchor.time_base)}. Evidence: {clockAnchor.provenance}. This is separate from the preview timer.</p> : <p className="detail">No original-clock anchor for this segment. Real-world survey time is unknown; an anchor on another segment is not propagated.</p>}
+    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300">
+      <div className="flex items-center gap-1">
+        <Button size="sm" variant="secondary" className="h-8" disabled={!enabled || busy || !canPrevious} onClick={() => void start(BigInt(previous) < BigInt(minPTS) ? minPTS : previous)}><ChevronLeft />2 s back</Button>
+        <Button size="sm" variant="secondary" className="h-8" disabled={!enabled || busy || !canNext} onClick={() => void start(next)}>2 s on<ChevronRight /></Button>
+        <Button size="sm" variant="secondary" className="h-8" disabled={!enabled || busy} onClick={() => void start(initialPTS)}><RotateCcw />Window start</Button>
+        {(starting || job?.state === 'running') && <Button size="sm" variant="ghost" className="h-8 text-slate-200" onClick={() => void cancel()}>Cancel preview</Button>}
+      </div>
+      <span role="status">{url ? (loaded ? 'Preview ready' : 'Loading preview...') : ''}{manifest ? ` · clip ${offset(manifest.actual_pts)} to ${clock(ptsSeconds(manifest.actual_pts, minPTS, timeBase) + manifest.preview_duration_ms / 1000)} of this window` : ''}</span>
+    </div>
+    {displayed && <p aria-label="Displayed original frame" className="text-xs text-slate-200">Displayed frame: {offset(displayed.source_pts)} into the window · <span className="font-mono">Displayed source PTS {displayed.source_pts}</span> · source time {rational(displayed.source_time)} s</p>}
+    {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
+    {manifest && manifest.warnings.length > 0 && <details className="text-xs text-slate-400"><summary className="cursor-pointer">About this preview ({manifest.warnings.length} notes)</summary>
+      <ul aria-label="Preview fidelity warnings" className="mt-1 list-disc pl-4">{manifest.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul></details>}
   </section>;
 }

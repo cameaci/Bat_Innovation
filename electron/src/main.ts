@@ -6,6 +6,8 @@ import { ExportSaver } from './export_saver';
 import type { NewSession } from './contracts';
 
 const UI_URL = 'app://bat/index.html';
+/** The UI document, ignoring only the in-page route fragment (#/...) used by the renderer's hash router. */
+const isUI = (url: string) => url === UI_URL || url.startsWith(`${UI_URL}#`);
 const repoRoot = resolve(__dirname, '../..');
 // A packaged build keeps the frozen backend and the built UI beside the executable, never in the checkout.
 const installRoot = app.isPackaged ? dirname(process.execPath) : repoRoot;
@@ -66,7 +68,7 @@ if (configuredData !== undefined) {
 }
 
 function trusted(event: IpcMainInvokeEvent): void {
-  if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== UI_URL) {
+  if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || !isUI(event.senderFrame.url)) {
     throw new Error('IPC is restricted to the application main frame.');
   }
 }
@@ -122,8 +124,8 @@ async function open(): Promise<void> {
     webPreferences: { preload: join(__dirname, 'preload.js'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, webviewTag: false, spellcheck: false },
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  window.webContents.on('will-navigate', (event, url) => { if (url !== UI_URL) event.preventDefault(); });
-  window.webContents.on('will-frame-navigate', (event) => { if (!event.isMainFrame || event.url !== UI_URL) event.preventDefault(); });
+  window.webContents.on('will-navigate', (event, url) => { if (!isUI(url)) event.preventDefault(); });
+  window.webContents.on('will-frame-navigate', (event) => { if (!event.isMainFrame || !isUI(event.url)) event.preventDefault(); });
   window.webContents.on('will-redirect', (event) => event.preventDefault());
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
   window.on('close', event => { if (!confirmDiscard()) event.preventDefault(); });

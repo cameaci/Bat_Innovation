@@ -18,7 +18,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from . import store, summary_store
+from . import qa_store, review_store, store, summary_store
 from .imports import ImportErrorResponse, ImportJobs, source_state
 from .preview import PreviewJobs
 from .summary_jobs import SummaryJobs
@@ -161,7 +161,13 @@ def create_app(settings: Settings) -> FastAPI:
     if len(settings.api_token) < 32:
         raise RuntimeError("A per-launch API token of at least 32 characters is required")
     db_path = settings.data_dir / "bat_innovation.sqlite3"
+    fresh = not db_path.exists()
     store.initialise(db_path)
+    if fresh:
+        # A database created by this launch holds nothing to preserve, so it starts at the current schema.
+        # An existing database is only ever upgraded by an explicit user action.
+        for upgrade in (store.upgrade_media, summary_store.upgrade, review_store.upgrade, qa_store.upgrade):
+            upgrade(db_path)
     activity_lock = Lock()
     jobs = ImportJobs(db_path, settings.data_dir, activity_lock)
     previews = PreviewJobs(db_path, settings.data_dir, activity_lock)
