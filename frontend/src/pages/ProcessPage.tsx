@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, ArrowDown, ArrowRight, ArrowUp, ChevronDown, FilePlus2, Film, Loader2, Play, Square } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowRight, ArrowUp, ChevronDown, FilePlus2, Film, Loader2, Play, RefreshCw, Square } from 'lucide-react';
 import type { Continuity, MediaSegment, SaveMedia, SummaryWindow } from '../../../electron/src/contracts';
 import { activeRun, CURRENT_SCHEMA, useSurvey } from '../survey';
 import { clock, localDate, rational, span } from '../lib/time';
@@ -17,6 +17,7 @@ import { WindowDialog } from '../components/WindowDialog';
 // Stated on every import; they belong with the source details, not among the warnings.
 const ROUTINE_NOTES = new Set(['Original recording speed is unverified.', 'No original-clock anchor is inferred from media metadata.']);
 
+const sourceBadge: Record<string, string> = { missing_source: 'Source missing', unreadable_source: 'Source unreadable', changed_source: 'Source changed' };
 const sourceProblem: Record<string, string> = {
   missing_source: 'Original missing. Restore it to its original location and refresh.',
   unreadable_source: 'Original cannot be read. Check file permissions or the drive.',
@@ -92,7 +93,10 @@ function VideosCard({ disabled }: { disabled: boolean }) {
         <CardTitle id="videos-heading">Videos</CardTitle>
         <CardDescription>Original .MTS or .MP4 files, in recording order. They are read, never copied or changed.</CardDescription>
       </div>
-      <Button onClick={() => void survey.chooseVideos()} disabled={locked || dirty}><FilePlus2 />Add videos</Button>
+      <div className="flex shrink-0 gap-2">
+        <Button variant="outline" size="icon" aria-label="Refresh videos" title="Check the original files again" onClick={() => void survey.refreshMedia()} disabled={dirty}><RefreshCw /></Button>
+        <Button onClick={() => void survey.chooseVideos()} disabled={locked || dirty}><FilePlus2 />Add videos</Button>
+      </div>
     </CardHeader>
     <CardContent className="space-y-4">
       {importJob && importing && <div className="space-y-2 rounded-lg border bg-muted/40 p-3" role="status" aria-label="Import progress">
@@ -114,7 +118,7 @@ function VideosCard({ disabled }: { disabled: boolean }) {
                 <p className="text-xs text-muted-foreground">{clock(segment.metadata.elapsed_end ?? segment.metadata.elapsed_last_time)} · {segment.metadata.width}×{segment.metadata.height} · {segment.metadata.codec} · {segment.metadata.frame_count} frames</p>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                {segment.source_state === 'ready' ? <Badge variant="success">Ready</Badge> : <Badge variant="danger">{segment.source_state.replace('_source', '')}</Badge>}
+                {segment.source_state === 'ready' ? <Badge variant="success">Ready</Badge> : <Badge variant="danger">{sourceBadge[segment.source_state]}</Badge>}
                 <Button size="icon" variant="ghost" className="h-8 w-8" aria-label={`Move ${segment.metadata.filename} up`} disabled={locked || index === 0} onClick={() => move(index, -1)}><ArrowUp /></Button>
                 <Button size="icon" variant="ghost" className="h-8 w-8" aria-label={`Move ${segment.metadata.filename} down`} disabled={locked || index === segments.length - 1} onClick={() => move(index, 1)}><ArrowDown /></Button>
               </div>

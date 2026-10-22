@@ -29,10 +29,10 @@ export function SurveysPage() {
       const api = getAPI();
       if (!api) { setError('The desktop bridge is unavailable. Open this window through the Bat Innovation app.'); return; }
       const ready = await api.health();
-      if (!ready.ok) { setError(ready.error.message); return; }
+      if (!ready.ok) { setError(ready.error.code === 'unavailable' ? `Backend unavailable. ${ready.error.message}` : ready.error.message); return; }
       setHealth(ready.value);
       const listed = await api.listSessions();
-      if (!listed.ok) { setError(listed.error.message); setHealth(null); return; }
+      if (!listed.ok) { setError(listed.error.code === 'unavailable' ? `Backend unavailable. ${listed.error.message}` : listed.error.message); setHealth(null); return; }
       setSessions(listed.value);
     } catch { setError(unavailable); }
     finally { setLoading(false); }
@@ -44,7 +44,7 @@ export function SurveysPage() {
       actions={<>
         <span role="status" className="flex items-center gap-1.5 text-sm text-muted-foreground">
           {loading ? <><RefreshCw className="h-4 w-4 animate-spin" />Checking backend...</>
-            : health ? <><CircleCheck className="h-4 w-4 text-emerald-600" />Backend ready<span className="sr-only">.</span><span className="hidden lg:inline"> · SQLite storage ready.</span></>
+            : health ? <><CircleCheck className="h-4 w-4 text-emerald-600" /><span>Backend ready</span><span aria-hidden>·</span><span>SQLite storage ready.</span></>
             : <><CircleX className="h-4 w-4 text-red-600" />Backend not ready</>}
         </span>
         <Button variant="outline" onClick={() => void refresh()} disabled={loading}><RefreshCw />Refresh</Button>

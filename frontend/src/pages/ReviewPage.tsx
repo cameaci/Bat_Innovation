@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Eye, RefreshCw } from 'lucide-react';
 import type { SummaryWindow } from '../../../electron/src/contracts';
 import { activeRun, useSurvey } from '../survey';
 import { localDate, span } from '../lib/time';
@@ -46,7 +46,8 @@ export function ReviewPage() {
   const qa = run?.qa_progress;
 
   return <>
-    <PageHeader title="Review" subtitle="Open each window, watch the original video and record what you saw. Every window needs a decision, including quiet ones." />
+    <PageHeader title="Review" subtitle="Open each window, watch the original video and record what you saw. Every window needs a decision, including quiet ones."
+      actions={<Button variant="outline" disabled={survey.dirty} onClick={() => { void survey.refreshMedia(); survey.reloadRun(); }}><RefreshCw />Refresh</Button>} />
     <PageBody>
       <Messages error={survey.error} notice={survey.notice} />
       {!run && <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">No motion summaries yet. <Link to={`/surveys/${survey.session.id}/process`} className="font-medium text-primary hover:underline">Generate them on the Process page.</Link></CardContent></Card>}
@@ -106,7 +107,8 @@ function WindowCard({ window, name, verified, onOpen }: { window: SummaryWindow;
       </div>
       <div className="flex flex-wrap gap-1 px-1 pb-1">
         <Badge variant={decision === 'unreviewed' ? 'outline' : decision === 'reviewed_with_observations' ? 'info' : 'success'}>{decisionText[decision]}{(window.review?.observation_count ?? 0) > 0 ? ` (${window.review?.observation_count})` : ''}</Badge>
-        {window.status !== 'complete' && <Badge variant="danger">{window.status}</Badge>}
+        {window.status !== 'complete' && <Badge variant="danger" title={window.error?.message}>{window.status}{window.error ? `: ${window.error.code.replaceAll('_', ' ')}` : ''}</Badge>}
+        {window.source_state && window.source_state !== 'ready' && <Badge variant="danger">{window.source_state.replace('_source', '')} source</Badge>}
         {window.review?.needs_reverification && <Badge variant="warning">Re-check</Badge>}
         {flags.length > 0 && <Badge variant="warning" title={flags.join(', ')}><AlertTriangle className="h-3 w-3" />{flags.length} flag{flags.length === 1 ? '' : 's'}</Badge>}
         {window.qa && window.qa.status !== 'pending' && <Badge variant="outline">QA {window.qa.status.replaceAll('_', ' ')}</Badge>}

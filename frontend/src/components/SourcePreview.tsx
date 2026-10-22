@@ -27,6 +27,7 @@ export function SourcePreview({ segment, initialPTS, minPTS, maxPTS, enabled, di
   onDisplayedFrame?: (frame: DisplayedSourceFrame | null) => void;
 }) {
   const [sourcePTS, setSourcePTS] = useState(initialPTS);
+  const [exact, setExact] = useState(initialPTS);
   const [job, setJob] = useState<PreviewJob | null>(null);
   const [starting, setStarting] = useState(false);
   const [pendingCancellation, setPendingCancellation] = useState<string | null>(null);
@@ -101,7 +102,7 @@ export function SourcePreview({ segment, initialPTS, minPTS, maxPTS, enabled, di
   async function start(requested: string) {
     invalidate();
     setError(''); setNotice('');
-    setSourcePTS(requested);
+    setSourcePTS(requested); setExact(requested);
     const ticket = generation.current;
     setStarting(true);
     try {
@@ -304,12 +305,27 @@ export function SourcePreview({ segment, initialPTS, minPTS, maxPTS, enabled, di
         <Button size="sm" variant="secondary" className="h-8" disabled={!enabled || busy || !canPrevious} onClick={() => void start(BigInt(previous) < BigInt(minPTS) ? minPTS : previous)}><ChevronLeft />2 s back</Button>
         <Button size="sm" variant="secondary" className="h-8" disabled={!enabled || busy || !canNext} onClick={() => void start(next)}>2 s on<ChevronRight /></Button>
         <Button size="sm" variant="secondary" className="h-8" disabled={!enabled || busy} onClick={() => void start(initialPTS)}><RotateCcw />Window start</Button>
-        {(starting || job?.state === 'running') && <Button size="sm" variant="ghost" className="h-8 text-slate-200" onClick={() => void cancel()}>Cancel preview</Button>}
+        {(starting || job) && <Button size="sm" variant="ghost" className="h-8 text-slate-200" onClick={() => void cancel()}>Cancel preview</Button>}
       </div>
-      <span role="status">{url ? (loaded ? 'Preview ready' : 'Loading preview...') : ''}{manifest ? ` · clip ${offset(manifest.actual_pts)} to ${clock(ptsSeconds(manifest.actual_pts, minPTS, timeBase) + manifest.preview_duration_ms / 1000)} of this window` : ''}</span>
+      <span role="status">{url && <span>{loaded ? 'Preview ready' : 'Loading preview...'}</span>}{manifest && <span> · clip {offset(manifest.actual_pts)} to {clock(ptsSeconds(manifest.actual_pts, minPTS, timeBase) + manifest.preview_duration_ms / 1000)} of this window</span>}</span>
     </div>
     {displayed && <p aria-label="Displayed original frame" className="text-xs text-slate-200">Displayed frame: {offset(displayed.source_pts)} into the window · <span className="font-mono">Displayed source PTS {displayed.source_pts}</span> · source time {rational(displayed.source_time)} s</p>}
     {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
+    <details className="text-xs text-slate-300">
+      <summary className="cursor-pointer text-slate-400">Exact position</summary>
+      <form className="mt-2 flex flex-wrap items-end gap-2" onSubmit={event => { event.preventDefault(); if (/^-?\d+$/.test(exact.trim())) void start(exact.trim()); else setError('Enter an integer source PTS.'); }}>
+        <label className="space-y-1"><span className="block">Source PTS</span>
+          <input value={exact} onChange={event => setExact(event.target.value)} inputMode="numeric" autoComplete="off" className="h-8 w-48 rounded-md border border-slate-600 bg-slate-900 px-2 font-mono text-slate-100" /></label>
+        <Button type="submit" size="sm" variant="secondary" className="h-8" disabled={!enabled || busy}>Create preview</Button>
+        <span className="text-slate-400">Timebase {rational(timeBase)} s; this window starts at PTS {minPTS}. A PTS between frames shows the next frame.</span>
+      </form>
+      {manifest && <dl className="mt-2 grid grid-cols-[auto,1fr] gap-x-3 gap-y-0.5">
+        <dt className="text-slate-400">Requested / actual first source PTS</dt><dd>{manifest.requested_pts} / {manifest.actual_pts}</dd>
+        <dt className="text-slate-400">Seek delta (seconds)</dt><dd>{rational(manifest.seek_error)}</dd>
+        <dt className="text-slate-400">Clip source start / end (seconds)</dt><dd>{rational(manifest.source_start)} / {rational(manifest.source_end)}</dd>
+        {displayed && <><dt className="text-slate-400">Displayed segment elapsed (seconds)</dt><dd>{rational(displayed.elapsed)}</dd></>}
+      </dl>}
+    </details>
     {manifest && manifest.warnings.length > 0 && <details className="text-xs text-slate-400"><summary className="cursor-pointer">About this preview ({manifest.warnings.length} notes)</summary>
       <ul aria-label="Preview fidelity warnings" className="mt-1 list-disc pl-4">{manifest.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul></details>}
   </section>;

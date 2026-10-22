@@ -2,15 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Theme tokens follow Camera_Trap's shadcn/ui variables. The primary colour is a neutral
-   dark teal rather than Camera_Trap's brand red: this tool is not a WSP-branded product. */
+/* Theme tokens follow Camera_Trap's shadcn/ui variables, including its WSP red primary colour. */
 @layer base {
   :root {
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
     --card: 0 0% 100%;
     --card-foreground: 222.2 84% 4.9%;
-    --primary: 168 55% 26%;
+    --primary: 2 75% 52%;           /* #E02F28, as in Camera_Trap */
     --primary-foreground: 210 40% 98%;
     --secondary: 210 40% 96.1%;
     --secondary-foreground: 222.2 47.4% 11.2%;
@@ -22,7 +21,7 @@
     --destructive-foreground: 210 40% 98%;
     --border: 214.3 31.8% 91.4%;
     --input: 214.3 31.8% 91.4%;
-    --ring: 168 55% 26%;
+    --ring: 2 75% 52%;
     --radius: 0.5rem;
   }
   * { @apply border-border; }
