@@ -4,10 +4,10 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { expect, type Locator } from '@playwright/test';
 import type { BatAPI, MediaSession, SummaryDetail, WindowQA, WindowReview, QAHistory } from '../src/contracts';
-import type { RunningShell } from './shell-helpers';
+import { cleanup, type RunningShell } from './shell-helpers';
 
 /** Run one synthetic fixture generator (never real media) and return its name -> path map. */
-export function fixtures<T extends string>(script: 'media_fixtures' | 'summary_fixtures' | 'preview_fixtures', directory: string): Record<T, string> {
+export function fixtures<T extends string>(script: 'media_fixtures' | 'summary_fixtures' | 'preview_fixtures' | 'gallery_fixtures', directory: string): Record<T, string> {
   const result = spawnSync(process.env.BAT_PYTHON ?? 'python', ['-m', `backend.tests.${script}`, directory],
     { cwd: resolve('.'), encoding: 'utf8', timeout: 45_000 });
   expect(result.status, result.stderr || `${script} failed`).toBe(0);
@@ -94,6 +94,47 @@ export async function previewReady(view: Locator): Promise<void> {
   await expect(view.getByText('Preview ready', { exact: true })).toBeVisible({ timeout: 30_000 });
   await expect(view.getByLabel('Derived source preview', { exact: true })).toBeVisible();
   await expect(view.getByText(/^Watch the original video/)).toHaveCount(0);
+}
+
+/** Open the window card at this gallery position. */
+export async function openAt(shell: RunningShell, index: number): Promise<Locator> {
+  await windowCards(shell).nth(index).getByRole('button').click();
+  const opened = dialog(shell);
+  await expect(opened).toBeVisible();
+  return opened;
+}
+
+export async function closeWindow(view: Locator): Promise<void> {
+  await view.getByRole('button', { name: 'Close window', exact: true }).click();
+  await expect(view).toBeHidden();
+}
+
+/** Open a collapsed <details> section by its summary text (idempotent). */
+export async function expand(view: Locator, summary: string): Promise<void> {
+  const details = view.locator(`xpath=.//details[summary[normalize-space()="${summary}"]]`);
+  if (!(await details.evaluate(element => (element as HTMLDetailsElement).open))) await details.locator('xpath=./summary').click();
+}
+
+/** The Review page progress line, for example "1 of 6 windows". */
+export const reviewProgress = (shell: RunningShell, reviewed: number, total: number) =>
+  shell.page.getByRole('status').filter({ hasText: new RegExp(`^${reviewed} of ${total} windows$`) });
+
+/** Create a survey, add originals, summarise them and land on the Review page. */
+export async function preparedReview(shell: RunningShell, paths: string[], name: string): Promise<string> {
+  const sessionID = await createSurvey(shell, name, 'Synthetic review camera');
+  await addVideos(shell, paths);
+  await summarize(shell);
+  await goTo(shell, 'Review');
+  return sessionID;
+}
+
+/** Fail-safe teardown: accept any pending native or in-page discard prompt, then stop the app. */
+export async function cleanupDraftShell(shell: RunningShell | undefined): Promise<void> {
+  if (shell) await shell.application.evaluate(({ dialog }) => {
+    dialog.showMessageBoxSync = (() => 1) as typeof dialog.showMessageBoxSync;
+  }).catch(() => undefined);
+  if (shell) await shell.page.evaluate(() => { window.confirm = () => true; }).catch(() => undefined);
+  await cleanup(shell);
 }
 
 export async function displayedPTS(view: Locator): Promise<string | null> {

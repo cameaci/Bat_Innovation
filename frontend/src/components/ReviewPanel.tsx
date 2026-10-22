@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Ban, Check, History, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import type { ProvisionalObservation, ProvisionalObservationInput, ReviewChange, ReviewHistory, SummaryWindow, WindowReview } from '../../../electron/src/contracts';
-import { getAPI } from '../api';
+import { getAPI, whileBusy } from '../api';
 import { displayedPTSFor } from '../sourceFrame';
 import type { WindowSourceFrame } from '../sourceFrame';
 import { clock, seconds } from '../lib/time';
@@ -84,7 +84,9 @@ export const ReviewPanel = forwardRef<ReviewPanelHandle, {
     if (!actor.trim()) { setError('Enter your name or initials as reviewer first.'); return; }
     setSaving(true); setError(''); setNotice('');
     try {
-      const result = await getAPI()?.saveReview(selected.id, { ...change, actor: actor.trim(), expected_revision: review.revision } as ReviewChange);
+      const api = getAPI();
+      // The window's preview briefly holds the media lock while it encodes; wait for it rather than refuse the save.
+      const result = api && await whileBusy('review_busy', () => api.saveReview(selected.id, { ...change, actor: actor.trim(), expected_revision: review.revision } as ReviewChange));
       if (!result?.ok) { setError(result?.error.message ?? unavailable); return; }
       readGeneration.current += 1;
       setReview(result.value); setVerifiedHeader(header);

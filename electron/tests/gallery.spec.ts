@@ -1,60 +1,18 @@
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { appendFile, mkdtemp, readFile, rename, rm } from 'node:fs/promises';
+import { appendFile, mkdtemp, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, join } from 'node:path';
 import { expect, test, type Locator } from '@playwright/test';
-import type { BatAPI, ReviewHistory, SummaryDetail, WindowReview } from '../src/contracts';
-import { cleanup, launch, quit, type RunningShell } from './shell-helpers';
+import type { BatAPI, ReviewHistory } from '../src/contracts';
+import { launch, quit, type RunningShell } from './shell-helpers';
+import { cleanupDraftShell, closeWindow, digests, displayedPTS, expand, fixtures, goTo, latestRun, openAt, preparedReview, previewReady,
+  reviewProgress, savedReview as review, windowCards as cards } from './ui-helpers';
 
-type Fixtures = Record<'quiet_240' | 'vfr_65' | 'earlier_9' | 'empty_middle' | 'brightness_9', string>;
+type Fixture = 'quiet_240' | 'vfr_65' | 'earlier_9' | 'empty_middle' | 'brightness_9';
 type BlobCounts = { live: number; peak: number; created: number; revoked: number; imageLive: number; videoLive: number };
 type BinaryCounts = { active: number; peak: number; images: number; previews: number; collisions: number; manifests: number };
-
-function sources(directory: string): Fixtures {
-  const result = spawnSync(process.env.BAT_PYTHON ?? 'python', ['-m', 'backend.tests.gallery_fixtures', directory], {
-    cwd: resolve('.'), encoding: 'utf8', timeout: 45_000,
-  });
-  expect(result.status, result.stderr || 'Synthetic gallery fixture generation failed').toBe(0);
-  return JSON.parse(result.stdout) as Fixtures;
-}
-
-async function prepared(shell: RunningShell, originals: string[]): Promise<string> {
-  await shell.page.getByRole('button', { name: 'Create session', exact: true }).click();
-  await shell.page.getByRole('button', { name: 'Inspect media', exact: true }).click();
-  await shell.page.getByRole('button', { name: 'Upgrade media storage', exact: true }).click();
-  // Only the physical picker return is substituted. Import, decoding and persistence are real.
-  await shell.application.evaluate(({ dialog }, files) => {
-    dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: files })) as typeof dialog.showOpenDialog;
-  }, originals);
-  await shell.page.getByRole('button', { name: 'Choose original videos', exact: true }).click();
-  await expect(shell.page.getByRole('article', { name: /^Segment / })).toHaveCount(originals.length);
-  await shell.page.getByRole('button', { name: 'Upgrade summary storage', exact: true }).click();
-  await shell.page.getByRole('button', { name: 'Generate motion summaries', exact: true }).click();
-  await expect(shell.page.getByRole('status').filter({ hasText: /^Run (complete|incomplete):/ })).toBeVisible();
-  await shell.page.getByRole('button', { name: 'Upgrade review storage', exact: true }).click();
-  await expect(shell.page.getByRole('heading', { name: 'Manual first review', exact: true })).toBeVisible();
-  const sessions = await shell.page.evaluate(() => (window as unknown as { batAPI: BatAPI }).batAPI.listSessions());
-  if (!sessions.ok) throw new Error(sessions.error.message);
-  return sessions.value[0]!.id;
-}
-
-async function latest(shell: RunningShell, sessionID: string): Promise<SummaryDetail> {
-  const result = await shell.page.evaluate(async id => {
-    const api = (window as unknown as { batAPI: BatAPI }).batAPI;
-    const runs = await api.listSummaryRuns(id);
-    if (!runs.ok) return runs;
-    return api.summaryRun(runs.value[0]!.id);
-  }, sessionID);
-  if (!result.ok) throw new Error(result.error.message);
-  return result.value;
-}
-
-async function review(shell: RunningShell, windowID: string): Promise<WindowReview> {
-  const result = await shell.page.evaluate(id => (window as unknown as { batAPI: BatAPI }).batAPI.getWindowReview(id), windowID);
-  if (!result.ok) throw new Error(result.error.message);
-  return result.value;
-}
+const SURVEY = 'Synthetic gallery survey';
+const PAGE = 24;
 
 async function history(shell: RunningShell, windowID: string): Promise<ReviewHistory> {
   const result = await shell.page.evaluate(id => (window as unknown as { batAPI: BatAPI }).batAPI.reviewHistory(id, 0), windowID);
@@ -62,28 +20,22 @@ async function history(shell: RunningShell, windowID: string): Promise<ReviewHis
   return result.value;
 }
 
-async function cleanupDraft(shell: RunningShell | undefined): Promise<void> {
-  if (shell) await shell.application.evaluate(({ dialog }) => {
-    dialog.showMessageBoxSync = (() => 1) as typeof dialog.showMessageBoxSync;
-  }).catch(() => undefined);
-  await cleanup(shell);
+/** Whole-second clock text as the UI shows it (m:ss, or h:mm:ss from one hour). */
+function clock(total: number): string {
+  const hours = Math.floor(total / 3600), minutes = Math.floor((total % 3600) / 60), secs = total % 60;
+  return `${hours ? `${hours}:${String(minutes).padStart(2, '0')}` : minutes}:${String(secs).padStart(2, '0')}`;
 }
 
-function cards(shell: RunningShell): Locator {
-  return shell.page.getByRole('list', { name: /^(All|Filtered) planned windows$/ }).getByRole('article');
+function filter(shell: RunningShell, label: string): Locator {
+  return shell.page.getByRole('toolbar', { name: 'Window filter', exact: true }).getByRole('button', { name: new RegExp(`^${label} \\d+$`) });
 }
 
-function inspection(shell: RunningShell): Locator {
-  return shell.page.getByLabel('Selected summary window', { exact: true });
+async function filterCount(shell: RunningShell, label: string): Promise<number> {
+  return Number(/(\d+)$/.exec((await filter(shell, label).textContent()) ?? '')?.[1]);
 }
 
 async function refresh(shell: RunningShell): Promise<void> {
-  await shell.page.getByRole('button', { name: 'Refresh summary runs', exact: true }).click();
-  await expect(shell.page.getByRole('status').filter({ hasText: /^Loading summary runs/ })).not.toBeVisible();
-}
-
-async function displayedPTS(shell: RunningShell): Promise<string | null> {
-  return shell.page.getByText('Displayed source PTS', { exact: true }).evaluate(element => element.nextElementSibling?.textContent ?? null);
+  await shell.page.getByRole('button', { name: 'Refresh', exact: true }).click();
 }
 
 async function monitor(shell: RunningShell): Promise<void> {
@@ -151,71 +103,67 @@ test.skip(process.platform !== 'linux', 'Gallery media and Electron lifecycle ac
 test('gallery filters preserve every-window progress and exact displayed source PTS without losing drafts', async () => {
   test.setTimeout(150_000);
   const directory = await mkdtemp(join(tmpdir(), 'bat-gallery-review-'));
-  const fixtures = sources(join(directory, 'originals'));
-  const originals = [fixtures.vfr_65, fixtures.earlier_9, fixtures.empty_middle, fixtures.brightness_9];
-  const originalHashes = await Promise.all(originals.map(async path => createHash('sha256').update(await readFile(path)).digest('hex')));
+  const sources = fixtures<Fixture>('gallery_fixtures', join(directory, 'originals'));
+  const originals = [sources.vfr_65, sources.earlier_9, sources.empty_middle, sources.brightness_9];
+  const originalHashes = await digests(originals);
   let shell: RunningShell | undefined;
   try {
     shell = await launch(join(directory, 'data'));
-    const sessionID = await prepared(shell, originals);
-    const run = await latest(shell, sessionID);
+    const sessionID = await preparedReview(shell, originals, SURVEY);
+    const run = await latestRun(shell, sessionID);
     expect(run.windows).toHaveLength(8);
     expect(BigInt(run.windows[3]!.stats.first_pts!)).toBeLessThan(BigInt(run.windows[0]!.stats.first_pts!));
-    const expectedNames = run.windows.map(row => `Window ${row.index + 1}: ${basename(originals[[run.windows[0]!.segment_id, run.windows[3]!.segment_id, run.windows[4]!.segment_id, run.windows[7]!.segment_id].indexOf(row.segment_id)]!)}`);
+    // Every window stays in run order, each named by its own original file.
+    const segments = [run.windows[0]!.segment_id, run.windows[3]!.segment_id, run.windows[4]!.segment_id, run.windows[7]!.segment_id];
+    const files = run.windows.map(row => basename(originals[segments.indexOf(row.segment_id)]!));
     await expect(cards(shell)).toHaveCount(8);
-    expect(await cards(shell).evaluateAll(elements => elements.map(element => element.getAttribute('aria-label')))).toEqual(expectedNames);
-    await expect(cards(shell).first()).toContainText('[0/1, 30/1)');
-    await expect(cards(shell).nth(2)).toContainText('[60/1, 65/1)');
-    await expect(cards(shell).first()).toContainText('No motion evidence above threshold.');
-    await expect(cards(shell).nth(5)).toContainText('no_decoded_frames');
+    const labels = await cards(shell).evaluateAll(elements => elements.map(element => element.getAttribute('aria-label') ?? ''));
+    expect(labels.map(label => label.replace(/^Window .* of /, ''))).toEqual(files);
+    expect(labels[0]).toBe(`Window 0:00 - 0:30 of ${files[0]}`);
+    expect(labels[2]).toBe(`Window 1:00 - 1:05 of ${files[2]}`);
+    await expect(cards(shell).nth(5)).toContainText(/incomplete: no decoded frames/);
     expect((await review(shell, run.windows[0]!.id)).revision).toBe(0);
 
-    const selectedHeading = inspection(shell).getByRole('heading', { name: 'Inspect window 1', exact: true });
-    await selectedHeading.focus();
-    await shell.page.keyboard.press('ArrowRight');
-    await expect(inspection(shell).getByRole('heading', { name: 'Inspect window 2', exact: true })).toBeVisible();
-    await inspection(shell).getByRole('heading', { name: 'Inspect window 2', exact: true }).focus();
-    await shell.page.keyboard.press('ArrowLeft');
-    await expect(selectedHeading).toBeVisible();
-    await selectedHeading.focus();
-    await shell.page.keyboard.press('g');
-    await expect(cards(shell).first()).toHaveAttribute('aria-current', 'true');
-    await cards(shell).first().getByRole('button', { name: 'Inspect summary', exact: true }).click();
+    const view = await openAt(shell, 0);
+    await expect(view.getByText('No motion evidence above threshold.', { exact: true })).toBeVisible();
+    // Arrow keys move between windows unless focus is in a form control, disclosure or editable element.
+    const close = view.getByRole('button', { name: 'Close window', exact: true });
+    await close.focus(); await shell.page.keyboard.press('ArrowRight');
+    await expect(view.getByText('2 of 8', { exact: true })).toBeVisible();
+    await close.focus(); await shell.page.keyboard.press('ArrowLeft');
+    await expect(view.getByText('1 of 8', { exact: true })).toBeVisible();
 
-    await shell.page.getByLabel('Reviewer label', { exact: true }).fill('Synthetic gallery reviewer');
-    await shell.page.getByRole('button', { name: 'Add provisional observation', exact: true }).click();
-    const startInput = shell.page.getByLabel('Observation start source PTS', { exact: true });
-    const endInput = shell.page.getByLabel('Observation end source PTS (exclusive)', { exact: true });
-    const notes = shell.page.getByLabel('Observation notes', { exact: true });
+    await view.getByLabel('Reviewer', { exact: true }).fill('Synthetic gallery reviewer');
+    await view.getByRole('button', { name: /^Add observation/ }).click();
+    await expand(view, 'Exact source PTS');
+    const startInput = view.getByLabel('Observation start source PTS', { exact: true });
+    const endInput = view.getByLabel('Observation end source PTS (exclusive)', { exact: true });
+    const notes = view.getByLabel('Notes', { exact: true });
     await notes.fill('Retain this gallery draft');
-    for (const name of ['Next window', 'Next unreviewed window', 'Return to gallery', 'Next gallery page', 'Refresh summary runs', 'Generate motion summaries']) {
-      await expect(shell.page.getByRole('button', { name, exact: true })).toBeDisabled();
-    }
-    await expect(shell.page.getByLabel('Window filter', { exact: true })).toBeDisabled();
-    await expect(shell.page.getByLabel('Processing run', { exact: true })).toBeDisabled();
-    await expect(cards(shell).last().getByRole('button', { name: 'Inspect summary', exact: true })).toBeDisabled();
     await notes.press('ArrowRight'); await notes.press('u'); await notes.press('g');
     await expect(notes).toHaveValue('Retain this gallery draftug');
-    await expect(selectedHeading).toBeVisible();
-    await shell.page.getByLabel('Provisional visual category', { exact: true }).focus();
+    await view.getByLabel('What moved', { exact: true }).focus();
     await shell.page.keyboard.press('ArrowRight'); await shell.page.keyboard.press('u');
-    await expect(selectedHeading).toBeVisible();
-    await expect(shell.page.getByRole('button', { name: 'Use displayed PTS as start', exact: true })).toBeDisabled();
-    await cards(shell).first().getByRole('button', { name: 'Preview window source', exact: true }).click();
-    await expect(shell.page.getByLabel('Source PTS', { exact: true })).toHaveValue(run.windows[0]!.preview_pts!);
-    await shell.page.getByRole('button', { name: 'Create preview', exact: true }).click();
-    await expect(shell.page.getByText('Preview ready', { exact: true })).toBeVisible();
-    const useStart = shell.page.getByRole('button', { name: 'Use displayed PTS as start', exact: true });
-    const useEnd = shell.page.getByRole('button', { name: 'Use displayed PTS as exclusive end', exact: true });
+    await expect(view.getByText('1 of 8', { exact: true })).toBeVisible();
+    // With a draft open, window navigation is refused and the draft stays.
+    await close.focus(); await shell.page.keyboard.press('ArrowRight');
+    await expect(view.getByRole('alert').filter({ hasText: 'Save or discard your changes before moving to another window.' })).toBeVisible();
+    await expect(view.getByText('1 of 8', { exact: true })).toBeVisible();
+    await expect(notes).toHaveValue('Retain this gallery draftug');
+
+    await previewReady(view);
+    const useStart = view.getByRole('button', { name: 'Use current frame as start', exact: true });
+    const useEnd = view.getByRole('button', { name: 'Use current frame as end', exact: true });
     await expect(useStart).toBeEnabled();
-    const start = await displayedPTS(shell);
+    const start = await displayedPTS(view);
     expect(start).toBe(run.windows[0]!.preview_pts);
     await useStart.click();
     await expect(startInput).toHaveValue(start!);
-    await shell.page.getByLabel('Derived source preview', { exact: true }).evaluate(element => { (element as HTMLVideoElement).currentTime = 0.24; });
-    await expect.poll(() => displayedPTS(shell!)).not.toBe(start);
+    const video = view.getByLabel('Derived source preview', { exact: true });
+    await video.evaluate(element => { (element as HTMLVideoElement).currentTime = 0.24; });
+    await expect.poll(() => displayedPTS(view)).not.toBe(start);
     await expect(useEnd).toBeEnabled();
-    const end = await displayedPTS(shell);
+    const end = await displayedPTS(view);
     // The generated source has an explicit frame at 240 ms, independent of nominal FPS.
     const timeBase = run.windows[0]!.time_base;
     const ticks = 240n * BigInt(timeBase.den), divisor = 1000n * BigInt(timeBase.num);
@@ -223,89 +171,85 @@ test('gallery filters preserve every-window progress and exact displayed source 
     expect(end).toBe(String(BigInt(start!) + ticks / divisor));
     // A paused seek may present its frame callback before seeked. Both directions must
     // restore the exact mapping without a second playback callback or a stale receipt.
-    await shell.page.getByLabel('Derived source preview', { exact: true }).evaluate(element => { (element as HTMLVideoElement).currentTime = 0; });
-    await expect.poll(() => displayedPTS(shell!)).toBe(start);
+    await video.evaluate(element => { (element as HTMLVideoElement).currentTime = 0; });
+    await expect.poll(() => displayedPTS(view)).toBe(start);
     await expect(useStart).toBeEnabled();
-    await shell.page.getByLabel('Derived source preview', { exact: true }).evaluate(element => { (element as HTMLVideoElement).currentTime = 0.24; });
-    await expect.poll(() => displayedPTS(shell!)).toBe(end);
-    await expect(useEnd).toBeEnabled();
+    await video.evaluate(element => { (element as HTMLVideoElement).currentTime = 0.24; });
+    await expect.poll(() => displayedPTS(view)).toBe(end);
     await useEnd.click();
     await expect(endInput).toHaveValue(end!);
     expect((await review(shell, run.windows[0]!.id)).revision).toBe(0);
     expect((await history(shell, run.windows[0]!.id)).events).toEqual([]);
-    await shell.page.getByRole('button', { name: 'Save observation', exact: true }).click();
-    await expect(shell.page.getByRole('list', { name: 'Saved provisional observations', exact: true })).toContainText('Count unknown');
-    await shell.page.getByRole('button', { name: 'Mark reviewed with observations', exact: true }).click();
-    await expect(shell.page.getByRole('status').filter({ hasText: /^First review progress: 1\/8 reviewed;/ })).toBeVisible();
-    await shell.page.getByRole('button', { name: 'Close preview', exact: true }).click();
+    await view.getByRole('button', { name: 'Save observation', exact: true }).click();
+    await expect(view.getByRole('list', { name: 'Saved provisional observations', exact: true })).toContainText('Count unknown');
+    await view.getByRole('button', { name: 'Mark reviewed with observations', exact: true }).click();
+    await expect.poll(async () => (await review(shell!, run.windows[0]!.id)).decision).toBe('reviewed_with_observations');
     const saved = await review(shell, run.windows[0]!.id);
     expect(saved.observations[0]).toMatchObject({ start_pts: start, end_pts: end, count: null });
     const audit = await history(shell, run.windows[0]!.id);
     expect(audit.events).toHaveLength(2);
-    await shell.page.getByRole('button', { name: 'Edit observation', exact: true }).click();
-    await expect(shell.page.getByRole('button', { name: 'Use displayed PTS as start', exact: true })).toBeDisabled();
-    await expect(shell.page.getByRole('button', { name: 'Use displayed PTS as exclusive end', exact: true })).toBeDisabled();
+    await view.getByRole('button', { name: 'Edit observation', exact: true }).click();
+    await expand(view, 'Exact source PTS');
     await expect(endInput).toHaveValue(end!);
-    await shell.page.getByRole('button', { name: 'Discard review draft', exact: true }).click();
+    await view.getByRole('button', { name: 'Cancel', exact: true }).click();
 
-    for (const control of [shell.page.getByRole('button', { name: 'Show review audit history', exact: true }), shell.page.getByLabel('Reviewer label', { exact: true })]) {
+    // Disclosures, modified keys, repeats, composition and editable elements never navigate.
+    await expand(view, 'Unable to assess, undo, history');
+    for (const control of [view.getByLabel('Reviewer', { exact: true }),
+      view.locator('summary', { hasText: 'Unable to assess, undo, history' })]) {
       await control.focus(); await shell.page.keyboard.press('ArrowRight'); await shell.page.keyboard.press('u');
-      await expect(selectedHeading).toBeVisible();
+      await expect(view.getByText('1 of 8', { exact: true })).toBeVisible();
     }
-    await expect(shell.page.getByRole('button', { name: 'Return to gallery', exact: true })).toBeDisabled();
-    await shell.page.getByRole('button', { name: 'Discard review draft', exact: true }).click();
-    await expect(shell.page.getByLabel('Reviewer label', { exact: true })).toHaveValue('Synthetic gallery reviewer');
-    await shell.page.getByRole('button', { name: 'Show review audit history', exact: true }).click();
-    const auditDisclosure = inspection(shell).locator('.review-history summary').first();
-    await expect(auditDisclosure).toBeVisible();
-    await auditDisclosure.focus();
-    await shell.page.keyboard.press('ArrowRight'); await shell.page.keyboard.press('u');
-    await expect(selectedHeading).toBeVisible();
     for (const key of ['Shift+ArrowRight', 'Control+ArrowRight', 'Alt+ArrowRight', 'Meta+ArrowRight']) {
-      await selectedHeading.focus(); await shell.page.keyboard.press(key); await expect(selectedHeading).toBeVisible();
+      await close.focus(); await shell.page.keyboard.press(key); await expect(view.getByText('1 of 8', { exact: true })).toBeVisible();
     }
-    await selectedHeading.evaluate(element => {
+    await close.evaluate(element => {
       element.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, repeat: true }));
-      element.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, isComposing: true }));
       const editable = document.createElement('div'); editable.contentEditable = 'true'; element.parentElement!.append(editable);
       editable.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); editable.remove();
     });
-    await expect(selectedHeading).toBeVisible();
+    await expect(view.getByText('1 of 8', { exact: true })).toBeVisible();
     expect((await history(shell, run.windows[0]!.id)).events).toEqual(audit.events);
-    await selectedHeading.focus(); await shell.page.keyboard.press('u');
-    await expect(inspection(shell).getByRole('heading', { name: 'Inspect window 2', exact: true })).toBeVisible();
-    await shell.page.getByRole('button', { name: 'Previous window', exact: true }).click();
-    await expect(selectedHeading).toBeVisible();
+    await close.focus(); await shell.page.keyboard.press('u');
+    await expect(view.getByText('2 of 8', { exact: true })).toBeVisible();
+    await closeWindow(view);
+    await expect(reviewProgress(shell, 1, 8)).toBeVisible();
 
-    const filter = shell.page.getByLabel('Window filter', { exact: true });
-    const checks = [
-      ['All windows', 8], ['Unreviewed', 7], ['Reviewed', 1], ['Contains observations', 1],
-      ['Quality flagged', run.windows.filter(row => row.flags.length > 0).length], ['Failed/incomplete', 1], ['Requires re-verification', 0],
-    ] as const;
+    const checks = [['All', 8], ['Not reviewed', 7], ['With observations', 1], ['No activity', 0], ['Failed or incomplete', 1], ['Needs re-check', 0]] as const;
     for (const [name, count] of checks) {
-      await filter.selectOption({ label: name });
-      await expect(cards(shell)).toHaveCount(count);
-      await expect(shell.page.getByRole('status').filter({ hasText: /^First review progress: 1\/8 reviewed;/ })).toBeVisible();
+      await filter(shell, name).click();
+      await expect(filter(shell, name)).toHaveAttribute('aria-pressed', 'true');
+      if (count === 0) await expect(shell.page.getByText('No windows match this filter.', { exact: true })).toBeVisible();
+      else await expect(cards(shell)).toHaveCount(count);
+      await expect(reviewProgress(shell, 1, 8), 'Filters never change coverage').toBeVisible();
     }
-    await filter.selectOption({ label: 'All windows' });
-    expect(await Promise.all(originals.map(async path => createHash('sha256').update(await readFile(path)).digest('hex')))).toEqual(originalHashes);
-    await appendFile(fixtures.vfr_65, 'Synthetic changed source');
+    const flagged = await filterCount(shell, 'Flagged');
+    expect(flagged).toBeGreaterThan(0);
+    await filter(shell, 'Flagged').click();
+    await expect(cards(shell)).toHaveCount(flagged);
+    await filter(shell, 'All').click();
+    expect(await digests(originals)).toEqual(originalHashes);
+
+    await appendFile(sources.vfr_65, 'Synthetic changed source');
     await refresh(shell);
-    await filter.selectOption({ label: 'Requires re-verification' });
+    await expect(reviewProgress(shell, 0, 8)).toBeVisible();
+    await filter(shell, 'Needs re-check').click();
     await expect(cards(shell)).toHaveCount(1);
-    await expect(cards(shell).first()).toContainText('changed_source');
-    await expect(shell.page.getByRole('status').filter({ hasText: /^First review progress: 0\/8 reviewed;/ })).toBeVisible();
+    await expect(cards(shell).first()).toContainText('changed source');
     expect((await history(shell, run.windows[0]!.id)).events).toEqual(audit.events);
-    await rename(fixtures.earlier_9, `${fixtures.earlier_9}.missing`);
+    await rename(sources.earlier_9, `${sources.earlier_9}.missing`);
     await refresh(shell);
-    await filter.selectOption({ label: 'All windows' });
-    await expect(cards(shell).nth(3)).toContainText('missing_source');
-    await expect(cards(shell).nth(3).getByRole('button', { name: 'Preview window source', exact: true })).toBeDisabled();
+    await filter(shell, 'All').click();
     await expect(cards(shell)).toHaveCount(8);
+    await expect(cards(shell).nth(3)).toContainText('missing source');
+    const missing = await openAt(shell, 3);
+    await expect(missing.getByText('The original video is missing or changed.', { exact: true })).toBeVisible();
+    await expect(missing.getByLabel('Derived source preview', { exact: true })).toHaveCount(0);
+    await closeWindow(missing);
     await expect(shell.page.locator('body')).not.toContainText(directory);
     await quit(shell); shell = undefined;
   } finally {
-    await cleanupDraft(shell);
+    await cleanupDraftShell(shell);
     await rm(directory, { recursive: true, force: true });
   }
 });
@@ -313,90 +257,83 @@ test('gallery filters preserve every-window progress and exact displayed source 
 test('240 real thirty-second windows keep image requests and Blob lifetimes bounded across gallery pages', async () => {
   test.setTimeout(180_000);
   const directory = await mkdtemp(join(tmpdir(), 'bat-gallery-scale-'));
-  const fixtures = sources(join(directory, 'originals'));
+  const sources = fixtures<Fixture>('gallery_fixtures', join(directory, 'originals'));
+  const name = basename(sources.quiet_240);
+  const label = (index: number) => `Window ${clock(index * 30)} - ${clock(index * 30 + 30)} of ${name}`;
   let shell: RunningShell | undefined;
   try {
     shell = await launch(join(directory, 'data'));
     await monitor(shell);
-    const sessionID = await prepared(shell, [fixtures.quiet_240]);
-    await shell.page.getByRole('button', { name: 'Upgrade QA storage', exact: true }).click();
-    await expect(shell.page.getByRole('status').filter({ hasText: /^Second-review QA coverage: 0\/240 agreed; 0 disagreed; 0 need clarification; 240 pending;/ })).toBeVisible();
-    const run = await latest(shell, sessionID);
+    const sessionID = await preparedReview(shell, [sources.quiet_240], SURVEY);
+    await expect(shell.page.getByText(/^Second review: 0 agreed, .* 240 pending \(of 240\)\.$/)).toBeVisible();
+    const run = await latestRun(shell, sessionID);
     expect(run.counts).toMatchObject({ planned: 240, complete: 240, failed: 0, incomplete: 0 });
     expect(run.windows.at(-1)!.interval.elapsed_end).toEqual({ num: '7200', den: '1' });
-    await expect(cards(shell)).toHaveCount(12);
-    await expect(shell.page.getByRole('status').filter({ hasText: /^First review progress: 0\/240 reviewed;/ })).toBeVisible();
+    await expect(cards(shell)).toHaveCount(PAGE);
+    await expect(reviewProgress(shell, 0, 240)).toBeVisible();
     await cards(shell).first().scrollIntoViewIfNeeded();
-    await expect(cards(shell).first().getByRole('img', { name: 'Summary thumbnail for window 1', exact: true })).toBeVisible();
-    expect((await binaryCounts(shell)).images).toBeLessThanOrEqual(13);
+    await expect(cards(shell).first().getByRole('img', { name: `Motion summary, ${label(0)}`, exact: true })).toBeVisible();
+    // The Process page shows at most 12 thumbnails and the gallery at most one page; nothing else is read.
+    expect((await binaryCounts(shell)).images).toBeLessThanOrEqual(12 + PAGE);
+    expect((await blobCounts(shell)).live).toBeLessThanOrEqual(PAGE);
+
+    // A draft in the window dialog blocks navigation and leaves no audit record when cancelled.
+    const view = await openAt(shell, 0);
+    await view.getByRole('button', { name: /^Add observation/ }).click();
+    const close = view.getByRole('button', { name: 'Close window', exact: true });
+    await close.focus(); await shell.page.keyboard.press('ArrowRight');
+    await expect(view.getByText('1 of 240', { exact: true })).toBeVisible();
+    await view.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await closeWindow(view);
+    expect((await history(shell, run.windows[0]!.id)).events).toEqual([]);
+
     const manifestsBeforePages = (await binaryCounts(shell)).manifests;
     const pageStarted = Date.now();
-    const next = shell.page.getByRole('button', { name: 'Next gallery page', exact: true });
-    await expect(next).toBeEnabled();
-    await shell.page.getByLabel('Reviewer label', { exact: true }).fill('Unsaved scale reviewer');
-    await expect(next).toBeDisabled();
-    await expect(shell.page.getByLabel('Window filter', { exact: true })).toBeDisabled();
-    const firstHeading = inspection(shell).getByRole('heading', { name: 'Inspect window 1', exact: true });
-    await firstHeading.focus(); await shell.page.keyboard.press('ArrowRight');
-    await expect(firstHeading).toBeVisible();
-    await expect(shell.page.getByLabel('Reviewer label', { exact: true })).toHaveValue('Unsaved scale reviewer');
-    await shell.page.getByRole('button', { name: 'Discard review draft', exact: true }).click();
-    await expect(shell.page.getByLabel('Reviewer label', { exact: true })).toHaveValue('');
-    expect((await history(shell, run.windows[0]!.id)).events).toEqual([]);
-    await expect(next).toBeEnabled();
-    for (let page = 2; page <= 20; page += 1) {
+    const next = shell.page.getByRole('button', { name: 'Next page', exact: true });
+    const pages = 240 / PAGE;
+    for (let page = 2; page <= pages; page += 1) {
       await next.click();
-      await expect(cards(shell)).toHaveCount(12);
-      await expect(cards(shell).first()).toHaveAttribute('aria-label', `Window ${(page - 1) * 12 + 1}: ${basename(fixtures.quiet_240)}`);
+      await expect(shell.page.getByText(`Page ${page} of ${pages}`, { exact: true })).toBeVisible();
+      await expect(cards(shell)).toHaveCount(PAGE);
+      await expect(cards(shell).first()).toHaveAttribute('aria-label', label((page - 1) * PAGE));
       await cards(shell).first().scrollIntoViewIfNeeded();
       await expect(cards(shell).first().getByRole('img')).toBeVisible();
-      expect((await blobCounts(shell)).live).toBeLessThanOrEqual(13);
+      expect((await blobCounts(shell)).live).toBeLessThanOrEqual(PAGE);
     }
     await expect(next).toBeDisabled();
     expect((await binaryCounts(shell)).manifests - manifestsBeforePages).toBeLessThanOrEqual(Math.ceil((Date.now() - pageStarted) / 30000));
-    await expect(cards(shell).last()).toContainText('[7170/1, 7200/1)');
-    await shell.page.getByRole('button', { name: 'Previous gallery page', exact: true }).click();
-    await expect(cards(shell).first()).toHaveAttribute('aria-label', `Window 217: ${basename(fixtures.quiet_240)}`);
-    await cards(shell).first().getByRole('button', { name: 'Inspect summary', exact: true }).click();
-    await cards(shell).first().getByRole('button', { name: 'Preview window source', exact: true }).click();
-    await expect(shell.page.getByLabel('Source PTS', { exact: true })).toHaveValue(run.windows[216]!.preview_pts!);
-    await shell.page.getByRole('button', { name: 'Create preview', exact: true }).click();
-    await expect(shell.page.getByRole('alert').filter({ hasText: /This preview exceeds the time, frame, memory, dimensions or byte limit/ })).toBeVisible();
-    await shell.page.getByRole('button', { name: 'Close preview', exact: true }).click();
-    // The intentionally sparse scale source has 30-second keyframe spacing.
-    // Its interior seeks can correctly hit the existing pre-roll limit. Reset
-    // the page through a real filter and preview its first frame instead.
-    await shell.page.getByLabel('Window filter', { exact: true }).selectOption({ label: 'Unreviewed' });
-    await expect(cards(shell).first()).toHaveAttribute('aria-label', `Window 1: ${basename(fixtures.quiet_240)}`);
-    await cards(shell).first().getByRole('button', { name: 'Inspect summary', exact: true }).click();
-    await cards(shell).first().getByRole('button', { name: 'Preview window source', exact: true }).click();
-    await expect(shell.page.getByLabel('Source PTS', { exact: true })).toHaveValue(run.windows[0]!.preview_pts!);
-    await shell.page.getByRole('button', { name: 'Create preview', exact: true }).click();
-    await expect(shell.page.getByText('Preview ready', { exact: true })).toBeVisible();
+    await expect(cards(shell).last()).toHaveAttribute('aria-label', label(239));
+    await expect(cards(shell).last()).toContainText('1:59:30 - 2:00:00');
+
+    // The intentionally sparse scale source has 30-second keyframe spacing, so this interior
+    // preview correctly hits the pre-roll limit and says so.
+    const interior = await openAt(shell, 0);
+    await expect(interior.getByText(`217 of 240`, { exact: true })).toBeVisible();
+    await expect(interior.getByRole('alert').filter({ hasText: /This preview exceeds the time, frame, memory, dimensions or byte limit/ })).toBeVisible({ timeout: 30_000 });
+    await closeWindow(interior);
+    await filter(shell, 'Not reviewed').click();
+    await expect(cards(shell).first()).toHaveAttribute('aria-label', label(0));
+    const first = await openAt(shell, 0);
+    await previewReady(first);
     expect(await blobCounts(shell)).toMatchObject({ videoLive: 1 });
-    expect((await blobCounts(shell)).peak).toBeLessThanOrEqual(14);
+    expect((await blobCounts(shell)).peak).toBeLessThanOrEqual(PAGE + 2);
     expect(await binaryCounts(shell)).toMatchObject({ active: 0, peak: 1, previews: 1, collisions: 0 });
-    await shell.page.getByRole('button', { name: 'Close preview', exact: true }).click();
+    await closeWindow(first);
     await expect.poll(async () => (await blobCounts(shell!)).videoLive).toBe(0);
-    await shell.page.getByRole('button', { name: 'Return to gallery', exact: true }).click();
-    // Changing sessions unmounts the entire review surface and must release every URL.
-    await shell.page.getByLabel('Display name', { exact: true }).fill('Synthetic empty gallery destination');
-    await shell.page.getByRole('button', { name: 'Create session', exact: true }).click();
-    const destination = shell.page.getByRole('row').filter({ hasText: 'Synthetic empty gallery destination' });
-    await expect(destination).toBeVisible();
-    await destination.getByRole('button', { name: 'Inspect media', exact: true }).click();
-    await expect(shell.page.getByText('No summary runs saved.', { exact: true })).toBeVisible();
+    // Leaving the survey unmounts the whole review surface and must release every URL.
+    await shell.page.getByRole('link', { name: 'Back to surveys' }).click();
+    await expect(shell.page.getByRole('heading', { name: 'Surveys', exact: true })).toBeVisible();
     await expect.poll(async () => (await blobCounts(shell!)).live).toBe(0);
     const blobs = await blobCounts(shell);
     expect(blobs.created).toBeGreaterThan(20);
     expect(blobs.revoked).toBe(blobs.created);
     expect((await binaryCounts(shell)).collisions).toBe(0);
-    console.info('Real gallery scale evidence:', { windows: 240, seconds: 7200, pages: 20,
+    console.info('Real gallery scale evidence:', { windows: 240, seconds: 7200, pages,
       peakBinaryReads: (await binaryCounts(shell)).peak, peakBlobURLs: blobs.peak,
       createdBlobURLs: blobs.created, revokedBlobURLs: blobs.revoked, liveBlobURLsAfterUnmount: blobs.live });
     await quit(shell); shell = undefined;
   } finally {
-    await cleanupDraft(shell);
+    await cleanupDraftShell(shell);
     await rm(directory, { recursive: true, force: true });
   }
 });
@@ -404,12 +341,12 @@ test('240 real thirty-second windows keep image requests and Blob lifetimes boun
 test('a real processing write failure stays visible and unresolved in the gallery', async () => {
   test.setTimeout(90_000);
   const directory = await mkdtemp(join(tmpdir(), 'bat-gallery-failure-'));
-  const fixtures = sources(join(directory, 'originals'));
+  const sources = fixtures<Fixture>('gallery_fixtures', join(directory, 'originals'));
   let shell: RunningShell | undefined;
   try {
     shell = await launch(join(directory, 'data'));
-    const sessionID = await prepared(shell, [fixtures.earlier_9]);
-    const before = await latest(shell, sessionID);
+    const sessionID = await preparedReview(shell, [sources.earlier_9], SURVEY);
+    const before = await latestRun(shell, sessionID);
     // Negative-only fault injection: a real SQLite error prevents image publication.
     // All successful processing, decoding, API responses and DB writes remain real.
     const injected = spawnSync(process.env.BAT_PYTHON ?? 'python', ['-c',
@@ -417,13 +354,17 @@ test('a real processing write failure stays visible and unresolved in the galler
       join(directory, 'data', 'bat_innovation.sqlite3'),
     ], { encoding: 'utf8' });
     expect(injected.status, injected.stderr).toBe(0);
+    await goTo(shell, 'Process');
+    const status = shell.page.getByRole('status').filter({ hasText: /^Run / });
     await shell.page.getByRole('button', { name: 'Generate motion summaries', exact: true }).click();
-    await expect(shell.page.getByRole('status').filter({ hasText: /^Run failed: 0\/1 windows complete; 1 failed;/ })).toBeVisible();
-    await shell.page.getByLabel('Window filter', { exact: true }).selectOption({ label: 'Failed/incomplete' });
+    await expect(status).toHaveText(/^Run failed: 0 of 1 windows complete$/, { timeout: 60_000 });
+    await expect(shell.page.getByText('1 failed', { exact: true })).toBeVisible();
+    await goTo(shell, 'Review');
+    await filter(shell, 'Failed or incomplete').click();
     await expect(cards(shell)).toHaveCount(1);
     await expect(cards(shell).first()).toContainText('failed');
-    await expect(shell.page.getByRole('status').filter({ hasText: /^First review progress: 0\/1 reviewed;/ })).toBeVisible();
-    const failed = await latest(shell, sessionID);
+    await expect(reviewProgress(shell, 0, 1)).toBeVisible();
+    const failed = await latestRun(shell, sessionID);
     expect(failed.windows[0]!.status).toBe('failed');
     expect(failed.windows[0]!.image).toBeNull();
     expect((await history(shell, failed.windows[0]!.id)).events).toEqual([]);
@@ -433,12 +374,13 @@ test('a real processing write failure stays visible and unresolved in the galler
       join(directory, 'data', 'bat_innovation.sqlite3'),
     ], { encoding: 'utf8' });
     expect(removed.status, removed.stderr).toBe(0);
+    await goTo(shell, 'Process');
     await shell.page.getByRole('button', { name: 'Generate motion summaries', exact: true }).click();
-    await expect(shell.page.getByRole('status').filter({ hasText: /^Run complete: 1\/1 windows complete;/ })).toBeVisible();
+    await expect(status).toHaveText(/^Run complete: 1 of 1 windows complete$/, { timeout: 60_000 });
     expect((await history(shell, failed.windows[0]!.id)).events).toEqual([]);
     await quit(shell); shell = undefined;
   } finally {
-    await cleanupDraft(shell);
+    await cleanupDraftShell(shell);
     await rm(directory, { recursive: true, force: true });
   }
 });

@@ -76,7 +76,7 @@ export function ExportPage() {
     <PageHeader title="Export" subtitle="Save the review results of one processing run as spreadsheet files." />
     <PageBody>
       <Messages error={error} notice={saved} />
-      <Card aria-label="Provisional CSV export">
+      <Card role="region" aria-label="Provisional CSV export">
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><FileSpreadsheet className="h-5 w-5" aria-hidden />Provisional CSV bundle</CardTitle>
           <CardDescription>Two CSV files and a manifest: your observations, and an audit row for every planned window (reviewed or not). <strong>PROVISIONAL: not an ecologically finalised report.</strong> Reviewer names are local labels, not verified identities.</CardDescription>

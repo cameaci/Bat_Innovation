@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { QAChange, QAHistory, QASuggestion, SummaryWindow, WindowQA } from '../../../electron/src/contracts';
-import { getAPI } from '../api';
+import { getAPI, whileBusy } from '../api';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Checkbox, Input, Label, Select, Textarea } from './ui/input';
@@ -83,7 +83,8 @@ export function QAPanel({ window: selected, previewID, disabled, onDirtyChange, 
     };
     setSaving(true); setError(''); setNotice('');
     try {
-      const result = await getAPI()?.saveQA(selected.id, input);
+      const api = getAPI();
+      const result = api && await whileBusy('qa_busy', () => api.saveQA(selected.id, input));
       if (!result?.ok) { setError(result?.error.message ?? unavailable); return; }
       generation.current += 1; draft.current = false; setDirty(false); replace(result.value);
       setNotice('QA decision saved with an audit record.'); onSaved();

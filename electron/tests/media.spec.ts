@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import type { BatAPI } from '../src/contracts';
-import { cleanup, launch, quit, type RunningShell } from './shell-helpers';
-import { addVideos, createSurvey, digests, fixtures, getMedia, openSurvey, pickerSpy, selectFiles, videos } from './ui-helpers';
+import { launch, quit, type RunningShell } from './shell-helpers';
+import { addVideos, cleanupDraftShell as cleanup, createSurvey, digests, fixtures, getMedia, openSurvey, pickerSpy, selectFiles, videos } from './ui-helpers';
 
 type Media = 'cfr_mp4' | 'nonzero_mts' | 'irregular_mp4' | 'short_mp4';
 const SURVEY = 'Synthetic media survey';
@@ -82,6 +82,8 @@ test('native selection inspects real media and persists explicit video order acr
     await page.getByRole('button', { name: 'Save timeline', exact: true }).click();
     await expect.poll(async () => (await getMedia(shell!, sessionID)).segments.map((segment) => segment.metadata.filename))
       .toEqual(['nonzero.mts', 'cfr.mp4', 'irregular.mp4']);
+    // The UI leaves its unsaved state only after the save returns; a reload before that is (correctly) guarded.
+    await expect(page.getByRole('button', { name: 'Refresh videos', exact: true })).toBeEnabled();
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Process', exact: true })).toBeVisible();
     await expect(videos(shell).first()).toHaveAccessibleName('Video 1: nonzero.mts');
@@ -109,6 +111,7 @@ test('native selection inspects real media and persists explicit video order acr
     await shell.page.getByLabel('Source of this time').fill('Synthetic clock reference');
     await shell.page.getByRole('button', { name: 'Save timeline', exact: true }).click();
     await expect.poll(async () => (await getMedia(shell!, sessionID)).clock_anchor?.utc).toBe('2026-10-15T20:00:00Z');
+    await expect(shell.page.getByRole('button', { name: 'Refresh videos', exact: true })).toBeEnabled();
     expect(await digests(selected), 'Inspection and reordering must leave original bytes unchanged').toEqual(hashes);
     await quit(shell);
     shell = undefined;

@@ -112,6 +112,13 @@ async function availablePort() {
   });
 }
 
+/** An existing v1 database from before the media upgrade; a brand-new data folder now starts at the current schema. */
+function legacyDatabase(dataDir) {
+  const created = spawnSync(python, ['-c', 'import sys; from pathlib import Path; from backend.app import store; store.initialise(Path(sys.argv[1]) / "bat_innovation.sqlite3")', dataDir],
+    { cwd: repoRoot, encoding: 'utf8', timeout: 15000 });
+  assert.equal(created.status, 0, created.stderr);
+}
+
 function expectFailure(result, code) {
   assert.equal(result.ok, false);
   assert.equal(result.error.code, code);
@@ -265,6 +272,7 @@ test('binary preview transport admits only one in-flight content response', { ti
 
 test('summary bridge requires explicit storage upgrade and rejects paths, invalid durations and unauthorized routes', { timeout: 30000 }, async t => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'bat-summary-contract-'));
+  legacyDatabase(dataDir);
   const runtime = new BackendRuntime();
   t.after(async () => { await runtime.stop(); await rm(dataDir, { recursive: true, force: true }); });
   const port = await availablePort();
@@ -363,6 +371,7 @@ test('real PyAV summaries and PNG evidence survive runtime restart after a media
   assert.equal(generated.status, 0, generated.stderr);
   const source = JSON.parse(generated.stdout).quiet_9;
   const original = await readFile(source);
+  legacyDatabase(dataDir);
   assert.equal((await first.start({ python, repoRoot, dataDir })).ok, true);
   assert.deepEqual(await first.upgradeMedia(), { ok: true, value: { schema_version: 2 } });
   const created = await first.createSession({ display_name: 'Synthetic summary persistence', camera_ref: 'Synthetic camera' });
@@ -432,6 +441,7 @@ test('real PyAV summaries and PNG evidence survive runtime restart after a media
 
 test('review bridge bounds IDs, fields, source PTS and history cursors and authenticates every route', { timeout: 30000 }, async t => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'bat-review-contract-'));
+  legacyDatabase(dataDir);
   const runtime = new BackendRuntime();
   t.after(async () => { await runtime.stop(); await rm(dataDir, { recursive: true, force: true }); });
   const port = await availablePort();
@@ -516,6 +526,7 @@ test('real provisional review retains source spans and audit revisions across re
   assert.equal(generated.status, 0, generated.stderr);
   const source = JSON.parse(generated.stdout).quiet_9;
   const original = await readFile(source);
+  legacyDatabase(dataDir);
   assert.equal((await first.start({ python, repoRoot, dataDir })).ok, true);
   assert.equal((await first.upgradeMedia()).ok, true);
   const created = await first.createSession({ display_name: 'Synthetic review persistence', camera_ref: 'Synthetic camera' });

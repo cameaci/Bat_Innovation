@@ -57,7 +57,7 @@ export function ReviewPage() {
             <div className="min-w-[16rem] flex-1 space-y-1.5">
               <div className="flex justify-between text-sm"><span className="font-medium">Reviewed</span><span role="status">{progress ? `${progress.reviewed} of ${progress.total} windows` : 'Loading...'}</span></div>
               <Progress value={progress ? 100 * progress.reviewed / Math.max(1, progress.total) : 0} label="Review progress" />
-              {qa && <p className="text-xs text-muted-foreground">Second review: {qa.agree} agreed, {qa.disagree} disagreed, {qa.needs_clarification} need clarification, {qa.pending} pending.</p>}
+              {qa && <p className="text-xs text-muted-foreground">Second review: {qa.agree} agreed, {qa.disagree} disagreed, {qa.needs_clarification} need clarification, {qa.unassessable} unassessable, {qa.pending} pending{qa.needs_reverification ? `, ${qa.needs_reverification} out of date` : ''} (of {qa.total}).</p>}
             </div>
             {survey.runs.length > 1 && <div className="space-y-1"><Label htmlFor="review-run" className="text-xs">Processing run</Label>
               <Select id="review-run" className="w-72" value={survey.runID} disabled={survey.dirty} onChange={event => { survey.selectRun(event.target.value); setPage(0); }}>

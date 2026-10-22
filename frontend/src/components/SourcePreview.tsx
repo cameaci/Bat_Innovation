@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Loader2, RotateCcw } from 'lucide-react';
 import type { MediaSegment, PreviewFrame, PreviewJob } from '../../../electron/src/contracts';
-import { getAPI } from '../api';
+import { getAPI, whileBusy } from '../api';
 import { readMediaBytes } from '../binary';
 import type { DisplayedSourceFrame } from '../sourceFrame';
 import { clock, ptsAfter, ptsSeconds, rational } from '../lib/time';
@@ -9,7 +9,6 @@ import { Button } from './ui/button';
 
 const unavailable = 'The local backend is unavailable. Close the window and retry after checking the backend.';
 const STEP_MS = 2000;
-const BUSY_RETRIES = 20, BUSY_WAIT_MS = 250;
 
 /**
  * Two-second derived WebM preview of the original, started at `initialPTS` when `enabled`. Displayed frames are
@@ -108,14 +107,9 @@ export function SourcePreview({ segment, initialPTS, minPTS, maxPTS, enabled, di
     try {
       const api = getAPI();
       if (!api) { fail(unavailable); return; }
-      let result = await api.startPreview({ segment_id: segment.id, source_pts: requested });
       // Moving to another window cancels the previous preview, whose worker may still be stopping.
       // Wait a bounded time for that release instead of failing the new window's preview.
-      for (let attempt = 0; !result.ok && result.error.code === 'preview_busy' && attempt < BUSY_RETRIES; attempt += 1) {
-        await new Promise(resolve => setTimeout(resolve, BUSY_WAIT_MS));
-        if (ticket !== generation.current) return;
-        result = await api.startPreview({ segment_id: segment.id, source_pts: requested });
-      }
+      const result = await whileBusy('preview_busy', () => api.startPreview({ segment_id: segment.id, source_pts: requested }), () => ticket !== generation.current);
       if (ticket !== generation.current) {
         if (result.ok) void api.cancelPreview(result.value.id).catch(() => undefined);
         return;
