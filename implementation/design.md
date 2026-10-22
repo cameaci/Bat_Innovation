@@ -98,7 +98,7 @@ Preview generation runs in one disposable Linux process with hard CPU/memory/fil
 - Detect and flag large frame-wide changes from tripod vibration, camera re-aiming, a torch beam or dusk-to-IR illumination. Reinitialise the reference scene where appropriate, **but never erase or silently accept** the affected window as reliable.
 - Video rotation, interlacing, HUD/date overlays, IR insect swarms and compression artefacts are explicit fixture scenarios. Overlay exclusion regions may be added only with a visible configuration and provenance; never hardcode camera coordinates.
 
-**No trained model, no automatic insect exclusion and no bat count derived from raw motion masks in v1.** Motion blob tracking can be introduced as an optional later pipeline **after** summary completeness and review efficacy are tested.
+**No trained model, no automatic insect exclusion and no bat count derived from raw motion masks.** Under the [feature expansion plan](feature-expansion.md) (owner decision 2026-10-22), a separate contained tracking run turns motion candidates into tracks and gate crossings. These are review candidates: algorithm, reviewer-adjusted and QA-approved counts stay separate and audited, and no window is hidden or decided by them.
 
 ## 5. SQLite domain model (minimum viable persistence)
 
@@ -166,6 +166,6 @@ Keep all-window review progress stable even when filters change, as in the Camer
 
 ## 9. Non-goals and upgrade points
 
-Defer: thermal, audio/Kaleidoscope integration, species ID, learned detector, GPU, automatic emergence sign-off, automatic cross-camera individual deduplication, central server, remote GCC authentication, multi-tenant hosting and generic reporting engines.
+Defer: radiometric thermal and vendor SDKs, Kaleidoscope or other acoustic classifier integration, species ID, learned detector, GPU, automatic emergence sign-off, automatic cross-camera individual deduplication, central server, remote GCC authentication, multi-tenant hosting and generic reporting engines.
 
-**Upgrade only on evidence:** if motion summaries fail to improve time or visibility, adjust the summary method or stop. Add blob tracking only if it improves adjudicated event recall or review efficiency; add learned bat recognition only if sufficient licensed frame labels and measured need exist. Do not scaffold these before they are needed.
+**Upgrade only on evidence:** if motion summaries fail to improve time or visibility, adjust the summary method or stop. Add blob tracking only if it improves adjudicated event recall or review efficiency; add learned bat recognition only if sufficient licensed frame labels and measured need exist. Do not scaffold these before they are needed. Rendered thermal video and full-spectrum WAV synchronisation are planned P1 review aids in the [feature expansion plan](feature-expansion.md).

@@ -20,7 +20,7 @@ Reviewed 2026-10-20. Status: **Slices 0 (Linux foundation), 1A, 1B, 2A, 3A, 3B, 
 
 ## Principles of execution
 
-- Do not start with the model, heatmaps, dashboards, server hosting, tracking or Windows installer.
+- Do not start with the model, dashboards or server hosting. Tracking, gates, heatmaps, thermal and audio follow the separate [feature expansion plan](feature-expansion.md) (owner decision 2026-10-22), one vertical slice at a time.
 - Every slice must prove an end-to-end path through the necessary layers: source or fixture -> backend -> persistent output -> user-visible result -> test.
 - Use the [reuse audit](reuse.md) before implementing frontend/backend utility behavior. Prefer small portable pieces; avoid importing camera-trap domain logic.
 - Each slice has a **go/no-go** check. If it fails, correct the relevant design and rerun the tests rather than proceeding with a patch that hides it.
@@ -194,7 +194,7 @@ Reviewed 2026-10-20. Status: **Slices 0 (Linux foundation), 1A, 1B, 2A, 3A, 3B, 
 
 ## After the first successful pilot (not pre-built)
 
-Only if supported by measured benefit: motion blobs and tracking (OpenCV/Norfair), roost-zone entry/exit suggestions, better insect rejection, cross-camera review, model training, acoustic synchronisation or thermal support.
+**Superseded 2026-10-22 by an owner decision:** tracking, gates and counts, trajectories, heatmaps, an activity timeline, highlight review, rendered thermal video and acoustic synchronisation are planned in the [feature expansion plan](feature-expansion.md) with its own tracker (E0-E8, baseline 0/27). That tracker is never added to the 44/70 above, and neither denominator changes. Better insect rejection, cross-camera review and model training still wait for measured benefit.
 
 ## Dependency graph
 
@@ -212,6 +212,11 @@ QA and two exports
 Offline Windows installer
           |
 Authorised independent ecological validation
+
+Feature expansion (feature-expansion.md), after the Windows installer:
+thermal modality -> tracks -> gates and count layers -> export v2
+-> highlight review -> timeline and heatmaps -> audio sync
+(its E8 validation is part of the ecological pilot above)
 
 Gate 1 rights/environment and Gate 2 adjudicated benchmark
 can progress in parallel with synthetic code development,

@@ -14,6 +14,7 @@ Build a small, local Windows desktop reviewer for **recorded active-infrared (IR
 | [plan.md](plan.md) | Sequenced vertical slices, tasks and measurable definition of done |
 | [tests.md](tests.md) | Synthetic fixtures, functional and ecological evaluation, release checks |
 | [review.md](review.md) | Architecture alternatives, expert review findings and resolved trade-offs |
+| [feature-expansion.md](feature-expansion.md) | Owner-approved P1 expansion: tracks, gates, counts, timeline, heatmaps, highlights, rendered thermal, audio sync; separate tracker |
 
 Supporting domain documentation: [scope](../docs/01-problem-and-scope.md), [evaluation](../docs/05-evaluation-framework.md), [data governance](../docs/04-data-governance.md), [IR architecture](../docs/09-ir-first-architecture-draft.md).
 
@@ -33,9 +34,9 @@ Prove reliable **video playback/seek** for original .MTS/.MP4 media, including s
 
 ## Boundaries
 
-- IR only in v1; no thermal or audio/spectral processing.
+- Active IR first. Rendered thermal video and full-spectrum WAV synchronisation are planned review aids in the [feature expansion plan](feature-expansion.md); no radiometric thermal analysis or acoustic species identification.
 - Every summary window is retained even when the motion image appears empty.
-- Tracking and possible-emergence hints are later optional increments.
+- Tracks, gate crossings and counts are planned review candidates ([feature expansion plan](feature-expansion.md)); they never hide windows or replace human decisions.
 - A QA-labeled Excel row is a prelabel until its original video and decision authority are verified.
 - No WSP/client footage, extracted images, original survey metadata or review databases in this **public** repository.
 - Gate 0 synthetic/licensed-public development is possible now. Real footage feasibility needs the relevant approvals. A measured ecological benchmark additionally needs adjudicated reference events.
