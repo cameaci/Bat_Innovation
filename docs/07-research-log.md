@@ -1,5 +1,13 @@
 # 07 - Research log
 
+## 2026-10-23 - Feature expansion E1: rendered thermal modality
+
+**Design:** schema v6 adds `segment.modality` (`active_ir` or `rendered_thermal`) and `modality_provenance`, declared in the Process page "Video type" select at import and never inferred. Existing segments are recorded as `active_ir` with provenance "recorded by the IR-only version". Summary evidence for thermal segments carries `rendered_thermal_display` and `palette_luma_not_temperature`, and the PNG footer, video rows, window cards and dialog show "Rendered thermal - no radiometric temperature analysis". Motion is still computed from display luminance; no temperature is derived. The five exact schema-5 checks became version tuples, and one explicit `/api/storage/upgrade` route (bridge `upgradeStorage`) runs all expansion steps after the QA schema, each in its own transaction, from the existing single "Upgrade storage" button.
+
+**Verified (Linux):** backend 385 passed, 45 skipped, including white-hot, black-hot and false-colour moving-target fixtures, v5 -> v6 upgrade, idempotence and rollback, refusal of thermal import before the upgrade, refusal of an unknown modality and of a `.seq` radiometric file, and a thermal summary run carrying the flags; strict TypeScript; 58 Node tests; Electron end-to-end 21 passed, 1 skipped, including a new thermal spec.
+
+**Not verified:** real thermal camera exports, palettes with HUD overlays (exclusion regions are not implemented yet), Windows.
+
 ## 2026-10-22 - Feature expansion research and owner scope decision
 
 **Decision (project owner):** after using the beta, the owner supplied a research summary of three reference demos and asked for an implementation plan. All its P1 features are in scope as review aids: persistent tracks, counting lines and gates with directional counts, trajectory overlays, heatmaps, an activity timeline, highlight/block review (loop, 0.25x-2x, frame stepping, "no bat + next"), rendered thermal video and full-spectrum WAV synchronisation with spectrogram and retunable heterodyne. This supersedes the 2026-10-15 "thermal and acoustic out of v1" and "tracking after the pilot" decisions. The fixed 44/70 tracker is unchanged; the [feature expansion plan](../implementation/feature-expansion.md) has its own tracker (0/27).

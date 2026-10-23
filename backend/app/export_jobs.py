@@ -71,7 +71,7 @@ class ExportJobs:
             if self.closed or self.job and self.job["state"] == "working":
                 raise ExportError("export_busy")
             with closing(readonly(self.database)) as connection:
-                if connection.execute("PRAGMA user_version").fetchone()[0] != store.QA_SCHEMA_VERSION:
+                if connection.execute("PRAGMA user_version").fetchone()[0] not in store.QA_SCHEMA_VERSIONS:
                     raise ExportError("export_schema_required")
                 run = connection.execute("SELECT state FROM processing_run WHERE id=?", (run_id,)).fetchone()
                 if not run:

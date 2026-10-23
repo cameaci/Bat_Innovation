@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import { existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
+import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
 import { ExportSaver } from './export_saver';
 import type { NewSession } from './contracts';
 
@@ -190,8 +190,10 @@ async function open(): Promise<void> {
     const result = await backend.summaryImage(id);
     return result.ok && result.value.bytes.byteLength > MAX_SUMMARY_BYTES ? invalid('Summary image exceeds its byte limit.') : result;
   });
-  handle('bat:choose-media', 1, async ([id]) => {
+  handle('bat:upgrade-storage', 0, () => backend.upgradeStorage());
+  handle('bat:choose-media', 2, async ([id, modality]) => {
     if (!isUUID(id)) return invalid('Select a valid session ID.');
+    if (!isModality(modality)) return invalid('Choose active IR or rendered thermal.');
     const media = await backend.getMedia(id);
     if (!media.ok) return media;
     if (media.value.schema_version < 2) return { ok: false, error: { code: 'schema_upgrade_required', message: 'Use Upgrade media storage before choosing original videos.' } };
@@ -204,7 +206,7 @@ async function open(): Promise<void> {
     if (!selected) return { ok: false, error: { code: 'picker_failed', message: 'The native file picker could not open. Check desktop permissions and reopen the app.' } };
     if (selected.canceled || selected.filePaths.length === 0) return { ok: true, value: null };
     // Raw native selections remain in this trusted closure and the authenticated local backend.
-    return backend.importSelectedMedia(id, selected.filePaths);
+    return backend.importSelectedMedia(id, selected.filePaths, modality);
   });
   void backend.start({
     repoRoot: installRoot, dataDir, ...(app.isPackaged ? { packaged: packagedBackend } : { python: process.env.BAT_PYTHON ?? 'python' }),

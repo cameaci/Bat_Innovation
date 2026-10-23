@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, ArrowDown, ArrowRight, ArrowUp, ChevronDown, FilePlus2, Film, Loader2, Play, RefreshCw, Square } from 'lucide-react';
-import type { Continuity, MediaSegment, SaveMedia, SummaryWindow } from '../../../electron/src/contracts';
-import { activeRun, CURRENT_SCHEMA, useSurvey } from '../survey';
+import type { Continuity, MediaSegment, Modality, SaveMedia, SummaryWindow } from '../../../electron/src/contracts';
+import { activeRun, CURRENT_SCHEMA, THERMAL_LABEL, useSurvey } from '../survey';
 import { clock, localDate, rational, span } from '../lib/time';
 import { PageBody, PageHeader } from '../components/layout/PageHeader';
 import { Messages } from '../components/layout/Messages';
@@ -47,6 +47,7 @@ function VideosCard({ disabled }: { disabled: boolean }) {
   const [segments, setSegments] = useState<MediaSegment[]>([]);
   const [anchor, setAnchor] = useState({ segment: '', utc: '', provenance: '' });
   const [dirty, setDirty] = useState(false);
+  const [modality, setModality] = useState<Modality>('active_ir');
   const [error, setError] = useState('');
   const importing = importJob?.state === 'running';
   const locked = disabled || survey.busy;
@@ -95,7 +96,10 @@ function VideosCard({ disabled }: { disabled: boolean }) {
       </div>
       <div className="flex shrink-0 gap-2">
         <Button variant="outline" size="icon" aria-label="Refresh videos" title="Check the original files again" onClick={() => void survey.refreshMedia()} disabled={dirty}><RefreshCw /></Button>
-        <Button onClick={() => void survey.chooseVideos()} disabled={locked || dirty}><FilePlus2 />Add videos</Button>
+        <Select aria-label="Video type" className="h-10 w-44" value={modality} disabled={locked || dirty} onChange={event => setModality(event.target.value as Modality)}>
+          <option value="active_ir">Active IR</option><option value="rendered_thermal">Rendered thermal</option>
+        </Select>
+        <Button onClick={() => void survey.chooseVideos(modality)} disabled={locked || dirty}><FilePlus2 />Add videos</Button>
       </div>
     </CardHeader>
     <CardContent className="space-y-4">
@@ -118,11 +122,13 @@ function VideosCard({ disabled }: { disabled: boolean }) {
                 <p className="text-xs text-muted-foreground">{clock(segment.metadata.elapsed_end ?? segment.metadata.elapsed_last_time)} · {segment.metadata.width}×{segment.metadata.height} · {segment.metadata.codec} · {segment.metadata.frame_count} frames</p>
               </div>
               <div className="flex shrink-0 items-center gap-1">
+                {segment.modality === 'rendered_thermal' && <Badge variant="info" title={THERMAL_LABEL}>Rendered thermal</Badge>}
                 {segment.source_state === 'ready' ? <Badge variant="success">Ready</Badge> : <Badge variant="danger">{sourceBadge[segment.source_state]}</Badge>}
                 <Button size="icon" variant="ghost" className="h-8 w-8" aria-label={`Move ${segment.metadata.filename} up`} disabled={locked || index === 0} onClick={() => move(index, -1)}><ArrowUp /></Button>
                 <Button size="icon" variant="ghost" className="h-8 w-8" aria-label={`Move ${segment.metadata.filename} down`} disabled={locked || index === segments.length - 1} onClick={() => move(index, 1)}><ArrowDown /></Button>
               </div>
             </div>
+            {segment.modality === 'rendered_thermal' && <p className="text-xs text-muted-foreground">{THERMAL_LABEL}.</p>}
             {segment.source_state !== 'ready' && <p role="alert" className="text-sm text-red-700">{sourceProblem[segment.source_state]}</p>}
             {segment.metadata.warnings.some(warning => !ROUTINE_NOTES.has(warning)) && <ul aria-label={`Warnings for ${segment.metadata.filename}`} className="space-y-0.5 text-xs text-amber-800">{segment.metadata.warnings.filter(warning => !ROUTINE_NOTES.has(warning)).map(warning => <li key={warning} className="flex gap-1"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />{warning}</li>)}</ul>}
             {index > 0 && <div className="grid gap-2 sm:grid-cols-2">

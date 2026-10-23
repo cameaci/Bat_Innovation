@@ -56,6 +56,9 @@ class Evidence:
             self.flags.add("interlaced_not_deinterlaced")
         if metadata.get("field_order") is None:
             self.flags.add("field_order_unverified")
+        if metadata.get("modality") == "rendered_thermal":
+            # Display luminance of a rendered palette, never a temperature.
+            self.flags.update({"rendered_thermal_display", "palette_luma_not_temperature"})
 
     def add(self, gray: np.ndarray, pts: int, previous: np.ndarray | None) -> None:
         if gray.shape != (self.height, self.width) or gray.dtype != np.uint8:
@@ -154,7 +157,8 @@ class Evidence:
                        f"Exact segment elapsed [{start}, {stop}) s | original PTS {source_interval}"])
         panel_top = 8 + len(header) * 14 + 18
         footer_top = panel_top + panel_height + 6
-        footer = wrap(["Evidence is not proof of presence or absence; verify the unchanged original.",
+        footer = wrap([*(["Rendered thermal - no radiometric temperature analysis."] if "rendered_thermal_display" in self.flags else []),
+                       "Evidence is not proof of presence or absence; verify the unchanged original.",
                        "Flags: " + ", ".join(sorted(self.flags)),
                        f"{windows.ALGORITHM_VERSION} | parameters SHA256 {parameter_hash}"])
         canvas_height = footer_top + 18 + len(footer) * 14 + 4

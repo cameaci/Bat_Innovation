@@ -2,9 +2,9 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Eye, RefreshCw } from 'lucide-react';
 import type { SummaryWindow } from '../../../electron/src/contracts';
-import { activeRun, useSurvey } from '../survey';
+import { activeRun, THERMAL_LABEL, useSurvey } from '../survey';
 import { localDate, span } from '../lib/time';
-import { isUnreviewed, warningFlags } from '../lib/windows';
+import { isThermal, isUnreviewed, warningFlags } from '../lib/windows';
 import { cn } from '../lib/utils';
 import { PageBody, PageHeader } from '../components/layout/PageHeader';
 import { Messages } from '../components/layout/Messages';
@@ -108,6 +108,7 @@ function WindowCard({ window, name, verified, onOpen }: { window: SummaryWindow;
       <div className="flex flex-wrap gap-1 px-1 pb-1">
         <Badge variant={decision === 'unreviewed' ? 'outline' : decision === 'reviewed_with_observations' ? 'info' : 'success'}>{decisionText[decision]}{(window.review?.observation_count ?? 0) > 0 ? ` (${window.review?.observation_count})` : ''}</Badge>
         {window.status !== 'complete' && <Badge variant="danger" title={window.error?.message}>{window.status}{window.error ? `: ${window.error.code.replaceAll('_', ' ')}` : ''}</Badge>}
+        {isThermal(window) && <Badge variant="info" title={THERMAL_LABEL}>Rendered thermal</Badge>}
         {window.source_state && window.source_state !== 'ready' && <Badge variant="danger">{window.source_state.replace('_source', '')} source</Badge>}
         {window.review?.needs_reverification && <Badge variant="warning">Re-check</Badge>}
         {flags.length > 0 && <Badge variant="warning" title={flags.join(', ')}><AlertTriangle className="h-3 w-3" />{flags.length} flag{flags.length === 1 ? '' : 's'}</Badge>}

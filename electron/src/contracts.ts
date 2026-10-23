@@ -57,7 +57,12 @@ export interface MediaSegment {
   continuity_provenance: string | null;
   source_state: 'ready' | 'missing_source' | 'unreadable_source' | 'changed_source';
   metadata: MediaMetadata;
+  /** Declared at import; rendered thermal is display luminance, never temperature. Absent before storage v6. */
+  modality?: Modality;
+  modality_provenance?: string | null;
 }
+
+export type Modality = 'active_ir' | 'rendered_thermal';
 
 export interface ClockAnchorInput { segment_id: string; utc: string; provenance: string }
 export interface ClockAnchor extends ClockAnchorInput { source_pts: string; time_base: Rational; source_time: Rational }
@@ -346,7 +351,8 @@ export interface BatAPI {
   createSession(input: NewSession): Promise<ApiResult<RecordingSession>>;
   getMedia(sessionID: string): Promise<ApiResult<MediaSession>>;
   upgradeMedia(): Promise<ApiResult<{ schema_version: 2 | 3 | 4 | 5 }>>;
-  chooseMedia(sessionID: string): Promise<ApiResult<ImportJob | null>>;
+  chooseMedia(sessionID: string, modality: Modality): Promise<ApiResult<ImportJob | null>>;
+  upgradeStorage(): Promise<ApiResult<{ schema_version: number }>>;
   importStatus(jobID: string): Promise<ApiResult<ImportJob>>;
   cancelImport(jobID: string): Promise<ApiResult<ImportJob>>;
   saveMedia(sessionID: string, input: SaveMedia): Promise<ApiResult<MediaSession>>;

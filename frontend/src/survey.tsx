@@ -1,11 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { ApiResult, BatAPI, ImportJob, MediaSession, RecordingSession, SaveMedia, SummaryDetail, SummaryRun } from '../../electron/src/contracts';
+import type { ApiResult, BatAPI, Modality, ImportJob, MediaSession, RecordingSession, SaveMedia, SummaryDetail, SummaryRun } from '../../electron/src/contracts';
 import { getAPI } from './api';
 
 const unavailable = 'The local backend is unavailable. Retry, or close and reopen the app.';
 export const activeRun = (run: SummaryRun | null | undefined) => run?.state === 'queued' || run?.state === 'running';
-export const CURRENT_SCHEMA = 5;
+export const CURRENT_SCHEMA = 6;
+export const THERMAL_LABEL = 'Rendered thermal - no radiometric temperature analysis';
 
 export interface Survey {
   session: RecordingSession;
@@ -16,7 +17,7 @@ export interface Survey {
   refreshMedia: () => Promise<void>;
   upgradeStorage: () => Promise<void>;
   importJob: ImportJob | null;
-  chooseVideos: () => Promise<void>;
+  chooseVideos: (modality: Modality) => Promise<void>;
   cancelImport: () => Promise<void>;
   saveTimeline: (input: SaveMedia) => Promise<boolean>;
   runs: SummaryRun[];
@@ -103,13 +104,13 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
     setError(''); setNotice('');
     // Each step is a separate transactional upgrade; a failure leaves the database at a supported earlier version.
     const steps: [number, (api: BatAPI) => Promise<ApiResult<unknown>>][] = [
-      [1, api => api.upgradeMedia()], [2, api => api.upgradeSummaries()], [3, api => api.upgradeReviews()], [4, api => api.upgradeQA()],
+      [1, api => api.upgradeMedia()], [2, api => api.upgradeSummaries()], [3, api => api.upgradeReviews()], [4, api => api.upgradeQA()], [5, api => api.upgradeStorage()],
     ];
     let version = media?.schema_version ?? CURRENT_SCHEMA;
     for (const [from, step] of steps) {
       if (version !== from) continue;
       if (await request(step) === undefined) break;
-      version = from + 1;
+      version = from === 5 ? CURRENT_SCHEMA : from + 1;
     }
     await refreshMedia();
     if (version === CURRENT_SCHEMA) setNotice('Storage upgraded. Existing sessions, videos and reviews were kept.');
@@ -138,9 +139,9 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
     return () => { active = false; clearTimeout(timer); };
   }, [importJob?.id, importJob?.state]);
 
-  async function chooseVideos() {
+  async function chooseVideos(modality: Modality) {
     setError(''); setNotice('');
-    const value = await request(api => api.chooseMedia(session.id));
+    const value = await request(api => api.chooseMedia(session.id, modality));
     if (value === undefined) return;
     if (value === null) { setNotice('No files were selected.'); return; }
     if (value.state === 'running') setImportJob(value); else await finishImport(value);

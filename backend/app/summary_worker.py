@@ -135,6 +135,7 @@ def render(payload: dict) -> None:
     try:
         for source in private["sources"]:
             metadata = json.loads(source["metadata_json"])
+            metadata["modality"] = source.get("modality", "active_ir")
             identity = json.loads(source["identity_json"])
             path = Path(source["source_path"])
             if path.suffix.lower() not in {".mp4", ".mts"}:

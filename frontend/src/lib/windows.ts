@@ -14,10 +14,15 @@ export const flagText: Record<string, string> = {
   field_order_unverified: 'Interlacing field order is unknown.',
   derived_grayscale_evidence: 'Motion is computed in greyscale; weak changes can be lost or noise can show.',
   source_speed_unverified: 'The original recording speed is not verified.',
+  rendered_thermal_display: 'Rendered thermal video: motion is computed from the displayed palette.',
+  palette_luma_not_temperature: 'Palette brightness is not a temperature; no radiometric analysis is made.',
 };
 
 /** Flags present on (almost) every window are provenance notes, not warnings worth a badge. */
-const routine = new Set(['derived_grayscale_evidence', 'source_speed_unverified', 'field_order_unverified']);
+const routine = new Set(['derived_grayscale_evidence', 'source_speed_unverified', 'field_order_unverified',
+  // Shown as the modality badge on every thermal window, so not counted as a quality warning.
+  'rendered_thermal_display', 'palette_luma_not_temperature']);
+export const isThermal = (window: SummaryWindow) => window.flags.includes('rendered_thermal_display');
 export const warningFlags = (window: SummaryWindow) => window.flags.filter(flag => !routine.has(flag));
 
 export function motionText(window: SummaryWindow): string {

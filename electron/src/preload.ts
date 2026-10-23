@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { BatAPI, NewSession, PreviewRequest, SaveMedia, SummaryRequest, ReviewChange, QAChange } from './contracts';
+import type { Modality, BatAPI, NewSession, PreviewRequest, SaveMedia, SummaryRequest, ReviewChange, QAChange } from './contracts';
 
 const api: BatAPI = {
   startExport: (...args: [string]) => ipcRenderer.invoke('bat:start-export', ...args),
@@ -26,7 +26,8 @@ const api: BatAPI = {
   createSession: (...args: [NewSession]) => ipcRenderer.invoke('bat:create-session', ...args),
   getMedia: (...args: [string]) => ipcRenderer.invoke('bat:get-media', ...args),
   upgradeMedia: (...args: []) => ipcRenderer.invoke('bat:upgrade-media', ...args),
-  chooseMedia: (...args: [string]) => ipcRenderer.invoke('bat:choose-media', ...args),
+  chooseMedia: (...args: [string, Modality]) => ipcRenderer.invoke('bat:choose-media', ...args),
+  upgradeStorage: (...args: []) => ipcRenderer.invoke('bat:upgrade-storage', ...args),
   importStatus: (...args: [string]) => ipcRenderer.invoke('bat:import-status', ...args),
   cancelImport: (...args: [string]) => ipcRenderer.invoke('bat:cancel-import', ...args),
   saveMedia: (...args: [string, SaveMedia]) => ipcRenderer.invoke('bat:save-media', ...args),

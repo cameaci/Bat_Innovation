@@ -91,9 +91,11 @@ def readonly(path: Path) -> sqlite3.Connection:
 
 def snapshot(database: Path, target: Path, check) -> str:
     """Pin one read transaction, copy in 64-page steps, then release the live DB."""
+    from . import store
+
     with closing(readonly(database)) as original, closing(sqlite3.connect(target)) as copy:
         original.execute("BEGIN")
-        if original.execute("PRAGMA user_version").fetchone()[0] != 5:
+        if original.execute("PRAGMA user_version").fetchone()[0] not in store.QA_SCHEMA_VERSIONS:
             raise ExportFailure("export_schema_required")
         if original.execute("PRAGMA page_count").fetchone()[0] * original.execute("PRAGMA page_size").fetchone()[0] > MAX_SNAPSHOT_BYTES:
             raise ExportFailure("export_too_large")

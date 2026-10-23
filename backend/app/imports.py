@@ -76,7 +76,7 @@ class ImportJobs:
         self._closed = False
         self._activity_lock = activity_lock if activity_lock is not None else Lock()
 
-    def start(self, session_id: str, paths: list[str]) -> dict:
+    def start(self, session_id: str, paths: list[str], modality: str = "active_ir") -> dict:
         if not workers.supported():
             raise ImportErrorResponse("import_limits_unavailable",
                 "Media import process limits are unavailable on this platform. Only Linux and Windows are supported.", 409)
@@ -97,7 +97,7 @@ class ImportJobs:
                 job = {"id": job_id, "session_id": session_id, "state": "running", "phase": "queued",
                        "filename": None, "files_done": 0, "files_total": len(sources), "progress_value": 0, "error": None}
                 self._jobs[job_id], self._cancel[job_id] = job, cancelled
-                self._thread = Thread(target=self._run, args=(job_id, session_id, sources, cancelled), daemon=True)
+                self._thread = Thread(target=self._run, args=(job_id, session_id, sources, cancelled, modality), daemon=True)
                 self._thread.start()
             except Exception:
                 self._thread = None
@@ -135,7 +135,7 @@ class ImportJobs:
         if thread is not None:
             thread.join(timeout=5)
 
-    def _run(self, job_id: str, session_id: str, sources: list[Path], cancelled: Event) -> None:
+    def _run(self, job_id: str, session_id: str, sources: list[Path], cancelled: Event, modality: str = "active_ir") -> None:
         def progress(phase: str, value: int) -> None:
             with self._lock:
                 self._jobs[job_id].update(phase=phase, progress_value=value)
@@ -165,7 +165,7 @@ class ImportJobs:
                     raise media.MediaError("cancelled", "Import cancelled. No sources were added.")
                 self._jobs[job_id]["phase"] = "saving"
                 try:
-                    store.commit_segments(self.db_path, session_id, inspected)
+                    store.commit_segments(self.db_path, session_id, inspected, modality)
                 except ValueError:
                     raise media.MediaError("duplicate_source", "A selected source is already present in this session or batch. No sources were added.") from None
                 outcome = {"state": "complete", "phase": "complete", "error": None}

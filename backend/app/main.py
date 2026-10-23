@@ -70,6 +70,7 @@ class NewImport(BaseModel):
     model_config = ConfigDict(extra="forbid")
     session_id: UUID
     paths: list[str] = Field(min_length=1, max_length=64)
+    modality: Literal["active_ir", "rendered_thermal"] = "active_ir"
 
 
 class EmptyRequest(BaseModel):
@@ -166,7 +167,7 @@ def create_app(settings: Settings) -> FastAPI:
     if fresh:
         # A database created by this launch holds nothing to preserve, so it starts at the current schema.
         # An existing database is only ever upgraded by an explicit user action.
-        for upgrade in (store.upgrade_media, summary_store.upgrade, review_store.upgrade, qa_store.upgrade):
+        for upgrade in (store.upgrade_media, summary_store.upgrade, review_store.upgrade, qa_store.upgrade, store.upgrade_expansion):
             upgrade(db_path)
     activity_lock = Lock()
     jobs = ImportJobs(db_path, settings.data_dir, activity_lock)
@@ -229,6 +230,7 @@ def create_app(settings: Settings) -> FastAPI:
         return {"session_id": session_id, "schema_version": store.schema_version(db_path),
                 "segments": [{"id": row["id"], "position": row["position"], "continuity": row["continuity"],
                               "continuity_provenance": row["continuity_provenance"], "source_state": source_state(row),
+                              "modality": row.get("modality", "active_ir"), "modality_provenance": row.get("modality_provenance"),
                               "metadata": json.loads(row["metadata_json"])}
                              for row in store.private_segments(db_path, session_id)],
                 "clock_anchor": store.clock_anchor(db_path, session_id), "active_import": jobs.active(session_id)}
@@ -239,6 +241,21 @@ def create_app(settings: Settings) -> FastAPI:
             store.upgrade_media(db_path)
         except (store.DatabaseSchemaError, sqlite3.DatabaseError):
             raise ImportErrorResponse("schema_upgrade_failed", "The media schema upgrade failed; the existing database was preserved.", 409) from None
+        return {"schema_version": store.schema_version(db_path)}
+
+    @app.post("/api/storage/upgrade", dependencies=[Depends(authenticate)])
+    def upgrade_storage(_payload: EmptyRequest = Body(default_factory=EmptyRequest)) -> dict[str, int]:
+        """Feature-expansion steps after the QA schema, each its own transaction."""
+        if store.schema_version(db_path) not in store.QA_SCHEMA_VERSIONS:
+            raise ImportErrorResponse("schema_upgrade_required", "Upgrade media, summary, review and QA storage first.", 409)
+        if not activity_lock.acquire(blocking=False):
+            raise ImportErrorResponse("storage_busy", "Wait for the active media operation before upgrading storage.", 409)
+        try:
+            store.upgrade_expansion(db_path)
+        except (store.DatabaseSchemaError, sqlite3.DatabaseError):
+            raise ImportErrorResponse("storage_upgrade_failed", "The storage upgrade failed; the existing database was preserved.", 409) from None
+        finally:
+            activity_lock.release()
         return {"schema_version": store.schema_version(db_path)}
 
     @app.get("/api/sessions/{session_id}/media", dependencies=[Depends(authenticate)])
@@ -263,7 +280,9 @@ def create_app(settings: Settings) -> FastAPI:
         session = str(payload.session_id)
         require_session(session)
         require_media_schema()
-        return jobs.start(session, payload.paths)
+        if payload.modality != "active_ir" and store.schema_version(db_path) < store.MODALITY_SCHEMA_VERSION:
+            raise ImportErrorResponse("schema_upgrade_required", "Upgrade storage before importing rendered thermal video.", 409)
+        return jobs.start(session, payload.paths, payload.modality)
 
     @app.get("/api/media/import/{job_id}", dependencies=[Depends(authenticate)])
     def get_import(job_id: UUID) -> dict:

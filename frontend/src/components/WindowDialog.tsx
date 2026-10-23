@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { AlertTriangle, ChevronLeft, ChevronRight, ChevronsRight, X } from 'lucide-react';
 import type { SummaryWindow } from '../../../electron/src/contracts';
-import { activeRun, useSurvey } from '../survey';
+import { activeRun, THERMAL_LABEL, useSurvey } from '../survey';
 import type { DisplayedSourceFrame, WindowSourceFrame } from '../sourceFrame';
 import { rational, span } from '../lib/time';
-import { flagText, isUnreviewed, motionText, warningFlags } from '../lib/windows';
+import { flagText, isThermal, isUnreviewed, motionText, warningFlags } from '../lib/windows';
 import { Dialog } from './ui/dialog';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -112,7 +112,9 @@ export function WindowDialog({ windows, initialID, onClose }: { windows: Summary
             <div className="mt-2 flex flex-wrap gap-1">
               <Badge variant={selected.status === 'complete' ? 'secondary' : 'danger'}>{selected.status}</Badge>
               {selected.qa && <Badge variant="outline">QA {selected.qa.status.replaceAll('_', ' ')}</Badge>}
+              {isThermal(selected) && <Badge variant="info">Rendered thermal</Badge>}
             </div>
+            {isThermal(selected) && <p className="mt-2 text-xs font-medium">{THERMAL_LABEL}.</p>}
             <p className="mt-2 text-xs">{motionText(selected)}</p>
             {selected.error && <p className="mt-1 text-xs text-red-700">{selected.error.message}</p>}
             {warningFlags(selected).length > 0 && <ul aria-label="Window quality flags" className="mt-2 space-y-1 text-xs text-amber-800">
