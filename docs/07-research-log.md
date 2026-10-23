@@ -1,5 +1,13 @@
 # 07 - Research log
 
+## 2026-10-23 - Feature expansion E1-E7 closing check
+
+**Frozen build:** a Linux PyInstaller onedir build with SciPy (296 MB) passed `scripts/smoke_backend.py`, which now also upgrades expansion storage and runs tracking: health, schema upgrades, import, preview, 2 of 2 summary windows, tracking, provisional export and unchanged original.
+
+**Tracker limitation found by the smoke video:** its slow (1 px per frame) uniform square produced two tracks, its leading and trailing edges, because candidates come from frame-to-frame change. A running-background variant gave whole silhouettes but smeared a ghost of anything present in the first frame into the track, so it was rejected; `tracks-v1` keeps the causal double difference and the split is now a tested, documented limitation. Bats usually move several body lengths per frame, where it does not occur.
+
+**Still open:** E0 (native Windows build and acceptance checklist of the new interface and workers, GPL-free PyAV build, ownership and licence) and E8 (ecological validation with an adjudicated reference set and owner-approved metrics). No ecological performance is claimed.
+
 ## 2026-10-23 - Feature expansion E7: full-spectrum audio beside the video
 
 **Design:** schema v10 adds `audio_source` (native selection of `.wav` only, SHA-256 and file identity, declared recording type: full spectrum, heterodyne, frequency division, time expansion or unknown, and one channel) and append-only `audio_anchor_event`. A contained `audio_worker` (1 GiB, 120 CPU s, 150 s wall, shared activity lock) inspects the WAV through the pinned PyAV with a `wav`-only format whitelist and PCM codecs only, and derives on demand, for the loaded video clip, a spectrogram PNG (SciPy, Hann 512/256, 80 dB range, 0 to Nyquist) or a digital heterodyne clip (mix with the tuning tone, 8th-order Butterworth 8 kHz low-pass with zero phase, `resample_poly` to 48 kHz, 16-bit). The original is re-hashed before reading and never written. One anchor pairs a displayed video frame with an audio time: `audio_time = video_time + b`, floored to a whole sample, valid for the anchored video only; drift is not corrected and the UI and export manifest say so (`drift_corrected: false`). Only full-spectrum sources can be retuned; others are shown as recorded. The Process page has an Audio card; the window dialog has an audio strip with the spectrogram, a playhead from the displayed frame, a tuning field and "Listen (heterodyne)" that plays the clip at 1x beside the video. The export manifest lists each audio source with its anchor.

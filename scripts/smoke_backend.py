@@ -128,7 +128,7 @@ def main(command: list[str]) -> None:
 
         tracking = api.call("POST", "/api/tracking", {"summary_run_id": run["id"]})
         tracked = api.wait(f"/api/tracking/{tracking['id']}", {"complete", "failed", "cancelled", "interrupted"}, 300)
-        if tracked["state"] != "complete" or sum(tracked["track_counts"].values()) < 1:
+        if tracked["state"] != "complete" or sum(tracked["track_counts"].values()) < 1:  # a slow square can give two edge tracks
             raise SystemExit(f"FAIL tracking: {json.dumps(tracked)[:600]}")
         step(f"tracking ({sum(tracked['track_counts'].values())} track(s) from the moving square)")
 

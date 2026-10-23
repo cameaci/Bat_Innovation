@@ -78,6 +78,8 @@ One vertical slice at a time: production behaviour and tests in the same change,
 - **Exit:** simple targets keep one ID; dropouts within the gap limit do not split a track; noise produces no track above the minimum length; the trail is frame-accurate in an end-to-end test; window coverage is unchanged.
 - **Stop:** if no dependency set fits the pins and licences, use the in-house association. If CPU cannot be bounded, track at reduced resolution and record the position error. If the synthetic paths are not recovered, do not start E3.
 
+**Known limitation (tested):** a slow, uniform target can appear as two parallel edge tracks, because candidates come from frame-to-frame change. A running background avoids that but leaves a ghost of anything present in the first frame; it was tried and rejected for `tracks-v1`.
+
 ### E3 - Gates and three-layer counts (schema v8, 12-18 d)
 
 - `gates.py` (pure geometry), `count_store.py`, a gate editor (SVG over the summary reference frame, with direction arrows) and a counts panel showing Entered, Exited and Net per layer.

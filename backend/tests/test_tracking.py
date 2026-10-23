@@ -61,6 +61,13 @@ def scenario(name: str) -> list[np.ndarray]:
     if name == "flash":
         a = path((4, 40), (5, 0), 20)
         return [frame([a[i]], background=200 if i == 10 else 40) for i in range(20)]
+    if name == "slow_square":
+        frames = []
+        for index in range(30):
+            image = np.full((H, W), 40, dtype=np.uint8)
+            image[40:48, 10 + index:18 + index] = 220
+            frames.append(image)
+        return frames
     if name == "edge_exit":
         a = path((90, 40), (6, 0), 12)
         return [frame([a[i]]) for i in range(12)]
@@ -103,6 +110,17 @@ def test_framewide_flash_is_a_gap_not_a_burst_of_tracks() -> None:
 def test_target_leaving_the_frame_ends_its_track() -> None:
     found = run(scenario("edge_exit"))
     assert len(found) == 1 and found[0].points[-1][1] > 110
+
+
+def test_slow_uniform_target_splits_into_edge_tracks_as_a_documented_limitation() -> None:
+    """Change-based candidates see only the leading and trailing edges of a slow, uniform target.
+
+    Bats usually move several body lengths per frame, where this does not occur; slow objects (insects close to
+    the camera, a walking animal) can appear as two parallel tracks. Reviewers see both trails on the original.
+    """
+    found = run(scenario("slow_square"))
+    assert len(found) == 2
+    assert abs(found[0].points[0][2] - found[1].points[0][2]) < 1, "Both edges move together at the same height"
 
 
 def test_points_round_trip_with_integrity() -> None:

@@ -1,6 +1,6 @@
 # 18 - Windows internal beta
 
-Status: **built and smoke-tested on one native Windows 11 machine; the owner installed and opened the first installer (screen recording, 2026-10-22). The Camera_Trap-style interface (2026-10-22) has not yet been built or run on Windows.** Reviewed 2026-10-22. Every row of the acceptance checklist below is "Not run" except where a result is stated.
+Status: **the feature expansion E1-E7 (2026-10-23) is Linux-verified only and has not been built on Windows. Earlier:** built and smoke-tested on one native Windows 11 machine; the owner installed and opened the first installer (screen recording, 2026-10-22). The Camera_Trap-style interface (2026-10-22) has not yet been built or run on Windows.** Reviewed 2026-10-22. Every row of the acceptance checklist below is "Not run" except where a result is stated.
 
 ## Owner decisions (2026-10-21)
 
@@ -17,6 +17,11 @@ Status: **built and smoke-tested on one native Windows 11 machine; the owner ins
    - **Surveys:** "New survey" creates one recording session (a name and the camera). Each survey card shows its videos, windows and review progress.
    - **Process:** "Add videos" selects the original `.MTS`/`.MP4` files. Check their order (arrows) and save. "Generate motion summaries" plans every time window; thumbnails appear as each window finishes and can be opened at once. Review and original-video previews unlock when processing ends.
    - **Review:** every window is a card. Filters (not reviewed, with observations, flagged, failed or incomplete, needs re-check, QA pending) never change the progress count. Opening a card shows the motion summary and plays two seconds of the original video from the window start. Enter your name once, then choose "No activity seen" (key N) or "Add observation" (key O); pause the video on a frame and use "Use current frame as start/end". Arrow keys move between windows and U jumps to the next unreviewed one. A decision is only saved after the original preview of that window is ready. A second person can add a QA decision under "Second review (QA)".
+   - **Tracks, gates and counts (optional):** on the Process page, "Find tracks" follows moving objects for the selected summary run. In a window, enter your name, pause the video and use "Draw a gate" (line, rectangle or polygon; side A is left of the first-to-second point). The **Counts** page shows the algorithm, reviewer and QA counts separately; confirm or correct each crossing and let a second person approve.
+   - **Events:** each candidate track plays in a 6 s block of the original with its trail; "Not a bat + next" (N), "Bat" (B), frame stepping (comma and full stop), loop (L) and speed (1-5).
+   - **Timeline and heatmap:** on the Review page, the timeline shows tracks per window across all videos (click to open); the heatmap shows where track points were (points, not individuals).
+   - **Rendered thermal:** choose "Rendered thermal" as video type before Add videos. Motion is computed from the displayed palette; no temperatures are read.
+   - **Audio:** add a bat-detector WAV on the Process page and declare its type. In a window, set one sync anchor at a displayed frame, then "Show spectrogram" or "Listen (heterodyne)" with a tuning in kHz (full-spectrum recordings only). Drift is not corrected.
    - **Export:** tick the provisional confirmation, "Export provisional CSVs", then "Save provisional CSV bundle..." to choose a folder.
    - An older data folder shows one "Upgrade storage" button; nothing is upgraded without that click.
 

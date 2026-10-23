@@ -1,6 +1,6 @@
 # Implementation
 
-Status: **Slices 0/1A/1B/2A/3A/3B are merged; Slice 4A is independently reviewed and merged; Slice 4B1 provisional CSV exports are a review candidate. Early Windows beta work is a Stage A feasibility report only; native Windows, binary distribution and ownership gates remain open**. Reviewed 2026-10-20.
+Status: **Slices 0-4B1 are merged. The Windows beta, the Camera_Trap-style interface and feature expansion E1-E7 (tracks, gates and three-layer counts, highlight review, timeline and heatmaps, rendered thermal, audio) are on the open beta branch, Linux-verified only. Native Windows, binary distribution, ownership and ecological validation remain open.** Reviewed 2026-10-23.
 
 Build a small, local Windows desktop reviewer for **recorded active-infrared (IR) bat survey video**. Reuse the structure and review ergonomics of [Camera_Trap](https://github.com/cameaci/Camera_Trap), but not its unrelated wildlife models, platform features or entire source tree.
 
