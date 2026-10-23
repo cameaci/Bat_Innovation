@@ -1,12 +1,18 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, type IpcMainInvokeEvent } from 'electron';
-import { readFileSync, mkdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
+import { existsSync, readFileSync, mkdirSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, isGateChange, isCountReviewInput, isCountQAInput, isCandidateDecision, isHeatmapMode, isAudioMode, isAudioAnchor, isAudioDerive, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
 import { ExportSaver } from './export_saver';
 import type { NewSession } from './contracts';
 
 const UI_URL = 'app://bat/index.html';
+/** The UI document, ignoring only the in-page route fragment (#/...) used by the renderer's hash router. */
+const isUI = (url: string) => url === UI_URL || url.startsWith(`${UI_URL}#`);
 const repoRoot = resolve(__dirname, '../..');
+// A packaged build keeps the frozen backend and the built UI beside the executable, never in the checkout.
+const installRoot = app.isPackaged ? dirname(process.execPath) : repoRoot;
+const uiRoot = app.isPackaged ? join(process.resourcesPath, 'frontend') : join(repoRoot, 'frontend/dist');
+const packagedBackend = join(process.resourcesPath, 'backend', process.platform === 'win32' ? 'bat-backend.exe' : 'bat-backend');
 const backend = new BackendRuntime();
 let exportSaver: ExportSaver | undefined;
 let window: BrowserWindow | undefined;
@@ -33,12 +39,25 @@ function confirmDiscard(force = false): boolean {
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 
+/** Packaged data stays on the local machine (not the roaming profile): reviews, derived images and Chromium state. */
+function localData(): string | undefined {
+  const local = process.env.LOCALAPPDATA;
+  return app.isPackaged && process.platform === 'win32' && local && isAbsolute(local) ? join(local, 'Bat Innovation') : undefined;
+}
+
 // Trusted process configuration only. No renderer operation accepts a path.
 const configuredData = process.env.BAT_APP_DATA_DIR;
 let configError: string | undefined;
+const packagedHome = configuredData === undefined ? localData() : undefined;
+if (packagedHome !== undefined) {
+  try {
+    mkdirSync(join(packagedHome, 'shell'), { recursive: true });
+    app.setPath('userData', join(packagedHome, 'shell'));
+  } catch { configError = 'The application data directory is not writable.'; }
+}
 if (configuredData !== undefined) {
-  if (!isExternalDataDirectory(repoRoot, configuredData)) {
-    configError = 'BAT_APP_DATA_DIR must be an absolute directory outside the repository.';
+  if (!isExternalDataDirectory(installRoot, configuredData)) {
+    configError = 'BAT_APP_DATA_DIR must be an absolute directory outside the installation or repository.';
   } else {
     try {
       const shellData = join(configuredData, 'shell');
@@ -49,7 +68,7 @@ if (configuredData !== undefined) {
 }
 
 function trusted(event: IpcMainInvokeEvent): void {
-  if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== UI_URL) {
+  if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || !isUI(event.senderFrame.url)) {
     throw new Error('IPC is restricted to the application main frame.');
   }
 }
@@ -67,13 +86,13 @@ async function open(): Promise<void> {
     app.quit();
     return;
   }
-  if (app.isPackaged) {
-    dialog.showErrorBox('Development shell only', 'A packaged Python runtime is not configured. Windows installer work belongs to Slice 5.');
+  if (app.isPackaged && !existsSync(packagedBackend)) {
+    dialog.showErrorBox('Installation incomplete', 'The Bat Innovation backend is missing. Reinstall the application.');
     app.quit();
     return;
   }
-  const dataDir = configuredData ?? join(app.getPath('userData'), 'data');
-  exportSaver = new ExportSaver(backend, repoRoot, dataDir);
+  const dataDir = configuredData ?? join(localData() ?? app.getPath('userData'), 'data');
+  exportSaver = new ExportSaver(backend, installRoot, dataDir);
   await exportSaver.recover();
   // Same fixed origin for development and eventual packaging. Serve only built UI assets.
   protocol.handle('app', (request) => {
@@ -83,7 +102,7 @@ async function open(): Promise<void> {
       return new Response('Not found', { status: 404 });
     }
     try {
-      const content = readFileSync(join(repoRoot, 'frontend/dist', url.pathname));
+      const content = readFileSync(join(uiRoot, url.pathname));
       return new Response(content, { headers: {
         'Content-Type': url.pathname.endsWith('.js') ? 'text/javascript' : url.pathname.endsWith('.css') ? 'text/css' : 'text/html',
         'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'",
@@ -105,8 +124,8 @@ async function open(): Promise<void> {
     webPreferences: { preload: join(__dirname, 'preload.js'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, webviewTag: false, spellcheck: false },
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  window.webContents.on('will-navigate', (event, url) => { if (url !== UI_URL) event.preventDefault(); });
-  window.webContents.on('will-frame-navigate', (event) => { if (!event.isMainFrame || event.url !== UI_URL) event.preventDefault(); });
+  window.webContents.on('will-navigate', (event, url) => { if (!isUI(url)) event.preventDefault(); });
+  window.webContents.on('will-frame-navigate', (event) => { if (!event.isMainFrame || !isUI(event.url)) event.preventDefault(); });
   window.webContents.on('will-redirect', (event) => event.preventDefault());
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
   window.on('close', event => { if (!confirmDiscard()) event.preventDefault(); });
@@ -171,8 +190,38 @@ async function open(): Promise<void> {
     const result = await backend.summaryImage(id);
     return result.ok && result.value.bytes.byteLength > MAX_SUMMARY_BYTES ? invalid('Summary image exceeds its byte limit.') : result;
   });
-  handle('bat:choose-media', 1, async ([id]) => {
+  handle('bat:upgrade-storage', 0, () => backend.upgradeStorage());
+  handle('bat:list-gates', 1, ([id]) => isUUID(id) ? backend.listGates(id) : invalid('Select a valid survey ID.'));
+  handle('bat:save-gate', 3, ([session, gate, change]) => isUUID(session) && (gate === null || isUUID(gate)) && isGateChange(change)
+    ? backend.saveGate(session, gate, change) : invalid('Use a valid gate: name, kind, 2 to 32 points, labels, direction and hysteresis.'));
+  handle('bat:get-counts', 2, ([run, gate]) => isUUID(run) && isUUID(gate) ? backend.getCounts(run, gate) : invalid());
+  handle('bat:save-count-review', 3, ([run, gate, input]) => isUUID(run) && isUUID(gate) && isCountReviewInput(input) ? backend.saveCountReview(run, gate, input) : invalid('Use a valid count review action.'));
+  handle('bat:save-count-qa', 3, ([run, gate, input]) => isUUID(run) && isUUID(gate) && isCountQAInput(input) ? backend.saveCountQA(run, gate, input) : invalid('Use a valid count QA action.'));
+  handle('bat:list-audio', 1, ([id]) => isUUID(id) ? backend.listAudio(id) : invalid());
+  handle('bat:set-audio-anchor', 2, ([id, input]) => isUUID(id) && isAudioAnchor(input) ? backend.setAudioAnchor(id, input) : invalid('Use a video frame and an audio sample inside both recordings.'));
+  handle('bat:derive-audio', 2, ([id, input]) => isUUID(id) && isAudioDerive(input) ? backend.deriveAudio(id, input) : invalid('Use a 1 to 12 s span and a 10 to 150 kHz tuning.'));
+  handle('bat:audio-content', 2, async ([id, kind]) => isUUID(id) && (kind === 'spectrogram' || kind === 'heterodyne') ? backend.audioContent(id, kind) : invalid());
+  handle('bat:choose-audio', 3, async ([id, mode, channel]) => {
+    if (!isUUID(id) || !isAudioMode(mode) || typeof channel !== 'number' || !Number.isInteger(channel) || channel < 0 || channel > 7) return invalid('Choose a survey, a source mode and a channel.');
+    const owner = window;
+    if (!owner || owner.isDestroyed()) return invalid('The application window is closed.');
+    const selected = await dialog.showOpenDialog(owner, { properties: ['openFile', 'multiSelections'], filters: [{ name: 'Full-spectrum WAV', extensions: ['wav'] }] }).catch(() => null);
+    if (!selected) return { ok: false, error: { code: 'picker_failed', message: 'The native file picker could not open. Check desktop permissions and reopen the app.' } };
+    if (selected.canceled || selected.filePaths.length === 0) return { ok: true, value: null };
+    return backend.addSelectedAudio(id, selected.filePaths, mode, channel);
+  });
+  handle('bat:get-heatmap', 3, ([run, segment, mode]) => isUUID(run) && isUUID(segment) && isHeatmapMode(mode) ? backend.getHeatmap(run, segment, mode) : invalid());
+  handle('bat:list-candidates', 1, ([id]) => isUUID(id) ? backend.listCandidates(id) : invalid());
+  handle('bat:decide-candidate', 3, ([run, track, input]) => isUUID(run) && isUUID(track) && isCandidateDecision(input) ? backend.decideCandidate(run, track, input) : invalid('Use a valid candidate decision.'));
+  handle('bat:start-tracking', 1, ([id]) => isUUID(id) ? backend.startTracking(id) : invalid('Select a valid summary run ID.'));
+  handle('bat:tracking-run', 1, ([id]) => isUUID(id) ? backend.trackingRun(id) : invalid('Select a valid tracking run ID.'));
+  handle('bat:list-tracking', 1, ([id]) => isUUID(id) ? backend.listTracking(id) : invalid('Select a valid summary run ID.'));
+  handle('bat:cancel-tracking', 1, ([id]) => isUUID(id) ? backend.cancelTracking(id) : invalid('Select a valid tracking run ID.'));
+  handle('bat:get-tracks', 4, ([run, segment, start, end]) => isUUID(run) && isUUID(segment) && isPTS(start) && (end === null || isPTS(end))
+    ? backend.getTracks(run, segment, start, end) : invalid('Use a tracking run, segment and integer source PTS range.'));
+  handle('bat:choose-media', 2, async ([id, modality]) => {
     if (!isUUID(id)) return invalid('Select a valid session ID.');
+    if (!isModality(modality)) return invalid('Choose active IR or rendered thermal.');
     const media = await backend.getMedia(id);
     if (!media.ok) return media;
     if (media.value.schema_version < 2) return { ok: false, error: { code: 'schema_upgrade_required', message: 'Use Upgrade media storage before choosing original videos.' } };
@@ -185,10 +234,10 @@ async function open(): Promise<void> {
     if (!selected) return { ok: false, error: { code: 'picker_failed', message: 'The native file picker could not open. Check desktop permissions and reopen the app.' } };
     if (selected.canceled || selected.filePaths.length === 0) return { ok: true, value: null };
     // Raw native selections remain in this trusted closure and the authenticated local backend.
-    return backend.importSelectedMedia(id, selected.filePaths);
+    return backend.importSelectedMedia(id, selected.filePaths, modality);
   });
   void backend.start({
-    repoRoot, dataDir, python: process.env.BAT_PYTHON ?? 'python',
+    repoRoot: installRoot, dataDir, ...(app.isPackaged ? { packaged: packagedBackend } : { python: process.env.BAT_PYTHON ?? 'python' }),
     port: process.env.BAT_API_PORT === undefined ? undefined : Number(process.env.BAT_API_PORT),
   });
   await window.loadURL(UI_URL);
@@ -199,7 +248,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', () => { window?.show(); window?.focus(); });
   void app.whenReady().then(open).catch(() => {
-    dialog.showErrorBox('Startup failed', 'The development shell could not load. Run npm run build and check the local data directory.');
+    dialog.showErrorBox('Startup failed', 'Bat Innovation could not load. Check that the local data directory is writable, then restart. A development checkout needs npm run build first.');
     app.quit();
   });
 }

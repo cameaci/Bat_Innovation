@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { BatAPI, NewSession, PreviewRequest, SaveMedia, SummaryRequest, ReviewChange, QAChange } from './contracts';
+import type { Modality, CandidateDecisionInput, HeatmapMode, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, GateChange, CountReviewInput, CountQAInput, BatAPI, NewSession, PreviewRequest, SaveMedia, SummaryRequest, ReviewChange, QAChange } from './contracts';
 
 const api: BatAPI = {
   startExport: (...args: [string]) => ipcRenderer.invoke('bat:start-export', ...args),
@@ -26,7 +26,26 @@ const api: BatAPI = {
   createSession: (...args: [NewSession]) => ipcRenderer.invoke('bat:create-session', ...args),
   getMedia: (...args: [string]) => ipcRenderer.invoke('bat:get-media', ...args),
   upgradeMedia: (...args: []) => ipcRenderer.invoke('bat:upgrade-media', ...args),
-  chooseMedia: (...args: [string]) => ipcRenderer.invoke('bat:choose-media', ...args),
+  chooseMedia: (...args: [string, Modality]) => ipcRenderer.invoke('bat:choose-media', ...args),
+  upgradeStorage: (...args: []) => ipcRenderer.invoke('bat:upgrade-storage', ...args),
+  startTracking: (...args: [string]) => ipcRenderer.invoke('bat:start-tracking', ...args),
+  listCandidates: (...args: [string]) => ipcRenderer.invoke('bat:list-candidates', ...args),
+  getHeatmap: (...args: [string, string, HeatmapMode]) => ipcRenderer.invoke('bat:get-heatmap', ...args),
+  listAudio: (...args: [string]) => ipcRenderer.invoke('bat:list-audio', ...args),
+  chooseAudio: (...args: [string, AudioSourceMode, number]) => ipcRenderer.invoke('bat:choose-audio', ...args),
+  setAudioAnchor: (...args: [string, AudioAnchorInput]) => ipcRenderer.invoke('bat:set-audio-anchor', ...args),
+  deriveAudio: (...args: [string, AudioDeriveInput]) => ipcRenderer.invoke('bat:derive-audio', ...args),
+  audioContent: (...args: [string, 'spectrogram' | 'heterodyne']) => ipcRenderer.invoke('bat:audio-content', ...args),
+  decideCandidate: (...args: [string, string, CandidateDecisionInput]) => ipcRenderer.invoke('bat:decide-candidate', ...args),
+  listGates: (...args: [string]) => ipcRenderer.invoke('bat:list-gates', ...args),
+  saveGate: (...args: [string, string | null, GateChange]) => ipcRenderer.invoke('bat:save-gate', ...args),
+  getCounts: (...args: [string, string]) => ipcRenderer.invoke('bat:get-counts', ...args),
+  saveCountReview: (...args: [string, string, CountReviewInput]) => ipcRenderer.invoke('bat:save-count-review', ...args),
+  saveCountQA: (...args: [string, string, CountQAInput]) => ipcRenderer.invoke('bat:save-count-qa', ...args),
+  trackingRun: (...args: [string]) => ipcRenderer.invoke('bat:tracking-run', ...args),
+  listTracking: (...args: [string]) => ipcRenderer.invoke('bat:list-tracking', ...args),
+  cancelTracking: (...args: [string]) => ipcRenderer.invoke('bat:cancel-tracking', ...args),
+  getTracks: (...args: [string, string, string, string | null]) => ipcRenderer.invoke('bat:get-tracks', ...args),
   importStatus: (...args: [string]) => ipcRenderer.invoke('bat:import-status', ...args),
   cancelImport: (...args: [string]) => ipcRenderer.invoke('bat:cancel-import', ...args),
   saveMedia: (...args: [string, SaveMedia]) => ipcRenderer.invoke('bat:save-media', ...args),

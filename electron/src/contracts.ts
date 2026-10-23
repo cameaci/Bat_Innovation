@@ -57,6 +57,81 @@ export interface MediaSegment {
   continuity_provenance: string | null;
   source_state: 'ready' | 'missing_source' | 'unreadable_source' | 'changed_source';
   metadata: MediaMetadata;
+  /** Declared at import; rendered thermal is display luminance, never temperature. Absent before storage v6. */
+  modality?: Modality;
+  modality_provenance?: string | null;
+}
+
+export type Modality = 'active_ir' | 'rendered_thermal';
+
+/** A derived tracking run over one summary run (feature expansion E2). Tracks are review aids, not animals. */
+export interface TrackingRun {
+  id: string;
+  summary_run_id: string;
+  session_id: string;
+  state: 'queued' | 'running' | 'complete' | 'failed' | 'cancelled' | 'interrupted';
+  algorithm_version: string;
+  parameter_hash: string;
+  parameters: Record<string, unknown>;
+  stats: Record<string, { frames: number; candidates: number; framewide_frames: number; candidate_limit_frames: number; tracks: number }>;
+  error: string | null;
+  started_at_utc: string;
+  finished_at_utc: string | null;
+  track_counts: Record<string, number>;
+  /** Present on a single-run read: tracks overlapping each summary window ID. */
+  window_counts?: Record<string, number>;
+}
+export type GateDirection = 'A_to_B' | 'B_to_A' | 'out_to_in' | 'in_to_out';
+export interface GateValue {
+  name: string; kind: 'line' | 'rect' | 'polygon'; points: [number, number][]; frame_w: number; frame_h: number;
+  label_a: string; label_b: string; entry_direction: 'A_to_B' | 'B_to_A' | 'out_to_in'; hysteresis_px: number;
+}
+export interface Gate extends GateValue { id: string; session_id: string; revision: number; state: 'active' | 'retired' }
+export interface GateChange { actor: string; expected_revision: number; value: GateValue | null }
+export interface CountTotals { entered: number; exited: number; net: number }
+export interface CountReview { action: 'confirm' | 'reject' | 'clear' | 'add_missed'; key: string | null; flipped: boolean; count: number; rationale: string; actor: string; revision: number; utc: string; direction?: GateDirection | null; segment_id?: string | null; pts?: string | null }
+export interface Crossing { key: string; track_id: string; segment_id: string; pts: string; direction: GateDirection; window_id: string | null; scene_changed: boolean; review: CountReview | null }
+export interface GateCounts {
+  gate: Gate; tracking_run_id: string; algorithm_version: string; revision: number; review_revision: number; reviewers: string[];
+  crossings: Crossing[]; missed: CountReview[]; skipped_segments: string[];
+  layers: {
+    algorithm: CountTotals & { excluded_scene_changed: number };
+    reviewer: CountTotals & { reviewed: number; crossings: number; added: number };
+    qa: { decision: 'approve' | 'reject'; actor: string; note: string; utc: string; review_revision: number; stale: boolean; counts: CountTotals | null } | null;
+  };
+}
+export interface CountReviewInput {
+  actor: string; expected_revision: number; action: CountReview['action']; key: string | null; flipped: boolean; count: number;
+  direction: GateDirection | null; segment_id: string | null; pts: string | null; rationale: string;
+}
+export interface CountQAInput { actor: string; expected_revision: number; review_revision: number; decision: 'approve' | 'reject'; note: string }
+
+export interface Candidate {
+  track_id: string; segment_id: string; track_index: number; first_pts: string; last_pts: string; point_count: number; window_id: string | null;
+  revision: number; decision: { decision: 'bat' | 'not_bat' | 'uncertain'; actor: string; note: string; utc: string } | null;
+}
+export type AudioSourceMode = 'full_spectrum' | 'heterodyne' | 'frequency_division' | 'time_expansion' | 'unknown';
+export interface AudioSource {
+  id: string; session_id: string; sha256: string; source_mode: AudioSourceMode; channel: number; retunable: boolean;
+  metadata: { sample_rate: number; channels: number; frames: number; codec: string; filename: string };
+  anchor: { revision: number; actor: string; segment_id: string; video_pts: string; audio_sample: number; note: string; utc: string } | null;
+}
+export interface AudioAnchorInput { actor: string; expected_revision: number; segment_id: string; video_pts: string; audio_sample: number; note: string }
+export interface AudioDeriveInput { segment_id: string; start_pts: string; seconds: number; kind: 'spectrogram' | 'heterodyne'; tune_hz: number | null }
+export interface AudioDerived {
+  id: string; kind: 'spectrogram' | 'heterodyne'; audio_id: string; segment_id: string; mime: string; bytes: number; sha256: string;
+  sample_rate: number; start_sample: number; end_sample: number; requested_start_sample: number; requested_end_sample: number;
+  start_offset_seconds: number; covered_seconds: number; anchor_revision: number; drift_corrected: false;
+  frequency_max_hz?: number; tune_hz?: number;
+}
+export type HeatmapMode = 'first' | 'all' | 'confirmed';
+export interface Heatmap { segment_id: string; mode: HeatmapMode; width: number; height: number; columns: number; rows: number; cells: number[]; points: number; tracks: number }
+export interface CandidateDecisionInput { actor: string; expected_revision: number; decision: 'bat' | 'not_bat' | 'uncertain'; note: string; preview_id: string }
+
+/** points: [source_pts, x, y, area] in original source pixels. */
+export interface TrackRecord {
+  id: string; segment_id: string; track_index: number; first_pts: string; last_pts: string; point_count: number;
+  bbox: [number, number, number, number]; points: [string, number, number, number][];
 }
 
 export interface ClockAnchorInput { segment_id: string; utc: string; provenance: string }
@@ -85,7 +160,7 @@ export interface ImportJob {
   error: { code: string; message: string } | null;
 }
 
-export interface PreviewRequest { segment_id: string; source_pts: string }
+export interface PreviewRequest { segment_id: string; source_pts: string; clip_seconds?: 2 | 6 | 12 }
 export interface PreviewFrame {
   source_pts: string;
   source_time: Rational;
@@ -105,6 +180,7 @@ export interface PreviewManifest {
   elapsed_start: Rational;
   elapsed_end: Rational;
   preview_duration_ms: number;
+  clip_seconds?: 2 | 6 | 12;
   width: number;
   height: number;
   frames: PreviewFrame[];
@@ -295,10 +371,12 @@ export interface QAHistory {
   next_after_revision: number | null;
 }
 
-export type ExportKind = 'observations' | 'audit' | 'manifest';
+export type ExportKind = 'observations' | 'audit' | 'tracks' | 'counts' | 'manifest';
 export interface ExportFile { name: string; bytes: number; sha256: string; rows?: number }
 export interface ExportManifest {
-  schema_version: 'bat-provisional-csv-v1';
+  schema_version: 'bat-provisional-csv-v2';
+  /** Latest complete tracking run included in tracks and counts CSVs, or null. */
+  tracking?: { tracking_run_id: string; algorithm_version: string; parameter_sha256: string; tracks: number; gates: number; note: string } | null;
   provisional_label: string;
   as_of_utc: string;
   run_id: string;
@@ -311,7 +389,7 @@ export interface ExportManifest {
  * descriptor (including its SHA256) exists only in the authenticated
  * transport manifest: a file cannot embed its own content hash. */
 export type ExportDiskManifest = Omit<ExportManifest, 'files'> & {
-  files: Pick<ExportManifest['files'], 'observations' | 'audit'>;
+  files: Pick<ExportManifest['files'], 'observations' | 'audit' | 'tracks' | 'counts'>;
 };
 export interface ExportJob {
   id: string;
@@ -346,7 +424,26 @@ export interface BatAPI {
   createSession(input: NewSession): Promise<ApiResult<RecordingSession>>;
   getMedia(sessionID: string): Promise<ApiResult<MediaSession>>;
   upgradeMedia(): Promise<ApiResult<{ schema_version: 2 | 3 | 4 | 5 }>>;
-  chooseMedia(sessionID: string): Promise<ApiResult<ImportJob | null>>;
+  chooseMedia(sessionID: string, modality: Modality): Promise<ApiResult<ImportJob | null>>;
+  upgradeStorage(): Promise<ApiResult<{ schema_version: number }>>;
+  startTracking(summaryRunID: string): Promise<ApiResult<TrackingRun>>;
+  trackingRun(runID: string): Promise<ApiResult<TrackingRun>>;
+  listTracking(summaryRunID: string): Promise<ApiResult<TrackingRun[]>>;
+  cancelTracking(runID: string): Promise<ApiResult<TrackingRun>>;
+  getTracks(runID: string, segmentID: string, startPTS: string, endPTS: string | null): Promise<ApiResult<TrackRecord[]>>;
+  listGates(sessionID: string): Promise<ApiResult<Gate[]>>;
+  saveGate(sessionID: string, gateID: string | null, change: GateChange): Promise<ApiResult<Gate>>;
+  getCounts(runID: string, gateID: string): Promise<ApiResult<GateCounts>>;
+  saveCountReview(runID: string, gateID: string, input: CountReviewInput): Promise<ApiResult<GateCounts>>;
+  saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>>;
+  listCandidates(runID: string): Promise<ApiResult<Candidate[]>>;
+  getHeatmap(runID: string, segmentID: string, mode: HeatmapMode): Promise<ApiResult<Heatmap>>;
+  listAudio(sessionID: string): Promise<ApiResult<AudioSource[]>>;
+  chooseAudio(sessionID: string, sourceMode: AudioSourceMode, channel: number): Promise<ApiResult<AudioSource[] | null>>;
+  setAudioAnchor(audioID: string, input: AudioAnchorInput): Promise<ApiResult<AudioSource>>;
+  deriveAudio(audioID: string, input: AudioDeriveInput): Promise<ApiResult<AudioDerived>>;
+  audioContent(derivedID: string, kind: 'spectrogram' | 'heterodyne'): Promise<ApiResult<{ bytes: Uint8Array }>>;
+  decideCandidate(runID: string, trackID: string, input: CandidateDecisionInput): Promise<ApiResult<Candidate>>;
   importStatus(jobID: string): Promise<ApiResult<ImportJob>>;
   cancelImport(jobID: string): Promise<ApiResult<ImportJob>>;
   saveMedia(sessionID: string, input: SaveMedia): Promise<ApiResult<MediaSession>>;

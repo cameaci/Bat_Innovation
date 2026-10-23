@@ -93,7 +93,7 @@ class QAService:
                                  "observations": [{**item, "revision": revisions[item["id"]]} for item in first["observations"]]}}
 
     def augment_summary(self, detail: dict) -> dict:
-        if store.schema_version(self.db_path) != store.QA_SCHEMA_VERSION:
+        if store.schema_version(self.db_path) not in store.QA_SCHEMA_VERSIONS:
             return detail
         private = summary_store.private_run(self.db_path, detail["id"])
         rows = {row["id"]: row for row in private["windows"]}

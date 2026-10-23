@@ -1,64 +1,35 @@
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { appendFile, chmod, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { appendFile, chmod, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { expect, test, type Locator } from '@playwright/test';
 import type { BatAPI, MediaSegment } from '../src/contracts';
 import { cleanup, launch, quit, type RunningShell } from './shell-helpers';
+import { addVideos, createSurvey, dialog, digests, displayedPTS, fixtures, getMedia, goTo, openSurvey, summarize } from './ui-helpers';
 
-type FixtureName = 'cfr_mp4' | 'nonzero_mts' | 'irregular_mp4' | 'short_mp4' | 'long_mp4';
-type MarkerPaths = Record<FixtureName, string>;
+type Marker = 'cfr_mp4' | 'nonzero_mts' | 'irregular_mp4' | 'short_mp4' | 'long_mp4';
+const SURVEY = 'Synthetic preview survey';
 
-function generateMarkers(directory: string): MarkerPaths {
-  const result = spawnSync(process.env.BAT_PYTHON ?? 'python', [
-    'backend/tests/preview_fixtures.py', directory,
-  ], { cwd: resolve('.'), encoding: 'utf8', timeout: 45_000 });
-  expect(result.status, result.stderr || 'Marker generation failed').toBe(0);
-  return JSON.parse(result.stdout) as MarkerPaths;
+async function prepared(shell: RunningShell, paths: Record<Marker, string>): Promise<MediaSegment[]> {
+  const sessionID = await createSurvey(shell, SURVEY);
+  await addVideos(shell, Object.values(paths));
+  await summarize(shell);
+  await goTo(shell, 'Review');
+  const media = await getMedia(shell, sessionID);
+  expect(media.clock_anchor).toBeNull();
+  return media.segments;
 }
 
-async function hashes(paths: MarkerPaths): Promise<string[]> {
-  return Promise.all(Object.values(paths).map(async (path) => createHash('sha256').update(await readFile(path)).digest('hex')));
+async function openFile(shell: RunningShell, filename: string): Promise<Locator> {
+  await shell.page.getByRole('article', { name: new RegExp(`of ${filename.replaceAll('.', '\\.')}$`) }).getByRole('button').click();
+  const view = dialog(shell);
+  await expect(view.getByText('Preview ready', { exact: true })).toBeVisible({ timeout: 30_000 });
+  return view;
 }
 
-async function importedMarkers(shell: RunningShell, paths: MarkerPaths): Promise<MediaSegment[]> {
-  const { page } = shell;
-  await page.getByRole('button', { name: 'Create session', exact: true }).click();
-  await page.getByRole('button', { name: 'Inspect media', exact: true }).click();
-  await page.getByRole('button', { name: 'Upgrade media storage', exact: true }).click();
-  // Only the OS selection boundary is replaced; the real imported IDs feed previews.
-  await shell.application.evaluate(({ dialog }, files) => {
-    dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: files })) as typeof dialog.showOpenDialog;
-  }, Object.values(paths));
-  await page.getByRole('button', { name: 'Choose original videos', exact: true }).click();
-  await expect(page.getByRole('article', { name: /marker-long\.mp4/ })).toBeVisible();
-  const inventory = await page.evaluate(async () => {
-    const api = (window as unknown as { batAPI: BatAPI }).batAPI;
-    const sessions = await api.listSessions();
-    if (!sessions.ok) return sessions;
-    return api.getMedia(sessions.value[0]!.id);
-  });
-  expect(inventory.ok).toBe(true);
-  if (!inventory.ok || !('segments' in inventory.value)) throw new Error('Real marker inventory was not available.');
-  expect(inventory.value.clock_anchor).toBeNull();
-  return inventory.value.segments;
-}
-
-async function openPreview(shell: RunningShell, filename: string): Promise<void> {
-  await shell.page.getByRole('article', { name: new RegExp(filename.replaceAll('.', '\\.')) })
-    .getByRole('button', { name: 'Preview source', exact: true }).click();
-  await expect(shell.page.getByRole('heading', { name: 'Source preview', exact: true })).toBeVisible();
-}
-
-async function closePreview(shell: RunningShell): Promise<void> {
-  await shell.page.getByRole('button', { name: 'Close preview', exact: true }).click();
-  await expect(shell.page.getByRole('heading', { name: 'Source preview', exact: true })).not.toBeVisible();
-}
-
-async function displayedPTS(shell: RunningShell): Promise<string | null> {
-  return shell.page.getByText('Displayed source PTS', { exact: true })
-    .evaluate((label) => label.nextElementSibling?.textContent ?? null);
+async function closeFile(view: Locator): Promise<void> {
+  await view.getByRole('button', { name: 'Close window', exact: true }).click();
+  await expect(view).toBeHidden();
 }
 
 function rationalText(numerator: number, denominator: number): string {
@@ -67,8 +38,8 @@ function rationalText(numerator: number, denominator: number): string {
   return `${numerator / left}/${denominator / left}`;
 }
 
-async function timingValue(shell: RunningShell, label: string): Promise<string | null> {
-  return shell.page.getByText(label, { exact: true }).evaluate((element) => element.nextElementSibling?.textContent ?? null);
+async function timing(view: Locator, label: string): Promise<string | null> {
+  return view.getByText(label, { exact: true }).evaluate(element => element.nextElementSibling?.textContent ?? null);
 }
 
 async function marker(video: Locator, seekSeconds?: number): Promise<{ index: number; duration: number; paused: boolean }> {
@@ -102,14 +73,21 @@ async function marker(video: Locator, seekSeconds?: number): Promise<{ index: nu
   }, seekSeconds);
 }
 
-async function requestMarker(shell: RunningShell, sourcePTS: string, expectedIndex: number): Promise<void> {
-  await shell.page.getByLabel('Source PTS', { exact: true }).fill(sourcePTS);
-  await shell.page.getByRole('button', { name: 'Create preview', exact: true }).click();
-  await expect(shell.page.getByText('Preview ready', { exact: true })).toBeVisible();
-  const video = shell.page.getByLabel('Derived source preview', { exact: true });
+/** Request a preview at an exact original PTS through the dialog's Exact position control. */
+async function exact(view: Locator, sourcePTS: string): Promise<void> {
+  const details = view.locator('details', { hasText: 'Exact position' });
+  if (!(await details.evaluate(element => (element as HTMLDetailsElement).open))) await details.getByText('Exact position').click();
+  await view.getByLabel('Source PTS', { exact: true }).fill(sourcePTS);
+  await view.getByRole('button', { name: 'Create preview', exact: true }).click();
+}
+
+async function requestMarker(view: Locator, sourcePTS: string, expectedIndex: number): Promise<void> {
+  await exact(view, sourcePTS);
+  await expect(view.getByText('Preview ready', { exact: true })).toBeVisible();
+  const video = view.getByLabel('Derived source preview', { exact: true });
   await expect(video).toBeVisible();
   const decoded = await marker(video);
-  expect(decoded.index, `Clicked source PTS ${sourcePTS} must display its actual marker`).toBe(expectedIndex);
+  expect(decoded.index, `Requested source PTS ${sourcePTS} must display its actual marker`).toBe(expectedIndex);
   expect(decoded.paused).toBe(true);
   expect(decoded.duration).toBeGreaterThan(0);
   expect(decoded.duration).toBeLessThanOrEqual(2.001);
@@ -117,62 +95,55 @@ async function requestMarker(shell: RunningShell, sourcePTS: string, expectedInd
 
 test.skip(process.platform !== 'linux', 'Preview resource guards and Electron lifecycle are currently verified on Linux only.');
 
-test('imported source PTS displays real marker frames with exact VFR and nonzero-origin mapping', async () => {
-  test.setTimeout(90_000);
+test('window previews display real marker frames with exact VFR and nonzero-origin mapping', async () => {
+  test.setTimeout(120_000);
   const directory = await mkdtemp(join(tmpdir(), 'bat-preview-e2e-'));
-  const paths = generateMarkers(join(directory, 'originals'));
-  const originals = await hashes(paths);
+  const paths = fixtures<Marker>('preview_fixtures', join(directory, 'originals'));
+  const originals = await digests(Object.values(paths));
   let shell: RunningShell | undefined;
   try {
     shell = await launch(join(directory, 'data'));
-    await importedMarkers(shell, paths);
+    await prepared(shell, paths);
     for (const entry of [
-      { filename: 'marker-cfr.mp4', origin: 0, step: 512, denominator: 12800, indices: [0, 4, 7] },
-      { filename: 'marker-nonzero.mts', origin: 129600, step: 3600, denominator: 90000, indices: [0, 4, 7] },
-      { filename: 'marker-irregular.mp4', origin: 0, step: 512, denominator: 12800, indices: [0, 4, 7] },
-      { filename: 'marker-short.mp4', origin: 0, step: 512, denominator: 12800, indices: [0, 1, 2] },
-      { filename: 'marker-long.mp4', origin: 0, step: 512, denominator: 12800, indices: [0, 64, 79] },
+      { filename: 'marker-cfr.mp4', origin: 0, step: 512, denominator: 12800, indices: [4, 7] },
+      { filename: 'marker-nonzero.mts', origin: 129600, step: 3600, denominator: 90000, indices: [4, 7] },
+      { filename: 'marker-irregular.mp4', origin: 0, step: 512, denominator: 12800, indices: [4, 7] },
+      { filename: 'marker-short.mp4', origin: 0, step: 512, denominator: 12800, indices: [1, 2] },
+      { filename: 'marker-long.mp4', origin: 0, step: 512, denominator: 12800, indices: [64, 79] },
     ]) {
-      await openPreview(shell, entry.filename);
-      await shell.page.getByRole('button', { name: 'First frame', exact: true }).click();
-      await expect(shell.page.getByLabel('Source PTS', { exact: true })).toHaveValue(String(entry.origin));
+      // Opening a window previews its first decoded frame automatically.
+      const view = await openFile(shell, entry.filename);
+      expect((await marker(view.getByLabel('Derived source preview', { exact: true }))).index).toBe(0);
+      await expect.poll(() => displayedPTS(view)).toBe(String(entry.origin));
       for (const index of entry.indices) {
         const pts = String(entry.origin + index * entry.step);
-        await requestMarker(shell, pts, index);
-        await expect.poll(() => displayedPTS(shell!)).toBe(pts);
-        await expect.poll(() => timingValue(shell!, 'Displayed segment elapsed (seconds)'))
-          .toBe(rationalText(index * entry.step, entry.denominator));
-        await expect.poll(() => timingValue(shell!, 'Displayed source time (seconds)'))
-          .toBe(rationalText(entry.origin + index * entry.step, entry.denominator));
+        await requestMarker(view, pts, index);
+        await expect.poll(() => displayedPTS(view)).toBe(pts);
+        await expect.poll(() => timing(view, 'Displayed segment elapsed (seconds)')).toBe(rationalText(index * entry.step, entry.denominator));
+        await expect(view.getByLabel('Displayed original frame')).toContainText(`source time ${rationalText(entry.origin + index * entry.step, entry.denominator)} s`);
       }
-      await shell.page.getByRole('button', { name: 'Last frame', exact: true }).click();
-      await expect(shell.page.getByLabel('Source PTS', { exact: true }))
-        .toHaveValue(String(entry.origin + entry.indices.at(-1)! * entry.step));
-      await closePreview(shell);
+      await closeFile(view);
     }
-
-    await openPreview(shell, 'marker-irregular.mp4');
-    await requestMarker(shell, '0', 0);
-    expect((await marker(shell.page.getByLabel('Derived source preview', { exact: true }), 0.16)).index).toBe(4);
-    await expect.poll(() => displayedPTS(shell!)).toBe('2048');
+    const view = await openFile(shell, 'marker-irregular.mp4');
+    expect((await marker(view.getByLabel('Derived source preview', { exact: true }), 0.16)).index).toBe(4);
+    await expect.poll(() => displayedPTS(view)).toBe('2048');
     // 1024 lies in a VFR gap; the chosen policy is the first decoded PTS at or after it.
-    await requestMarker(shell, '1024', 3);
-    await expect.poll(() => displayedPTS(shell!)).toBe('1536');
-    expect(await timingValue(shell, 'Requested / actual first source PTS')).toBe('1024 / 1536');
-    expect(await timingValue(shell, 'Seek delta (seconds)')).toBe('1/25');
-    await closePreview(shell);
-    expect(await hashes(paths), 'Preview generation never changes original source bytes').toEqual(originals);
+    await requestMarker(view, '1024', 3);
+    await expect.poll(() => displayedPTS(view)).toBe('1536');
+    expect(await timing(view, 'Requested / actual first source PTS')).toBe('1024 / 1536');
+    expect(await timing(view, 'Seek delta (seconds)')).toBe('1/25');
+    await closeFile(view);
+    expect(await digests(Object.values(paths)), 'Preview generation never changes original source bytes').toEqual(originals);
     await expect(shell.page.locator('body')).not.toContainText(directory);
     await quit(shell);
     shell = undefined;
     expect(await readdir(join(directory, 'data', 'previews'))).toEqual([]);
-
     shell = await launch(join(directory, 'data'));
-    await shell.page.getByRole('button', { name: 'Inspect media', exact: true }).click();
-    await openPreview(shell, 'marker-nonzero.mts');
-    await requestMarker(shell, '144000', 4);
-    await expect.poll(() => displayedPTS(shell!)).toBe('144000');
-    await closePreview(shell);
+    await openSurvey(shell, SURVEY, 'Review');
+    const reopened = await openFile(shell, 'marker-nonzero.mts');
+    await requestMarker(reopened, '144000', 4);
+    await expect.poll(() => displayedPTS(reopened)).toBe('144000');
+    await closeFile(reopened);
     await quit(shell);
     shell = undefined;
     expect(await readdir(join(directory, 'data', 'previews'))).toEqual([]);
@@ -183,12 +154,13 @@ test('imported source PTS displays real marker frames with exact VFR and nonzero
 });
 
 test('invalid requests, cancellation and changed or missing originals clear displayed content', async () => {
+  test.setTimeout(120_000);
   const directory = await mkdtemp(join(tmpdir(), 'bat-preview-errors-'));
-  const paths = generateMarkers(join(directory, 'originals'));
+  const paths = fixtures<Marker>('preview_fixtures', join(directory, 'originals'));
   let shell: RunningShell | undefined;
   try {
     shell = await launch(join(directory, 'data'));
-    const segments = await importedMarkers(shell, paths);
+    const segments = await prepared(shell, paths);
     const rejected = await shell.page.evaluate(async (segmentID) => {
       const api = (window as unknown as { batAPI: BatAPI }).batAPI;
       const start = api.startPreview as (input: unknown) => ReturnType<BatAPI['startPreview']>;
@@ -201,31 +173,26 @@ test('invalid requests, cancellation and changed or missing originals clear disp
       expect.objectContaining({ ok: false, error: expect.objectContaining({ code: 'invalid' }) }),
       expect.objectContaining({ ok: false, error: expect.objectContaining({ code: 'invalid' }) }),
     ]);
-    await openPreview(shell, 'marker-nonzero.mts');
-    await shell.page.getByLabel('Source PTS', { exact: true }).fill('0');
-    await shell.page.getByRole('button', { name: 'Create preview', exact: true }).click();
-    await expect(shell.page.getByRole('alert')).toContainText('first through the last decoded frame');
-    await expect(shell.page.getByLabel('Derived source preview', { exact: true })).toHaveCount(0);
-    await closePreview(shell);
-
-    await openPreview(shell, 'marker-short.mp4');
-    await requestMarker(shell, '0', 0);
-    await shell.page.getByRole('button', { name: 'Cancel preview', exact: true }).click();
-    await expect(shell.page.getByRole('status').filter({ hasText: /cancel/i })).toBeVisible();
-    await expect(shell.page.getByLabel('Derived source preview', { exact: true })).toHaveCount(0);
-    await requestMarker(shell, '0', 0);
+    let view = await openFile(shell, 'marker-nonzero.mts');
+    await exact(view, '0');
+    await expect(view.getByRole('alert')).toContainText('first through the last decoded frame');
+    await expect(view.getByLabel('Derived source preview', { exact: true })).toHaveCount(0);
+    await closeFile(view);
+    view = await openFile(shell, 'marker-short.mp4');
+    await view.getByRole('button', { name: 'Cancel preview', exact: true }).click();
+    await expect(view.getByRole('status').filter({ hasText: /cancel/i })).toBeVisible();
+    await expect(view.getByLabel('Derived source preview', { exact: true })).toHaveCount(0);
+    await requestMarker(view, '0', 0);
     await appendFile(paths.short_mp4, 'Synthetic source changed after preview.');
-    await expect(shell.page.getByRole('alert')).toContainText(/changed/i);
-    await expect(shell.page.getByLabel('Derived source preview', { exact: true })).toHaveCount(0);
-    await closePreview(shell);
-
-    await openPreview(shell, 'marker-cfr.mp4');
-    await requestMarker(shell, '0', 0);
+    await expect(view.getByRole('alert')).toContainText(/changed/i);
+    await expect(view.getByLabel('Derived source preview', { exact: true })).toHaveCount(0);
+    await closeFile(view);
+    view = await openFile(shell, 'marker-cfr.mp4');
     await rm(paths.cfr_mp4);
-    await expect(shell.page.getByRole('alert')).toContainText(/missing|unavailable/i);
-    await expect(shell.page.getByLabel('Derived source preview', { exact: true })).toHaveCount(0);
+    await expect(view.getByRole('alert')).toContainText(/missing|unavailable/i);
+    await expect(view.getByLabel('Derived source preview', { exact: true })).toHaveCount(0);
     await expect(shell.page.locator('body')).not.toContainText(directory);
-    await closePreview(shell);
+    await closeFile(view);
     await quit(shell);
     shell = undefined;
     expect(await readdir(join(directory, 'data', 'previews'))).toEqual([]);
@@ -237,32 +204,27 @@ test('invalid requests, cancellation and changed or missing originals clear disp
 
 test('unreadable originals and unknown final timing produce explicit preview errors', async () => {
   test.skip(process.getuid?.() === 0, 'The real permission check requires an unprivileged Linux user; backend injection coverage also runs as root.');
+  test.setTimeout(120_000);
   const directory = await mkdtemp(join(tmpdir(), 'bat-preview-permissions-'));
-  const paths = generateMarkers(join(directory, 'originals'));
+  const paths = fixtures<Marker>('preview_fixtures', join(directory, 'originals'));
   let shell: RunningShell | undefined;
   try {
     shell = await launch(join(directory, 'data'));
-    const segments = await importedMarkers(shell, paths);
-    await openPreview(shell, 'marker-irregular.mp4');
-    await requestMarker(shell, '0', 0);
+    const segments = await prepared(shell, paths);
+    const view = await openFile(shell, 'marker-irregular.mp4');
     await chmod(paths.irregular_mp4, 0o000);
-    await expect(shell.page.getByRole('alert')).toContainText(/cannot be read|permissions|access/i);
-    await expect(shell.page.getByLabel('Derived source preview', { exact: true })).toHaveCount(0);
-    await closePreview(shell);
-
-    // Unknown end is a supported persisted import state; exercise the real API/UI refusal.
+    await expect(view.getByRole('alert')).toContainText(/cannot be read|permissions|access/i);
+    await expect(view.getByLabel('Derived source preview', { exact: true })).toHaveCount(0);
+    await closeFile(view);
+    // Unknown end is a supported persisted import state; exercise the real API refusal.
     const short = segments.find(segment => segment.metadata.filename === 'marker-short.mp4')!;
-    const prepared = spawnSync(process.env.BAT_PYTHON ?? 'python', ['-c',
+    const prepared_ = spawnSync(process.env.BAT_PYTHON ?? 'python', ['-c',
       'import json,sqlite3,sys; db=sqlite3.connect(sys.argv[1]); row=db.execute("SELECT metadata_json FROM segment WHERE id=?",(sys.argv[2],)).fetchone(); value=json.loads(row[0]); value["end_time"]=None; value["elapsed_end"]=None; db.execute("UPDATE segment SET metadata_json=? WHERE id=?",(json.dumps(value),sys.argv[2])); db.commit(); db.close()',
       join(directory, 'data', 'bat_innovation.sqlite3'), short.id,
     ], { cwd: resolve('.'), encoding: 'utf8', timeout: 5000 });
-    expect(prepared.status, 'Synthetic unknown-end fixture must be saved').toBe(0);
-    await openPreview(shell, 'marker-short.mp4');
-    await shell.page.getByRole('button', { name: 'Create preview', exact: true }).click();
-    await expect(shell.page.getByRole('alert')).toContainText(/timing|frame boundaries/i);
-    await expect(shell.page.getByLabel('Derived source preview', { exact: true })).toHaveCount(0);
-    await expect(shell.page.locator('body')).not.toContainText(directory);
-    await closePreview(shell);
+    expect(prepared_.status, 'Synthetic unknown-end fixture must be saved').toBe(0);
+    const refused = await shell.page.evaluate(id => (window as unknown as { batAPI: BatAPI }).batAPI.startPreview({ segment_id: id, source_pts: '0' }), short.id);
+    expect(refused).toMatchObject({ ok: false, error: { code: 'unknown_timing' } });
     await quit(shell);
     shell = undefined;
     expect(await readdir(join(directory, 'data', 'previews'))).toEqual([]);
@@ -274,13 +236,13 @@ test('unreadable originals and unknown final timing produce explicit preview err
 });
 
 test('a running preview can be cancelled and Electron shutdown reaps its worker', async () => {
+  test.setTimeout(120_000);
   const directory = await mkdtemp(join(tmpdir(), 'bat-preview-stop-'));
-  const paths = generateMarkers(join(directory, 'originals'));
+  const paths = fixtures<Marker>('preview_fixtures', join(directory, 'originals'));
   let shell: RunningShell | undefined;
   let stoppedPID: number | undefined;
-
   async function stopWorker(backendPID: number): Promise<number> {
-    const deadline = Date.now() + 3000;
+    const deadline = Date.now() + 5000;
     while (Date.now() < deadline) {
       const children = spawnSync('ps', ['--ppid', String(backendPID), '-o', 'pid=,args='], { encoding: 'utf8' });
       const line = children.stdout.split('\n').find(value => /\s-m\s+backend\.app\.preview_worker(?:\s|$)/.test(value));
@@ -292,29 +254,26 @@ test('a running preview can be cancelled and Electron shutdown reaps its worker'
     }
     throw new Error('The real preview worker did not start.');
   }
-
   function exited(pid: number): boolean {
     try { process.kill(pid, 0); return false; } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ESRCH') return true;
       throw error;
     }
   }
-
   try {
     shell = await launch(join(directory, 'data'));
-    await importedMarkers(shell, paths);
-    await openPreview(shell, 'marker-long.mp4');
-    const creating = shell.page.getByRole('button', { name: 'Create preview', exact: true }).click();
+    await prepared(shell, paths);
+    // Opening the window starts its preview; stop the real worker mid-encode.
+    const opening = shell.page.getByRole('article', { name: /of marker-long\.mp4$/ }).getByRole('button').click();
     stoppedPID = await stopWorker(shell.backendPid);
-    await creating;
-    await shell.page.getByRole('button', { name: 'Cancel preview', exact: true }).click();
+    await opening;
+    const view = dialog(shell);
+    await view.getByRole('button', { name: 'Cancel preview', exact: true }).click();
     await expect.poll(() => exited(stoppedPID!)).toBe(true);
     stoppedPID = undefined;
-    await expect(shell.page.getByRole('button', { name: 'Create preview', exact: true })).toBeEnabled();
-    await expect(shell.page.getByLabel('Derived source preview', { exact: true })).toHaveCount(0);
+    await expect(view.getByLabel('Derived source preview', { exact: true })).toHaveCount(0);
     expect(await readdir(join(directory, 'data', 'previews'))).toEqual([]);
-
-    const restarting = shell.page.getByRole('button', { name: 'Create preview', exact: true }).click();
+    const restarting = exact(view, '0');
     stoppedPID = await stopWorker(shell.backendPid);
     await restarting;
     const workerPID = stoppedPID;

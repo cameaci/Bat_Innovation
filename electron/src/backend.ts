@@ -8,7 +8,53 @@ import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia, SummaryRequest, SummaryRun, SummaryDetail, ReviewChange, WindowReview, ReviewHistory } from './contracts';
-import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory } from './contracts';
+import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, TrackingRun, TrackRecord, Gate, GateChange, GateCounts, CountReviewInput, CountQAInput, Candidate, CandidateDecisionInput, Heatmap, HeatmapMode, AudioSource, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, AudioDerived } from './contracts';
+
+export const isAudioMode = (value: unknown): value is AudioSourceMode =>
+  ['full_spectrum', 'heterodyne', 'frequency_division', 'time_expansion', 'unknown'].includes(String(value));
+export function isAudioAnchor(input: unknown): input is AudioAnchorInput {
+  return object(input) && exactKeys(input, ['actor', 'expected_revision', 'segment_id', 'video_pts', 'audio_sample', 'note']) && text(input.actor, 120) &&
+    isReviewCursor(input.expected_revision) && isUUID(input.segment_id) && isPTS(input.video_pts) &&
+    typeof input.audio_sample === 'number' && Number.isSafeInteger(input.audio_sample) && input.audio_sample >= 0 && text(input.note, 2000, false);
+}
+export function isAudioDerive(input: unknown): input is AudioDeriveInput {
+  return object(input) && exactKeys(input, ['segment_id', 'start_pts', 'seconds', 'kind', 'tune_hz']) && isUUID(input.segment_id) && isPTS(input.start_pts) &&
+    count(input.seconds, 12) && (input.seconds as number) >= 1 && (input.kind === 'spectrogram' || input.kind === 'heterodyne') &&
+    (input.tune_hz === null || (typeof input.tune_hz === 'number' && input.tune_hz >= 10000 && input.tune_hz <= 150000));
+}
+export const isHeatmapMode = (value: unknown): value is HeatmapMode => value === 'first' || value === 'all' || value === 'confirmed';
+
+const within = (input: Record<string, unknown>, keys: string[]) => Object.keys(input).every(key => keys.includes(key));
+const text = (value: unknown, max: number, required = true) => typeof value === 'string' && value.length <= max && (!required || value.trim().length > 0);
+const count = (value: unknown, max: number) => typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= max;
+export function isGateChange(input: unknown): input is GateChange {
+  if (!object(input) || !exactKeys(input, ['actor', 'expected_revision', 'value']) || !text(input.actor, 120) || !isReviewCursor(input.expected_revision)) return false;
+  const value = input.value;
+  if (value === null) return true;
+  return object(value) && exactKeys(value, ['name', 'kind', 'points', 'frame_w', 'frame_h', 'label_a', 'label_b', 'entry_direction', 'hysteresis_px']) &&
+    text(value.name, 60) && text(value.label_a, 60) && text(value.label_b, 60) && ['line', 'rect', 'polygon'].includes(String(value.kind)) &&
+    ['A_to_B', 'B_to_A', 'out_to_in'].includes(String(value.entry_direction)) && count(value.frame_w, 8192) && count(value.frame_h, 8192) &&
+    typeof value.hysteresis_px === 'number' && value.hysteresis_px >= 0 && value.hysteresis_px <= 200 &&
+    Array.isArray(value.points) && value.points.length >= 2 && value.points.length <= 32 &&
+    value.points.every(point => Array.isArray(point) && point.length === 2 && point.every(item => typeof item === 'number' && Number.isFinite(item)));
+}
+export function isCountReviewInput(input: unknown): input is CountReviewInput {
+  return object(input) && within(input, ['actor', 'expected_revision', 'action', 'key', 'flipped', 'count', 'direction', 'segment_id', 'pts', 'rationale']) &&
+    text(input.actor, 120) && isReviewCursor(input.expected_revision) && ['confirm', 'reject', 'clear', 'add_missed'].includes(String(input.action)) &&
+    (input.key === null || isUUID(input.key)) && typeof input.flipped === 'boolean' && count(input.count, 10000) &&
+    (input.direction === null || ['A_to_B', 'B_to_A', 'out_to_in', 'in_to_out'].includes(String(input.direction))) &&
+    (input.segment_id === null || isUUID(input.segment_id)) && (input.pts === null || isPTS(input.pts)) && text(input.rationale, 2000, false);
+}
+export function isCountQAInput(input: unknown): input is CountQAInput {
+  return object(input) && exactKeys(input, ['actor', 'expected_revision', 'review_revision', 'decision', 'note']) && text(input.actor, 120) &&
+    isReviewCursor(input.expected_revision) && isReviewCursor(input.review_revision) && ['approve', 'reject'].includes(String(input.decision)) && text(input.note, 2000, false);
+}
+export function isCandidateDecision(input: unknown): input is CandidateDecisionInput {
+  return object(input) && exactKeys(input, ['actor', 'expected_revision', 'decision', 'note', 'preview_id']) && text(input.actor, 120) &&
+    isReviewCursor(input.expected_revision) && ['bat', 'not_bat', 'uncertain'].includes(String(input.decision)) && text(input.note, 2000, false) && isUUID(input.preview_id);
+}
+export const isPTS = (value: unknown): value is string => typeof value === 'string' && /^-?\d{1,19}$/.test(value);
+export const isModality = (value: unknown): value is Modality => value === 'active_ir' || value === 'rendered_thermal';
 
 const unavailable = (message = 'Backend unavailable. Reopen the app after checking Python and the installed backend dependencies.') =>
   ({ ok: false, error: { code: 'unavailable', message } }) as const;
@@ -77,10 +123,12 @@ export function isSummaryRequest(input: unknown): input is SummaryRequest {
     typeof input.window_seconds === 'number' && Number.isInteger(input.window_seconds) && input.window_seconds >= 1 && input.window_seconds <= 120;
 }
 
-export const MAX_PREVIEW_BYTES = 8 * 1024 * 1024;
+// Highlight clips (E5) of up to 12 s; measured 4.4 MB for 12 s of 640x360 noise, so this leaves room for 960x540.
+export const MAX_PREVIEW_BYTES = 32 * 1024 * 1024;
 export function isPreviewRequest(input: unknown): input is PreviewRequest {
-  if (!object(input) || !exactKeys(input, ['segment_id', 'source_pts']) || !isUUID(input.segment_id) ||
-      typeof input.source_pts !== 'string' || !/^-?\d{1,19}$/.test(input.source_pts)) return false;
+  if (!object(input) || !(exactKeys(input, ['segment_id', 'source_pts']) || exactKeys(input, ['segment_id', 'source_pts', 'clip_seconds'])) ||
+      !isUUID(input.segment_id) || typeof input.source_pts !== 'string' || !/^-?\d{1,19}$/.test(input.source_pts) ||
+      (input.clip_seconds !== undefined && ![2, 6, 12].includes(input.clip_seconds as number))) return false;
   const pts = BigInt(input.source_pts);
   return pts >= -(2n ** 63n) && pts < 2n ** 63n;
 }
@@ -104,13 +152,49 @@ export function isSaveMedia(input: unknown): input is SaveMedia {
 
 // Only known error codes cross the desktop boundary; arbitrary response text never does.
 const mediaErrors: Record<string, string> = {
+  storage_busy: 'Wait for the active media operation before upgrading storage.',
+  storage_upgrade_failed: 'The storage upgrade failed; the existing database was preserved.',
+  tracking_busy: 'Another media operation is running. Wait for it or cancel it before tracking.',
+  tracking_missing: 'The selected tracking or summary run does not exist.',
+  tracking_upgrade_required: 'Upgrade storage before tracking.',
+  tracking_summary_running: 'Wait for the summary run to finish before tracking it.',
+  tracking_limit: 'Tracking exceeded a configured time, memory, frame or track limit. No partial segment was saved.',
+  tracking_limits_unavailable: 'Hard process limits are unavailable on this platform. Only Linux and Windows are supported.',
+  tracking_failed: 'Tracking failed. Completed segments remain; the run is marked failed.',
+  tracking_integrity: 'Stored track points failed their integrity check.',
+  track_limit: 'Too many tracks overlap this interval to show at once.',
+  count_upgrade_required: 'Upgrade storage before drawing gates.',
+  count_invalid: 'Check the count action: a reason is needed when rejecting, flipping, changing a count or adding a crossing.',
+  count_conflict: 'Counts or the gate changed since you loaded them. Refresh before saving.',
+  count_same_actor: 'QA must be done by a different person than the count reviewer.',
+  gate_missing: 'The gate does not exist.',
+  gate_conflict: 'The gate changed or was retired. Reload it before editing.',
+  audio_upgrade_required: 'Upgrade storage before adding audio.',
+  audio_busy: 'Another media operation is running. Wait for it before working with audio.',
+  audio_failed: 'The audio operation failed. The original recording was not changed.',
+  audio_limit: 'The audio operation exceeded a time, memory or size limit.',
+  audio_limits_unavailable: 'Hard process limits are unavailable on this platform. Only Linux and Windows are supported.',
+  unsupported_audio: 'Only uncompressed PCM WAV recordings with one audio stream are supported.',
+  outside_audio: 'The audio recording does not cover this part of the video.',
+  not_retunable: 'This recording is not full-spectrum (or its sample rate is too low for this tuning), so it cannot be retuned.',
+  audio_not_synchronised: 'Set a sync anchor for this video before showing its audio.',
+  audio_invalid: 'Check the audio settings: the anchor must lie inside both recordings and the channel must exist.',
+  audio_missing: 'The audio recording does not exist.',
+  audio_duplicate: 'This audio recording is already added.',
+  audio_conflict: 'The sync anchor changed. Reload before saving.',
+  candidate_upgrade_required: 'Upgrade storage before reviewing candidates.',
+  candidate_invalid: 'Enter your name and choose bat, not a bat or uncertain.',
+  candidate_missing: 'The candidate track does not exist.',
+  candidate_unverified: 'Watch an original preview that covers this candidate before deciding.',
+  candidate_conflict: 'This candidate changed since you loaded it. Reload before saving.',
+  gate_invalid: 'The gate is too small, outside the frame or has the wrong number of points for its type.',
   export_busy: 'Another export or this processing run is active. Wait or cancel, then retry.',
   export_too_large: 'Export exceeds a row, byte, CPU, memory, snapshot or time limit. No partial export was published.',
   export_stale: 'Export evidence or coverage changed or is inconsistent. Refresh and retry.',
   export_write_failed: 'The provisional export could not be written. Check local storage and retry.',
   export_missing: 'This export or run is unavailable. Generate the provisional export again.',
   export_schema_required: 'Explicitly upgrade to QA schema 5 before exporting provisional CSVs.',
-  export_limits_unavailable: 'Safe export process limits are currently verified on Linux only.',
+  export_limits_unavailable: 'Safe export process limits are unavailable on this platform. Only Linux and Windows are supported.',
   export_cancelled: 'Export cancelled. Incomplete managed files were removed.',
   qa_schema_required: 'Use Upgrade QA storage before independent second review.',
   qa_upgrade_failed: 'QA storage could not be upgraded. The existing database was preserved.',
@@ -137,7 +221,7 @@ const mediaErrors: Record<string, string> = {
   summary_busy: 'A media operation is running. Wait for it or cancel it before starting another.',
   summary_missing: 'This summary run or window is unavailable. Refresh the session.',
   summary_not_ready: 'This window has no complete image. Its coverage record remains visible.',
-  summary_limits_unavailable: 'Summary resource limits are unavailable on this platform. Windows execution remains unverified.',
+  summary_limits_unavailable: 'Summary resource limits are unavailable on this platform. Only Linux and Windows are supported.',
   summary_limit: 'This run exceeds a time, frame, memory, image, source or disk limit. Incomplete windows remain visible.',
   summary_failed: 'Summary processing failed. Inspect the coverage records and original recordings before retrying.',
   summary_image_invalid: 'This derived image is missing or corrupt. Its window remains incomplete; start a new run to regenerate it.',
@@ -149,7 +233,7 @@ const mediaErrors: Record<string, string> = {
   schema_upgrade_failed: 'Media storage could not be upgraded. Close the app and check the local database before retrying.',
   session_missing: 'This session no longer exists. Refresh the session list.',
   job_missing: 'This import is no longer available. Refresh the session media.',
-  import_limits_unavailable: 'Media import process limits are unavailable on this platform. Only Linux development imports are verified.',
+  import_limits_unavailable: 'Media import process limits are unavailable on this platform. Only Linux and Windows are supported.',
   import_busy: 'A media import is already running. Wait for it or cancel it before importing again.',
   invalid_sources: 'Choose readable local .MTS or .MP4 original files using the native picker.',
   invalid_timeline: 'Check segment order, continuity evidence and the optional UTC clock anchor.',
@@ -169,7 +253,7 @@ const mediaErrors: Record<string, string> = {
   preview_busy: 'A preview is running. Wait for it or cancel it before starting another media operation.',
   preview_missing: 'This preview expired or was replaced. Request a new preview from the saved segment.',
   preview_not_ready: 'This preview has no complete content. Wait for it or request a new preview.',
-  preview_limits_unavailable: 'Preview resource limits are not available on this platform. Windows preview execution remains unverified.',
+  preview_limits_unavailable: 'Preview resource limits are unavailable on this platform. Only Linux and Windows are supported.',
   preview_limit: 'This preview exceeds the time, frame, memory, dimensions or byte limit. Choose another source time or supported recording.',
   preview_failed: 'Preview generation failed. Check the original recording and local storage before retrying.',
 };
@@ -179,7 +263,7 @@ function mediaFailure(code: unknown) {
 type ApiRoute = '/api/exports' | `/api/exports/${string}` | `/api/exports/${string}/cancel` | '/api/qa/upgrade' | `/api/summary-windows/${string}/qa` | `/api/summary-windows/${string}/qa-actions` | `/api/summary-windows/${string}/qa-history?after_revision=${number}` | '/api/reviews/upgrade' | `/api/summary-windows/${string}/review` | `/api/summary-windows/${string}/review-actions` | `/api/summary-windows/${string}/review-history?after_revision=${number}` | '/api/health' | '/api/sessions' | '/api/media/upgrade' | '/api/media/import' |
   `/api/sessions/${string}/media` | `/api/media/import/${string}` | `/api/media/import/${string}/cancel` |
   '/api/summaries/upgrade' | '/api/summaries' | `/api/summaries/${string}` | `/api/summaries/${string}/cancel` | `/api/sessions/${string}/summary-runs` |
-  '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
+  '/api/storage/upgrade' | `/api/sessions/${string}/audio` | `/api/audio/${string}` | `/api/sessions/${string}/gates` | `/api/sessions/${string}/gates/${string}` | '/api/tracking' | `/api/tracking/${string}` | `/api/summaries/${string}/tracking` | '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
 
 /** Read only known, redacted startup codes from the Python process. */
 function safeStartupFailure(output: string): string | undefined {
@@ -262,13 +346,62 @@ export class BackendClient {
     return isUUID(sessionID) ? this.call(`/api/sessions/${sessionID}/media`) : Promise.resolve(invalid());
   }
   upgradeMedia(): Promise<ApiResult<{ schema_version: 2 | 3 | 4 | 5 }>> { return this.call('/api/media/upgrade', 'POST'); }
+  upgradeStorage(): Promise<ApiResult<{ schema_version: number }>> { return this.call('/api/storage/upgrade', 'POST'); }
+  startTracking(summaryRunID: string): Promise<ApiResult<TrackingRun>> {
+    return isUUID(summaryRunID) ? this.call('/api/tracking', 'POST', { summary_run_id: summaryRunID }) : Promise.resolve(invalid());
+  }
+  trackingRun(runID: string): Promise<ApiResult<TrackingRun>> { return isUUID(runID) ? this.call(`/api/tracking/${runID}`) : Promise.resolve(invalid()); }
+  listTracking(summaryRunID: string): Promise<ApiResult<TrackingRun[]>> {
+    return isUUID(summaryRunID) ? this.call(`/api/summaries/${summaryRunID}/tracking`) : Promise.resolve(invalid());
+  }
+  cancelTracking(runID: string): Promise<ApiResult<TrackingRun>> { return isUUID(runID) ? this.call(`/api/tracking/${runID}/cancel`, 'POST') : Promise.resolve(invalid()); }
+  getTracks(runID: string, segmentID: string, startPTS: string, endPTS: string | null): Promise<ApiResult<TrackRecord[]>> {
+    if (!isUUID(runID) || !isUUID(segmentID) || !isPTS(startPTS) || (endPTS !== null && !isPTS(endPTS))) return Promise.resolve(invalid());
+    return this.call(`/api/tracking/${runID}/tracks?segment_id=${segmentID}&start_pts=${startPTS}${endPTS === null ? '' : `&end_pts=${endPTS}`}`);
+  }
+  listGates(sessionID: string): Promise<ApiResult<Gate[]>> { return isUUID(sessionID) ? this.call(`/api/sessions/${sessionID}/gates`) : Promise.resolve(invalid()); }
+  saveGate(sessionID: string, gateID: string | null, change: GateChange): Promise<ApiResult<Gate>> {
+    if (!isUUID(sessionID) || !(gateID === null || isUUID(gateID)) || !isGateChange(change)) return Promise.resolve(invalid());
+    return gateID === null ? this.call(`/api/sessions/${sessionID}/gates`, 'POST', change) : this.call(`/api/sessions/${sessionID}/gates/${gateID}`, 'PUT', change);
+  }
+  getCounts(runID: string, gateID: string): Promise<ApiResult<GateCounts>> {
+    return isUUID(runID) && isUUID(gateID) ? this.call(`/api/tracking/${runID}/gates/${gateID}/counts`) : Promise.resolve(invalid());
+  }
+  saveCountReview(runID: string, gateID: string, input: CountReviewInput): Promise<ApiResult<GateCounts>> {
+    return isUUID(runID) && isUUID(gateID) && isCountReviewInput(input) ? this.call(`/api/tracking/${runID}/gates/${gateID}/review`, 'POST', input) : Promise.resolve(invalid());
+  }
+  saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>> {
+    return isUUID(runID) && isUUID(gateID) && isCountQAInput(input) ? this.call(`/api/tracking/${runID}/gates/${gateID}/qa`, 'POST', input) : Promise.resolve(invalid());
+  }
+  listCandidates(runID: string): Promise<ApiResult<Candidate[]>> { return isUUID(runID) ? this.call(`/api/tracking/${runID}/candidates`) : Promise.resolve(invalid()); }
+  listAudio(sessionID: string): Promise<ApiResult<AudioSource[]>> { return isUUID(sessionID) ? this.call(`/api/sessions/${sessionID}/audio`) : Promise.resolve(invalid()); }
+  // Called only by the main process after a native selection. Never exposed in BatAPI.
+  addSelectedAudio(sessionID: string, paths: string[], sourceMode: AudioSourceMode, channel: number): Promise<ApiResult<AudioSource[]>> {
+    return isUUID(sessionID) && isAudioMode(sourceMode) && count(channel, 7) && paths.length > 0 && paths.every(path => typeof path === 'string' && isAbsolute(path))
+      ? this.call(`/api/sessions/${sessionID}/audio`, 'POST', { paths, source_mode: sourceMode, channel }) : Promise.resolve(invalid());
+  }
+  setAudioAnchor(audioID: string, input: AudioAnchorInput): Promise<ApiResult<AudioSource>> {
+    return isUUID(audioID) && isAudioAnchor(input) ? this.call(`/api/audio/${audioID}/anchor`, 'POST', input) : Promise.resolve(invalid());
+  }
+  deriveAudio(audioID: string, input: AudioDeriveInput): Promise<ApiResult<AudioDerived>> {
+    return isUUID(audioID) && isAudioDerive(input) ? this.call(`/api/audio/${audioID}/derive`, 'POST', input) : Promise.resolve(invalid());
+  }
+  audioContent(derivedID: string, kind: 'spectrogram' | 'heterodyne'): Promise<ApiResult<{ bytes: Uint8Array }>> {
+    return isUUID(derivedID) ? this.binary(`/api/audio/derived/${derivedID}/content`, kind === 'spectrogram' ? 'image/png' : 'audio/wav', 8 * 1024 * 1024) : Promise.resolve(invalid());
+  }
+  getHeatmap(runID: string, segmentID: string, mode: HeatmapMode): Promise<ApiResult<Heatmap>> {
+    return isUUID(runID) && isUUID(segmentID) && isHeatmapMode(mode) ? this.call(`/api/tracking/${runID}/heatmap?segment_id=${segmentID}&mode=${mode}`) : Promise.resolve(invalid());
+  }
+  decideCandidate(runID: string, trackID: string, input: CandidateDecisionInput): Promise<ApiResult<Candidate>> {
+    return isUUID(runID) && isUUID(trackID) && isCandidateDecision(input) ? this.call(`/api/tracking/${runID}/candidates/${trackID}/decision`, 'POST', input) : Promise.resolve(invalid());
+  }
   saveMedia(sessionID: string, input: SaveMedia): Promise<ApiResult<MediaSession>> {
     return isUUID(sessionID) && isSaveMedia(input) ? this.call(`/api/sessions/${sessionID}/media`, 'PUT', input) : Promise.resolve(invalid('Use only selected segment IDs, continuity evidence and an optional UTC clock anchor.'));
   }
   // Called only by the main process after a native selection. Never exposed in BatAPI.
-  importSelectedMedia(sessionID: string, paths: string[]): Promise<ApiResult<ImportJob>> {
-    return isUUID(sessionID) && Array.isArray(paths) && paths.length > 0 && paths.every(path => typeof path === 'string' && isAbsolute(path)) ?
-      this.job('/api/media/import', 'POST', { session_id: sessionID, paths }) : Promise.resolve(invalid());
+  importSelectedMedia(sessionID: string, paths: string[], modality: Modality = 'active_ir'): Promise<ApiResult<ImportJob>> {
+    return isUUID(sessionID) && isModality(modality) && Array.isArray(paths) && paths.length > 0 && paths.every(path => typeof path === 'string' && isAbsolute(path)) ?
+      this.job('/api/media/import', 'POST', { session_id: sessionID, paths, modality }) : Promise.resolve(invalid());
   }
   importStatus(jobID: string): Promise<ApiResult<ImportJob>> {
     return isUUID(jobID) ? this.job(`/api/media/import/${jobID}`) : Promise.resolve(invalid());
@@ -312,7 +445,7 @@ export class BackendClient {
   }
   /** Privileged disk sink only. Never exposed through the renderer bridge. */
   async downloadExportFile(jobID: string, kind: ExportKind, file: ExportFile, destination: string, signal: AbortSignal): Promise<void> {
-    if (!isUUID(jobID) || !['observations', 'audit', 'manifest'].includes(kind) || !Number.isSafeInteger(file.bytes) ||
+    if (!isUUID(jobID) || !['observations', 'audit', 'tracks', 'counts', 'manifest'].includes(kind) || !Number.isSafeInteger(file.bytes) ||
         file.bytes < 1 || file.bytes > (kind === 'manifest' ? 65536 : 8 * 1024 * 1024) || !/^[0-9a-f]{64}$/.test(file.sha256)) throw new Error('Invalid export');
     const req = request({ hostname: '127.0.0.1', port: this.port, path: `/api/exports/${jobID}/files/${kind}`, headers: { 'X-Bat-Token': this.token }, signal });
     const timeout = setTimeout(() => req.destroy(new Error('Export read timed out')), 30000);
@@ -388,7 +521,7 @@ export class BackendClient {
     if (!isUUID(jobID)) return Promise.resolve(invalid());
     return this.binary(`/api/media/preview/${jobID}/content`, 'video/webm', MAX_PREVIEW_BYTES);
   }
-  private binary(path: string, mime: 'video/webm' | 'image/png', maxBytes: number): Promise<ApiResult<{ bytes: Uint8Array }>> {
+  private binary(path: string, mime: 'video/webm' | 'image/png' | 'audio/wav', maxBytes: number): Promise<ApiResult<{ bytes: Uint8Array }>> {
     if (this.readingPreview) return Promise.resolve({ ok: false, error: mediaFailure('preview_busy') });
     this.readingPreview = true;
     return new Promise<ApiResult<{ bytes: Uint8Array }>>(resolve => {
@@ -448,7 +581,9 @@ export function isExternalDataDirectory(repoRoot: string, dataDir: string): bool
   } catch { return false; }
 }
 
-export interface BackendOptions { python: string; repoRoot: string; dataDir: string; port?: number }
+/** Development runs the Python modules from the checkout; a packaged build runs its frozen backend executable. */
+export type BackendCommand = { python: string } | { packaged: string };
+export type BackendOptions = BackendCommand & { repoRoot: string; dataDir: string; port?: number };
 
 /** Owns exactly one child. Never attaches to, or kills, a process found by port. */
 export class BackendRuntime {
@@ -469,7 +604,7 @@ export class BackendRuntime {
 
   private async launch(options: BackendOptions): Promise<ApiResult<Health>> {
     if (!isExternalDataDirectory(options.repoRoot, options.dataDir)) {
-      this.failure = unavailable('App data must be an absolute directory outside the repository.');
+      this.failure = unavailable('App data must be an absolute directory outside the repository or installation.');
       return this.failure;
     }
     if (options.port !== undefined && (!Number.isInteger(options.port) || options.port < 1 || options.port > 65535)) {
@@ -481,14 +616,15 @@ export class BackendRuntime {
       if (this.stopped) return this.failure;
       const token = randomBytes(32).toString('hex');
       this.client = new BackendClient(port, token);
-      const child = spawn(options.python, ['-m', 'backend.app'], {
-        cwd: options.repoRoot, shell: false, windowsHide: true,
+      const packaged = 'packaged' in options;
+      const child = spawn(packaged ? options.packaged : options.python, packaged ? [] : ['-m', 'backend.app'], {
+        cwd: packaged ? dirname(options.packaged) : options.repoRoot, shell: false, windowsHide: true,
         stdio: ['ignore', 'ignore', 'pipe'],
-        env: { ...process.env, BAT_APP_DATA_DIR: options.dataDir, BAT_API_TOKEN: token, BAT_API_PORT: String(port) },
+        env: { ...process.env, BAT_APP_DATA_DIR: options.dataDir, BAT_API_TOKEN: token, BAT_API_PORT: String(port), BAT_PARENT_PID: String(process.pid) },
       });
       this.child = child;
       this.closed = new Promise<void>((resolve) => {
-        child.once('error', () => { this.failure = unavailable('Backend could not start. Check BAT_PYTHON and the installed Python requirements.'); });
+        child.once('error', () => { this.failure = unavailable(packaged ? 'Backend could not start. Reinstall Bat Innovation; the installed backend is missing or blocked.' : 'Backend could not start. Check BAT_PYTHON and the installed Python requirements.'); });
         child.once('close', () => { this.child = undefined; resolve(); });
       });
       // Do not echo stderr: tracebacks can contain private paths. Surface known prerequisite failures only.
@@ -498,7 +634,8 @@ export class BackendRuntime {
         const diagnostic = safeStartupFailure(stderr);
         if (diagnostic) this.failure = unavailable(diagnostic);
       });
-      const deadline = Date.now() + 15000;
+      // A frozen backend loads its native libraries from disk on first launch and may be scanned by antivirus.
+      const deadline = Date.now() + (packaged ? 60000 : 15000);
       while (!this.stopped && this.child && Date.now() < deadline) {
         const result = await this.client.health();
         if (result.ok && this.child && !this.stopped) return result;
@@ -535,7 +672,28 @@ export class BackendRuntime {
   getMedia(sessionID: string): Promise<ApiResult<MediaSession>> { return this.ready(client => client.getMedia(sessionID)); }
   upgradeMedia(): Promise<ApiResult<{ schema_version: 2 | 3 | 4 | 5 }>> { return this.ready(client => client.upgradeMedia()); }
   saveMedia(sessionID: string, input: SaveMedia): Promise<ApiResult<MediaSession>> { return this.ready(client => client.saveMedia(sessionID, input)); }
-  importSelectedMedia(sessionID: string, paths: string[]): Promise<ApiResult<ImportJob>> { return this.ready(client => client.importSelectedMedia(sessionID, paths)); }
+  importSelectedMedia(sessionID: string, paths: string[], modality: Modality = 'active_ir'): Promise<ApiResult<ImportJob>> { return this.ready(client => client.importSelectedMedia(sessionID, paths, modality)); }
+  upgradeStorage(): Promise<ApiResult<{ schema_version: number }>> { return this.ready(client => client.upgradeStorage()); }
+  startTracking(summaryRunID: string): Promise<ApiResult<TrackingRun>> { return this.ready(client => client.startTracking(summaryRunID)); }
+  trackingRun(runID: string): Promise<ApiResult<TrackingRun>> { return this.ready(client => client.trackingRun(runID)); }
+  listTracking(summaryRunID: string): Promise<ApiResult<TrackingRun[]>> { return this.ready(client => client.listTracking(summaryRunID)); }
+  cancelTracking(runID: string): Promise<ApiResult<TrackingRun>> { return this.ready(client => client.cancelTracking(runID)); }
+  getTracks(runID: string, segmentID: string, startPTS: string, endPTS: string | null): Promise<ApiResult<TrackRecord[]>> {
+    return this.ready(client => client.getTracks(runID, segmentID, startPTS, endPTS));
+  }
+  listGates(sessionID: string): Promise<ApiResult<Gate[]>> { return this.ready(client => client.listGates(sessionID)); }
+  saveGate(sessionID: string, gateID: string | null, change: GateChange): Promise<ApiResult<Gate>> { return this.ready(client => client.saveGate(sessionID, gateID, change)); }
+  getCounts(runID: string, gateID: string): Promise<ApiResult<GateCounts>> { return this.ready(client => client.getCounts(runID, gateID)); }
+  saveCountReview(runID: string, gateID: string, input: CountReviewInput): Promise<ApiResult<GateCounts>> { return this.ready(client => client.saveCountReview(runID, gateID, input)); }
+  saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>> { return this.ready(client => client.saveCountQA(runID, gateID, input)); }
+  listCandidates(runID: string): Promise<ApiResult<Candidate[]>> { return this.ready(client => client.listCandidates(runID)); }
+  getHeatmap(runID: string, segmentID: string, mode: HeatmapMode): Promise<ApiResult<Heatmap>> { return this.ready(client => client.getHeatmap(runID, segmentID, mode)); }
+  listAudio(sessionID: string): Promise<ApiResult<AudioSource[]>> { return this.ready(client => client.listAudio(sessionID)); }
+  addSelectedAudio(sessionID: string, paths: string[], sourceMode: AudioSourceMode, channel: number): Promise<ApiResult<AudioSource[]>> { return this.ready(client => client.addSelectedAudio(sessionID, paths, sourceMode, channel)); }
+  setAudioAnchor(audioID: string, input: AudioAnchorInput): Promise<ApiResult<AudioSource>> { return this.ready(client => client.setAudioAnchor(audioID, input)); }
+  deriveAudio(audioID: string, input: AudioDeriveInput): Promise<ApiResult<AudioDerived>> { return this.ready(client => client.deriveAudio(audioID, input)); }
+  audioContent(derivedID: string, kind: 'spectrogram' | 'heterodyne'): Promise<ApiResult<{ bytes: Uint8Array }>> { return this.ready(client => client.audioContent(derivedID, kind)); }
+  decideCandidate(runID: string, trackID: string, input: CandidateDecisionInput): Promise<ApiResult<Candidate>> { return this.ready(client => client.decideCandidate(runID, trackID, input)); }
   importStatus(jobID: string): Promise<ApiResult<ImportJob>> { return this.ready(client => client.importStatus(jobID)); }
   cancelImport(jobID: string): Promise<ApiResult<ImportJob>> { return this.ready(client => client.cancelImport(jobID)); }
   startPreview(input: PreviewRequest): Promise<ApiResult<PreviewJob>> { return this.ready(client => client.startPreview(input)); }

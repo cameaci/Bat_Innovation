@@ -313,7 +313,7 @@ def test_disk_quota_platform_and_shared_activity_rejections_do_not_mutate_histor
             jobs.start(session)
         assert failure.value.code == "summary_limit"
     with monkeypatch.context() as patch:
-        patch.setattr(summary_jobs.sys, "platform", "win32")
+        patch.setattr(summary_jobs.workers, "supported", lambda: False)
         with pytest.raises(summary_jobs.SummaryError) as failure:
             jobs.start(session)
         assert failure.value.code == "summary_limits_unavailable"

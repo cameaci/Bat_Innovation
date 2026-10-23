@@ -9,7 +9,7 @@ from pathlib import Path
 from threading import Event, Lock, Thread
 from uuid import uuid4
 
-from . import media, store
+from . import media, store, workers
 
 
 class ImportErrorResponse(Exception):
@@ -17,7 +17,7 @@ class ImportErrorResponse(Exception):
         self.code, self.message, self.status = code, message, status
 
 
-def selected_sources(paths: list[str], data_dir: Path) -> list[Path]:
+def selected_sources(paths: list[str], data_dir: Path, suffixes: tuple[str, ...] = (".mts", ".mp4")) -> list[Path]:
     """Trusted main-process input still receives strict local-file validation."""
     forbidden = (Path(__file__).resolve().parents[2], data_dir.resolve())
     sources: list[Path] = []
@@ -31,8 +31,8 @@ def selected_sources(paths: list[str], data_dir: Path) -> list[Path]:
                 raise ImportErrorResponse("invalid_sources", "Choose regular local video files.")
         except (OSError, ValueError):
             raise ImportErrorResponse("missing_source", "A selected source is missing or unreadable. Choose it again.") from None
-        if source.suffix.lower() not in (".mts", ".mp4"):
-            raise ImportErrorResponse("invalid_sources", "Only original .MTS and .MP4 files are supported.")
+        if source.suffix.lower() not in suffixes:
+            raise ImportErrorResponse("invalid_sources", "Only original .MTS and .MP4 files are supported." if ".mp4" in suffixes else "Only original .WAV files are supported.")
         if any(source.is_relative_to(root) for root in forbidden):
             raise ImportErrorResponse("invalid_sources", "Original videos must remain outside the repository and application data directory.")
         if source in sources:
@@ -42,7 +42,6 @@ def selected_sources(paths: list[str], data_dir: Path) -> list[Path]:
 
 
 def inspect(source: Path, progress: media.Progress, cancelled: Event) -> dict:
-    # start() rejects every non-Linux platform first, so the contained Windows worker is unreachable by requests.
     if sys.platform == "win32":
         from . import contained_import
         return contained_import.inspect_source(source, progress, cancelled.is_set)
@@ -77,10 +76,10 @@ class ImportJobs:
         self._closed = False
         self._activity_lock = activity_lock if activity_lock is not None else Lock()
 
-    def start(self, session_id: str, paths: list[str]) -> dict:
-        if sys.platform != "linux":
+    def start(self, session_id: str, paths: list[str], modality: str = "active_ir") -> dict:
+        if not workers.supported():
             raise ImportErrorResponse("import_limits_unavailable",
-                "Media import process limits are unavailable on this platform. Only Linux development imports are verified.", 409)
+                "Media import process limits are unavailable on this platform. Only Linux and Windows are supported.", 409)
         sources = selected_sources(paths, self.data_dir)
         with self._lock:
             if self._closed or any(job["state"] == "running" for job in self._jobs.values()):
@@ -98,7 +97,7 @@ class ImportJobs:
                 job = {"id": job_id, "session_id": session_id, "state": "running", "phase": "queued",
                        "filename": None, "files_done": 0, "files_total": len(sources), "progress_value": 0, "error": None}
                 self._jobs[job_id], self._cancel[job_id] = job, cancelled
-                self._thread = Thread(target=self._run, args=(job_id, session_id, sources, cancelled), daemon=True)
+                self._thread = Thread(target=self._run, args=(job_id, session_id, sources, cancelled, modality), daemon=True)
                 self._thread.start()
             except Exception:
                 self._thread = None
@@ -136,7 +135,7 @@ class ImportJobs:
         if thread is not None:
             thread.join(timeout=5)
 
-    def _run(self, job_id: str, session_id: str, sources: list[Path], cancelled: Event) -> None:
+    def _run(self, job_id: str, session_id: str, sources: list[Path], cancelled: Event, modality: str = "active_ir") -> None:
         def progress(phase: str, value: int) -> None:
             with self._lock:
                 self._jobs[job_id].update(phase=phase, progress_value=value)
@@ -166,7 +165,7 @@ class ImportJobs:
                     raise media.MediaError("cancelled", "Import cancelled. No sources were added.")
                 self._jobs[job_id]["phase"] = "saving"
                 try:
-                    store.commit_segments(self.db_path, session_id, inspected)
+                    store.commit_segments(self.db_path, session_id, inspected, modality)
                 except ValueError:
                     raise media.MediaError("duplicate_source", "A selected source is already present in this session or batch. No sources were added.") from None
                 outcome = {"state": "complete", "phase": "complete", "error": None}

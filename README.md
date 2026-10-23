@@ -35,6 +35,7 @@ This is an exploratory project, **not an official WSP publication, endorsed solu
 | [09 - IR-first app architecture](docs/09-ir-first-architecture-draft.md) | Lean Electron/React/FastAPI/SQLite desktop application, recording sessions, review/QA and exports |
 | [10 - Camera_Trap reference](docs/10-camera-trap-architecture-reference.md) | Reviewed implementation patterns to reuse and avoid |
 | [11 - Slice 0 development shell](docs/11-slice-0-development.md) | Setup, API-origin decision, source reuse, dependency licences and limits |
+| [18 - Windows internal beta](docs/18-windows-beta.md) | Install, build, Windows containment, limits, licence notice and acceptance checklist |
 | [Source review template](docs/source-review-template.md) | Standard format for future source assessments |
 | [Implementation plan](implementation/README.md) | Reviewed delivery sequence, technical contracts, reuse audit and tests |
 | [AGENTS.md](AGENTS.md) | Working rules for AI coding agents and contributors |
@@ -54,6 +55,14 @@ The minimal React/TypeScript UI and Electron development shell now display actua
 
 This is a foundation for the [planned workflow](implementation/plan.md). The Linux development shell supports source-PTS import/preview, all-window motion evidence, manual review and independent QA. [Provisional CSV exports](docs/17-slice-4b1-validation.md) are an unmerged review candidate. Ecological finalisation, approved output-template mapping and Windows packaging remain gated. No ecological performance result or production-ready desktop app is claimed. The source register remains a scoping review, and ownership/publication rights, approved footage and ecological evaluation remain open.
 
+## Install (Windows internal beta)
+
+An unsigned Windows installer is built from this repository by `scripts/build-windows.ps1` (or the `Build Windows installer` workflow) and published as a GitHub pre-release. It installs per user, runs offline and keeps your originals untouched. Exports are provisional, and the Windows acceptance checklist has not been run: follow the [install notes, limits, codec licence notice and checklist](docs/18-windows-beta.md) before relying on it.
+
+**How to use:** create a survey, add the original videos on the Process page and generate motion summaries (thumbnails appear while it runs), then open each window on the Review page, watch the original clip and record "No activity seen" or observations. Export the provisional CSV bundle from the Export page. Optional review aids: tracks, counting gates with separate algorithm, reviewer and QA counts, an Events queue of candidate clips, a timeline and heatmap, rendered thermal video and synchronised full-spectrum audio with a heterodyne monitor. The [step-by-step guide](docs/18-windows-beta.md#install-and-use) has details.
+
+For development on Linux or Windows: install `backend/requirements-dev.txt`, run `npm ci` and `npm run setup:electron`, then `npm run dev` (set `BAT_PYTHON` to the interpreter that has the requirements).
+
 ## Documentation conventions
 
 All project documentation is written in English and stored as Markdown (`.md`). New research should update the [source register](docs/02-source-register.md), [research log](docs/07-research-log.md), and relevant topic document. Use these four evidence labels consistently: **directly verified** (we inspected the cited source), **source-reported** (claim stated by a source but not reproduced), **inference** (our interpretation), or **unverified** (not checked). Source verification never implies the claim is independently reproduced.
@@ -64,7 +73,7 @@ All project documentation is written in English and stored as Markdown (`.md`). 
 
 ## App design decision
 
-Use the **actual Electron + React/TypeScript + FastAPI + SQLite desktop architecture** of [Camera_Trap](docs/10-camera-trap-architecture-reference.md), with a much smaller feature set and dependency tree. The [file-level reuse audit](implementation/reuse.md) records what can be copied, adapted or used only as a design pattern after licensing checks. The previous Gradio reference was incorrect and has been superseded. Start with streamed time-window IR motion summaries, original video verification, review/QA records, and CSV export. Tracking is an optional next enhancement. **Thermal and acoustic analysis are outside v1.** Any controlled test on client footage requires documented access and permission checks first. See [architecture](docs/09-ir-first-architecture-draft.md).
+Use the **actual Electron + React/TypeScript + FastAPI + SQLite desktop architecture** of [Camera_Trap](docs/10-camera-trap-architecture-reference.md), with a much smaller feature set and dependency tree. The [file-level reuse audit](implementation/reuse.md) records what can be copied, adapted or used only as a design pattern after licensing checks. The previous Gradio reference was incorrect and has been superseded. Start with streamed time-window IR motion summaries, original video verification, review/QA records, and CSV export. Tracks, counting gates, trajectories, heatmaps, highlight review, rendered thermal video and synchronised full-spectrum audio are planned review aids in the [feature expansion plan](implementation/feature-expansion.md) (owner decision 2026-10-22). Radiometric thermal analysis and acoustic species identification remain out of scope. Any controlled test on client footage requires documented access and permission checks first. See [architecture](docs/09-ir-first-architecture-draft.md).
 
 ## Delivery boundary
 

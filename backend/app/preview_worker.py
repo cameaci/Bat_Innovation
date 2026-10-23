@@ -8,12 +8,23 @@ import os
 from pathlib import Path
 import sys
 
-MAX_BYTES = 8 * 1024 * 1024
+from . import workers
+
+CLIP_CHOICES = (2, 6, 12)  # seconds; 6 and 12 are highlight/block clips (feature expansion E5)
+MAX_BYTES = 32 * 1024 * 1024  # largest clip; each clip's own budget is budget(seconds)["bytes"]
 MAX_MANIFEST_BYTES = 128 * 1024
 MAX_REQUEST_BYTES = 256 * 1024
 MAX_FRAMES = 300
 MAX_DECODED = 1000
 CLIP_SECONDS = 2
+
+
+def budget(seconds: int) -> dict[str, int]:
+    """Hard per-clip limits that scale with the requested clip length; 2 s keeps the original limits."""
+    if seconds not in CLIP_CHOICES:
+        raise ValueError("preview_limit")
+    return {"frames": MAX_FRAMES * seconds // 2, "decoded": MAX_DECODED * seconds // 2,
+            "bytes": min(MAX_BYTES, 8 * 1024 * 1024) if seconds == 2 else MAX_BYTES, "cpu": 10 * seconds}
 PRE_ROLL_SECONDS = 2
 MAX_PRE_ROLL_SECONDS = 10
 
@@ -22,8 +33,11 @@ def rational(value: Fraction) -> dict[str, str]:
     return {"num": str(value.numerator), "den": str(value.denominator)}
 
 
-def limits(parent_pid: int) -> None:
+def limits(parent_pid: int, seconds: int = CLIP_SECONDS) -> None:
     """Fail closed where hard process limits and a parent-death guard are unavailable."""
+    if sys.platform == "win32":
+        workers.require_limits(RuntimeError("preview_limits_unavailable"))
+        return
     if sys.platform != "linux":
         raise RuntimeError("preview_limits_unavailable")
     import ctypes
@@ -31,8 +45,9 @@ def limits(parent_pid: int) -> None:
 
     if ctypes.CDLL(None, use_errno=True).prctl(1, 9, 0, 0, 0) != 0 or os.getppid() != parent_pid:
         raise RuntimeError("preview_limits_unavailable")
-    for kind, amount in ((resource.RLIMIT_AS, 1024 ** 3), (resource.RLIMIT_CPU, 20),
-                         (resource.RLIMIT_FSIZE, MAX_BYTES), (resource.RLIMIT_CORE, 0)):
+    clip = budget(seconds)
+    for kind, amount in ((resource.RLIMIT_AS, 1024 ** 3), (resource.RLIMIT_CPU, clip["cpu"]),
+                         (resource.RLIMIT_FSIZE, clip["bytes"]), (resource.RLIMIT_CORE, 0)):
         _, hard = resource.getrlimit(kind)
         bound = amount if hard == resource.RLIM_INFINITY else min(amount, hard)
         resource.setrlimit(kind, (bound, bound))
@@ -46,6 +61,8 @@ def render(payload: dict) -> dict:
     source_path, output_path = Path(payload["source_path"]), Path(payload["output_path"])
     expected, metadata = payload["identity"], payload["metadata"]
     requested = int(payload["source_pts"])
+    seconds = int(payload.get("clip_seconds", CLIP_SECONDS))
+    clip = budget(seconds)
     time_base = Fraction(int(metadata["time_base"]["num"]), int(metadata["time_base"]["den"]))
     first, last = int(metadata["first_pts"]), int(metadata["last_pts"])
 
@@ -119,7 +136,7 @@ def render(payload: dict) -> dict:
                         end_ms = round((end - actual_time) / display_base)
                         if end_ms <= display_pts or (frames and display_pts <= frames[-1]["preview_ms"]):
                             fail("unknown_timing")
-                        if len(frames) >= MAX_FRAMES:
+                        if len(frames) >= clip["frames"]:
                             fail("preview_limit")
                         frames.append({"source_pts": str(pts), "source_time": rational(timestamp),
                                        "elapsed": rational(timestamp - first * time_base), "preview_ms": display_pts})
@@ -136,7 +153,7 @@ def render(payload: dict) -> dict:
                     reached_bound = False
                     for frame in media.decoded_frames(original, video):
                         decoded_count += 1
-                        if decoded_count > MAX_DECODED:
+                        if decoded_count > clip["decoded"]:
                             fail("preview_limit")
                         if frame.time_base != time_base:
                             fail("unknown_timing")
@@ -151,7 +168,7 @@ def render(payload: dict) -> dict:
                             continue
                         if actual_time is None:
                             actual_time = timestamp
-                        deadline = actual_time + CLIP_SECONDS
+                        deadline = actual_time + seconds
                         if pending is not None:
                             encode(pending, min(timestamp, deadline, source_end))
                         if timestamp >= deadline:
@@ -176,10 +193,10 @@ def render(payload: dict) -> dict:
         fail("unsupported_codec")
     except av.error.FFmpegError:
         fail("decode_failed")
-    if not frames or output_path.stat().st_size > MAX_BYTES:
+    if not frames or output_path.stat().st_size > clip["bytes"]:
         fail("preview_limit")
     manifest = {"segment_id": payload["segment_id"], "source_sha256": metadata["sha256"],
-                "requested_pts": str(requested), "actual_pts": frames[0]["source_pts"], "time_base": rational(time_base),
+                "clip_seconds": seconds, "requested_pts": str(requested), "actual_pts": frames[0]["source_pts"], "time_base": rational(time_base),
                 "seek_error": rational(actual_time - requested * time_base), "source_start": rational(actual_time),
                 "source_last": rational(last_source_pts * time_base), "source_end": rational(clip_end),
                 "elapsed_start": rational(actual_time - first * time_base),
@@ -194,11 +211,11 @@ def render(payload: dict) -> dict:
 def main() -> None:
     code = "preview_failed"
     try:
-        raw = sys.stdin.buffer.read(MAX_REQUEST_BYTES + 1)
+        raw = workers.read_request(MAX_REQUEST_BYTES)
         if len(raw) > MAX_REQUEST_BYTES:
             raise RuntimeError("preview_limit")
         payload = json.loads(raw)
-        limits(payload["parent_pid"])
+        limits(payload["parent_pid"], int(payload.get("clip_seconds", CLIP_SECONDS)))
         result = {"manifest": render(payload), "error": None}
     except Exception as error:
         # Never print native errors, paths, input payloads or filenames.
@@ -214,7 +231,7 @@ def main() -> None:
             candidate = "preview_limit"
         code = candidate if candidate in allowed | {"unreadable_source"} else code
         result = {"manifest": None, "error": code}
-    sys.stdout.write(json.dumps(result))
+    workers.write_response(json.dumps(result))
 
 
 if __name__ == "__main__":

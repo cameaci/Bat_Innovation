@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import re
 import subprocess
+import sys
 from threading import Thread
 from types import SimpleNamespace
 from typing import Any
@@ -13,6 +14,7 @@ from typing import Any
 import av
 import pytest
 
+from backend.app import media as media_module
 from backend.app.media import MediaError, decoded_frames, file_sha256, inspect_source
 from backend.tests.media_fixtures import generate_media
 
@@ -114,6 +116,15 @@ def test_hashing_is_bounded_and_cancelable(tmp_path: Path) -> None:
     with pytest.raises(MediaError) as error:
         file_sha256(path, lambda phase, amount: calls.append((phase, amount)), lambda: calls[-1][1] > 0)
     assert error.value.code == "cancelled"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows path and handle stat differ for st_ctime")
+def test_windows_path_and_open_file_identity_match(tmp_path: Path) -> None:
+    path = tmp_path / "synthetic.mp4"
+    path.write_bytes(b"synthetic video")
+    expected = media_module.identity_info(path)
+    with path.open("rb") as source:
+        assert media_module._identity(media_module.os.fstat(source.fileno())) == expected
 
 
 @pytest.mark.parametrize("phase", ["hashing", "decoding"])
