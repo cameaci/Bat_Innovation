@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import { existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
+import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, isGateChange, isCountReviewInput, isCountQAInput, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
 import { ExportSaver } from './export_saver';
 import type { NewSession } from './contracts';
 
@@ -191,6 +191,12 @@ async function open(): Promise<void> {
     return result.ok && result.value.bytes.byteLength > MAX_SUMMARY_BYTES ? invalid('Summary image exceeds its byte limit.') : result;
   });
   handle('bat:upgrade-storage', 0, () => backend.upgradeStorage());
+  handle('bat:list-gates', 1, ([id]) => isUUID(id) ? backend.listGates(id) : invalid('Select a valid survey ID.'));
+  handle('bat:save-gate', 3, ([session, gate, change]) => isUUID(session) && (gate === null || isUUID(gate)) && isGateChange(change)
+    ? backend.saveGate(session, gate, change) : invalid('Use a valid gate: name, kind, 2 to 32 points, labels, direction and hysteresis.'));
+  handle('bat:get-counts', 2, ([run, gate]) => isUUID(run) && isUUID(gate) ? backend.getCounts(run, gate) : invalid());
+  handle('bat:save-count-review', 3, ([run, gate, input]) => isUUID(run) && isUUID(gate) && isCountReviewInput(input) ? backend.saveCountReview(run, gate, input) : invalid('Use a valid count review action.'));
+  handle('bat:save-count-qa', 3, ([run, gate, input]) => isUUID(run) && isUUID(gate) && isCountQAInput(input) ? backend.saveCountQA(run, gate, input) : invalid('Use a valid count QA action.'));
   handle('bat:start-tracking', 1, ([id]) => isUUID(id) ? backend.startTracking(id) : invalid('Select a valid summary run ID.'));
   handle('bat:tracking-run', 1, ([id]) => isUUID(id) ? backend.trackingRun(id) : invalid('Select a valid tracking run ID.'));
   handle('bat:list-tracking', 1, ([id]) => isUUID(id) ? backend.listTracking(id) : invalid('Select a valid summary run ID.'));

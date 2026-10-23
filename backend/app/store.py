@@ -17,7 +17,8 @@ QA_SCHEMA_VERSION = 5
 # Feature expansion steps (implementation/feature-expansion.md); each requires the previous version.
 MODALITY_SCHEMA_VERSION = 6
 TRACKING_SCHEMA_VERSION = 7
-EXPANSION_SCHEMA_VERSIONS = (MODALITY_SCHEMA_VERSION, TRACKING_SCHEMA_VERSION)
+COUNT_SCHEMA_VERSION = 8
+EXPANSION_SCHEMA_VERSIONS = (MODALITY_SCHEMA_VERSION, TRACKING_SCHEMA_VERSION, COUNT_SCHEMA_VERSION)
 CURRENT_SCHEMA_VERSION = EXPANSION_SCHEMA_VERSIONS[-1]
 QA_SCHEMA_VERSIONS = (QA_SCHEMA_VERSION, *EXPANSION_SCHEMA_VERSIONS)
 REVIEW_SCHEMA_VERSIONS = (REVIEW_SCHEMA_VERSION, *QA_SCHEMA_VERSIONS)
@@ -82,6 +83,9 @@ def initialise(db_path: Path) -> None:
         if version >= TRACKING_SCHEMA_VERSION:
             connection.execute("SELECT id, summary_run_id, state FROM tracking_run LIMIT 1")
             connection.execute("SELECT id, run_id, points FROM track LIMIT 1")
+        if version >= COUNT_SCHEMA_VERSION:
+            connection.execute("SELECT id, revision, value_json FROM gate LIMIT 1")
+            connection.execute("SELECT tracking_run_id, gate_id, revision FROM count_event LIMIT 1")
 
 
 def schema_version(db_path: Path) -> int:
@@ -146,9 +150,9 @@ def upgrade_modality(db_path: Path) -> None:
 
 def upgrade_expansion(db_path: Path) -> None:
     """Steps after the QA schema, run in order by one explicit storage upgrade action."""
-    from . import tracking_store
+    from . import count_store, tracking_store
 
-    for step in (upgrade_modality, tracking_store.upgrade):
+    for step in (upgrade_modality, tracking_store.upgrade, count_store.upgrade):
         step(db_path)
 
 

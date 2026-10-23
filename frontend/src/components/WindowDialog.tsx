@@ -15,6 +15,9 @@ import { SourcePreview } from './SourcePreview';
 import { ReviewPanel } from './ReviewPanel';
 import type { ReviewPanelHandle } from './ReviewPanel';
 import { QAPanel } from './QAPanel';
+import { SceneOverlay } from './SceneOverlay';
+import { addPoint, GatePanel } from './GatePanel';
+import type { GateDraft } from './GatePanel';
 
 const REVIEWER_KEY = 'bat:reviewer';
 function savedReviewer(): string { try { return localStorage.getItem(REVIEWER_KEY) ?? ''; } catch { return ''; } }
@@ -37,6 +40,7 @@ export function WindowDialog({ windows, initialID, onClose }: { windows: Summary
   const [reviewer, setReviewer] = useState(savedReviewer);
   const [tracks, setTracks] = useState<TrackRecord[]>([]);
   const [tracksError, setTracksError] = useState('');
+  const [gateDraft, setGateDraft] = useState<GateDraft | null>(null);
   const review = useRef<ReviewPanelHandle>(null);
   const snapshot = useRef<SummaryWindow | null>(null);
   const dirty = firstDirty || qaDirty;
@@ -108,7 +112,10 @@ export function WindowDialog({ windows, initialID, onClose }: { windows: Summary
         {segment && selected.preview_pts !== null && <SourcePreview key={selected.id} segment={segment} initialPTS={selected.preview_pts}
           minPTS={selected.stats.first_pts ?? selected.preview_pts} maxPTS={selected.interval.end_pts?.den === '1' ? selected.interval.end_pts.num : null}
           enabled={previewEnabled} disabledReason={processing ? 'The original video opens when processing finishes.' : !sourceReady ? 'The original video is missing or changed.' : 'Original video unavailable.'}
-          onReady={previewID => setReceipt(previewID ? { windowID: selected.id, previewID } : null)} onDisplayedFrame={displayed} tracks={tracks} />}
+          onReady={previewID => setReceipt(previewID ? { windowID: selected.id, previewID } : null)} onDisplayedFrame={displayed}
+          overlay={pts => <SceneOverlay tracks={tracks} gates={survey.gates} displayedPTS={pts} width={segment.metadata.width} height={segment.metadata.height}
+            timeBase={segment.metadata.time_base} drawing={gateDraft ? { ...gateDraft, onPoint: point => setGateDraft(addPoint(gateDraft, point)) } : null} />} />}
+        {segment && (survey.media?.schema_version ?? 0) >= 8 && <GatePanel segment={segment} actor={reviewer} draft={gateDraft} setDraft={setGateDraft} />}
       </div>
       <aside aria-label="Window review" className="flex w-96 shrink-0 flex-col border-l bg-white">
         <div className="flex items-center justify-between border-b px-3 py-1.5">

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Loader2, RotateCcw } from 'lucide-react';
-import type { MediaSegment, PreviewFrame, PreviewJob, TrackRecord } from '../../../electron/src/contracts';
-import { TrackOverlay } from './TrackOverlay';
+import type { ReactNode } from 'react';
+import type { MediaSegment, PreviewFrame, PreviewJob } from '../../../electron/src/contracts';
 import { getAPI, whileBusy } from '../api';
 import { readMediaBytes } from '../binary';
 import type { DisplayedSourceFrame } from '../sourceFrame';
@@ -15,7 +15,7 @@ const STEP_MS = 2000;
  * Two-second derived WebM preview of the original, started at `initialPTS` when `enabled`. Displayed frames are
  * mapped to exact original PTS through the preview manifest (requestVideoFrameCallback), never a browser timer.
  */
-export function SourcePreview({ segment, initialPTS, minPTS, maxPTS, enabled, disabledReason, onReady, onDisplayedFrame, tracks = [] }: {
+export function SourcePreview({ segment, initialPTS, minPTS, maxPTS, enabled, disabledReason, onReady, onDisplayedFrame, overlay }: {
   segment: MediaSegment;
   initialPTS: string;
   /** Stepping stays inside this window: [minPTS, maxPTS). */
@@ -25,8 +25,8 @@ export function SourcePreview({ segment, initialPTS, minPTS, maxPTS, enabled, di
   disabledReason: string;
   onReady?: (previewID: string | null) => void;
   onDisplayedFrame?: (frame: DisplayedSourceFrame | null) => void;
-  /** Candidate tracks of this window, drawn as trails up to the displayed frame. */
-  tracks?: TrackRecord[];
+  /** Drawn over the loaded preview, given the displayed original source PTS (tracks, gates, gate drawing). */
+  overlay?: (displayedPTS: string | null) => ReactNode;
 }) {
   const [sourcePTS, setSourcePTS] = useState(initialPTS);
   const [exact, setExact] = useState(initialPTS);
@@ -296,8 +296,7 @@ export function SourcePreview({ segment, initialPTS, minPTS, maxPTS, enabled, di
           {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
           {!enabled ? disabledReason : starting ? 'Creating preview...' : job?.state === 'running' ? `Creating preview: ${job.phase}` : error ? 'Preview unavailable.' : notice || 'Preview not loaded.'}
         </p>}
-      {url && loaded && <TrackOverlay tracks={tracks} displayedPTS={displayed?.source_pts ?? null}
-        width={segment.metadata.width} height={segment.metadata.height} timeBase={segment.metadata.time_base} />}
+      {url && loaded && overlay?.(displayed?.source_pts ?? null)}
     </div>
     <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300">
       <div className="flex items-center gap-1">

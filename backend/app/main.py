@@ -26,6 +26,7 @@ from .reviews import ReviewService, install_routes as install_review_routes
 from .qa import QAService, install_routes as install_qa_routes
 from .export_jobs import ExportJobs
 from .tracking import TrackingJobs, install_routes as install_tracking_routes
+from .counts import install_routes as install_count_routes
 
 
 @dataclass(frozen=True)
@@ -366,4 +367,5 @@ def create_app(settings: Settings) -> FastAPI:
     install_review_routes(app, reviews, authenticate)
     install_qa_routes(app, qa, authenticate)
     install_tracking_routes(app, tracking, authenticate)
+    install_count_routes(app, db_path, authenticate)
     return app

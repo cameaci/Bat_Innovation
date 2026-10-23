@@ -28,7 +28,7 @@ test('tracks are computed from a finished summary run and drawn as trails over t
     await previewReady(view);
     const video = view.getByLabel('Derived source preview', { exact: true });
     await video.evaluate(element => { (element as HTMLVideoElement).currentTime = 0.5; });
-    await expect(view.getByRole('img', { name: 'Track trails', exact: true }).locator('polyline')).toHaveCount(2);
+    await expect(view.getByRole('img', { name: 'Tracks and gates', exact: true }).locator('[data-track] polyline')).toHaveCount(2);
     await quit(shell); shell = undefined;
   } finally {
     await cleanupDraftShell(shell);

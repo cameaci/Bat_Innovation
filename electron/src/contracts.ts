@@ -81,6 +81,31 @@ export interface TrackingRun {
   /** Present on a single-run read: tracks overlapping each summary window ID. */
   window_counts?: Record<string, number>;
 }
+export type GateDirection = 'A_to_B' | 'B_to_A' | 'out_to_in' | 'in_to_out';
+export interface GateValue {
+  name: string; kind: 'line' | 'rect' | 'polygon'; points: [number, number][]; frame_w: number; frame_h: number;
+  label_a: string; label_b: string; entry_direction: 'A_to_B' | 'B_to_A' | 'out_to_in'; hysteresis_px: number;
+}
+export interface Gate extends GateValue { id: string; session_id: string; revision: number; state: 'active' | 'retired' }
+export interface GateChange { actor: string; expected_revision: number; value: GateValue | null }
+export interface CountTotals { entered: number; exited: number; net: number }
+export interface CountReview { action: 'confirm' | 'reject' | 'clear' | 'add_missed'; key: string | null; flipped: boolean; count: number; rationale: string; actor: string; revision: number; utc: string; direction?: GateDirection | null; segment_id?: string | null; pts?: string | null }
+export interface Crossing { key: string; track_id: string; segment_id: string; pts: string; direction: GateDirection; window_id: string | null; scene_changed: boolean; review: CountReview | null }
+export interface GateCounts {
+  gate: Gate; tracking_run_id: string; algorithm_version: string; revision: number; review_revision: number; reviewers: string[];
+  crossings: Crossing[]; missed: CountReview[]; skipped_segments: string[];
+  layers: {
+    algorithm: CountTotals & { excluded_scene_changed: number };
+    reviewer: CountTotals & { reviewed: number; crossings: number; added: number };
+    qa: { decision: 'approve' | 'reject'; actor: string; note: string; utc: string; review_revision: number; stale: boolean; counts: CountTotals | null } | null;
+  };
+}
+export interface CountReviewInput {
+  actor: string; expected_revision: number; action: CountReview['action']; key: string | null; flipped: boolean; count: number;
+  direction: GateDirection | null; segment_id: string | null; pts: string | null; rationale: string;
+}
+export interface CountQAInput { actor: string; expected_revision: number; review_revision: number; decision: 'approve' | 'reject'; note: string }
+
 /** points: [source_pts, x, y, area] in original source pixels. */
 export interface TrackRecord {
   id: string; segment_id: string; track_index: number; first_pts: string; last_pts: string; point_count: number;
@@ -381,6 +406,11 @@ export interface BatAPI {
   listTracking(summaryRunID: string): Promise<ApiResult<TrackingRun[]>>;
   cancelTracking(runID: string): Promise<ApiResult<TrackingRun>>;
   getTracks(runID: string, segmentID: string, startPTS: string, endPTS: string | null): Promise<ApiResult<TrackRecord[]>>;
+  listGates(sessionID: string): Promise<ApiResult<Gate[]>>;
+  saveGate(sessionID: string, gateID: string | null, change: GateChange): Promise<ApiResult<Gate>>;
+  getCounts(runID: string, gateID: string): Promise<ApiResult<GateCounts>>;
+  saveCountReview(runID: string, gateID: string, input: CountReviewInput): Promise<ApiResult<GateCounts>>;
+  saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>>;
   importStatus(jobID: string): Promise<ApiResult<ImportJob>>;
   cancelImport(jobID: string): Promise<ApiResult<ImportJob>>;
   saveMedia(sessionID: string, input: SaveMedia): Promise<ApiResult<MediaSession>>;

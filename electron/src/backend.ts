@@ -8,8 +8,33 @@ import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia, SummaryRequest, SummaryRun, SummaryDetail, ReviewChange, WindowReview, ReviewHistory } from './contracts';
-import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, TrackingRun, TrackRecord } from './contracts';
+import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, TrackingRun, TrackRecord, Gate, GateChange, GateCounts, CountReviewInput, CountQAInput } from './contracts';
 
+const within = (input: Record<string, unknown>, keys: string[]) => Object.keys(input).every(key => keys.includes(key));
+const text = (value: unknown, max: number, required = true) => typeof value === 'string' && value.length <= max && (!required || value.trim().length > 0);
+const count = (value: unknown, max: number) => typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= max;
+export function isGateChange(input: unknown): input is GateChange {
+  if (!object(input) || !exactKeys(input, ['actor', 'expected_revision', 'value']) || !text(input.actor, 120) || !isReviewCursor(input.expected_revision)) return false;
+  const value = input.value;
+  if (value === null) return true;
+  return object(value) && exactKeys(value, ['name', 'kind', 'points', 'frame_w', 'frame_h', 'label_a', 'label_b', 'entry_direction', 'hysteresis_px']) &&
+    text(value.name, 60) && text(value.label_a, 60) && text(value.label_b, 60) && ['line', 'rect', 'polygon'].includes(String(value.kind)) &&
+    ['A_to_B', 'B_to_A', 'out_to_in'].includes(String(value.entry_direction)) && count(value.frame_w, 8192) && count(value.frame_h, 8192) &&
+    typeof value.hysteresis_px === 'number' && value.hysteresis_px >= 0 && value.hysteresis_px <= 200 &&
+    Array.isArray(value.points) && value.points.length >= 2 && value.points.length <= 32 &&
+    value.points.every(point => Array.isArray(point) && point.length === 2 && point.every(item => typeof item === 'number' && Number.isFinite(item)));
+}
+export function isCountReviewInput(input: unknown): input is CountReviewInput {
+  return object(input) && within(input, ['actor', 'expected_revision', 'action', 'key', 'flipped', 'count', 'direction', 'segment_id', 'pts', 'rationale']) &&
+    text(input.actor, 120) && isReviewCursor(input.expected_revision) && ['confirm', 'reject', 'clear', 'add_missed'].includes(String(input.action)) &&
+    (input.key === null || isUUID(input.key)) && typeof input.flipped === 'boolean' && count(input.count, 10000) &&
+    (input.direction === null || ['A_to_B', 'B_to_A', 'out_to_in', 'in_to_out'].includes(String(input.direction))) &&
+    (input.segment_id === null || isUUID(input.segment_id)) && (input.pts === null || isPTS(input.pts)) && text(input.rationale, 2000, false);
+}
+export function isCountQAInput(input: unknown): input is CountQAInput {
+  return object(input) && exactKeys(input, ['actor', 'expected_revision', 'review_revision', 'decision', 'note']) && text(input.actor, 120) &&
+    isReviewCursor(input.expected_revision) && isReviewCursor(input.review_revision) && ['approve', 'reject'].includes(String(input.decision)) && text(input.note, 2000, false);
+}
 export const isPTS = (value: unknown): value is string => typeof value === 'string' && /^-?\d{1,19}$/.test(value);
 export const isModality = (value: unknown): value is Modality => value === 'active_ir' || value === 'rendered_thermal';
 
@@ -107,6 +132,24 @@ export function isSaveMedia(input: unknown): input is SaveMedia {
 
 // Only known error codes cross the desktop boundary; arbitrary response text never does.
 const mediaErrors: Record<string, string> = {
+  storage_busy: 'Wait for the active media operation before upgrading storage.',
+  storage_upgrade_failed: 'The storage upgrade failed; the existing database was preserved.',
+  tracking_busy: 'Another media operation is running. Wait for it or cancel it before tracking.',
+  tracking_missing: 'The selected tracking or summary run does not exist.',
+  tracking_upgrade_required: 'Upgrade storage before tracking.',
+  tracking_summary_running: 'Wait for the summary run to finish before tracking it.',
+  tracking_limit: 'Tracking exceeded a configured time, memory, frame or track limit. No partial segment was saved.',
+  tracking_limits_unavailable: 'Hard process limits are unavailable on this platform. Only Linux and Windows are supported.',
+  tracking_failed: 'Tracking failed. Completed segments remain; the run is marked failed.',
+  tracking_integrity: 'Stored track points failed their integrity check.',
+  track_limit: 'Too many tracks overlap this interval to show at once.',
+  count_upgrade_required: 'Upgrade storage before drawing gates.',
+  count_invalid: 'Check the count action: a reason is needed when rejecting, flipping, changing a count or adding a crossing.',
+  count_conflict: 'Counts or the gate changed since you loaded them. Refresh before saving.',
+  count_same_actor: 'QA must be done by a different person than the count reviewer.',
+  gate_missing: 'The gate does not exist.',
+  gate_conflict: 'The gate changed or was retired. Reload it before editing.',
+  gate_invalid: 'The gate is too small, outside the frame or has the wrong number of points for its type.',
   export_busy: 'Another export or this processing run is active. Wait or cancel, then retry.',
   export_too_large: 'Export exceeds a row, byte, CPU, memory, snapshot or time limit. No partial export was published.',
   export_stale: 'Export evidence or coverage changed or is inconsistent. Refresh and retry.',
@@ -182,7 +225,7 @@ function mediaFailure(code: unknown) {
 type ApiRoute = '/api/exports' | `/api/exports/${string}` | `/api/exports/${string}/cancel` | '/api/qa/upgrade' | `/api/summary-windows/${string}/qa` | `/api/summary-windows/${string}/qa-actions` | `/api/summary-windows/${string}/qa-history?after_revision=${number}` | '/api/reviews/upgrade' | `/api/summary-windows/${string}/review` | `/api/summary-windows/${string}/review-actions` | `/api/summary-windows/${string}/review-history?after_revision=${number}` | '/api/health' | '/api/sessions' | '/api/media/upgrade' | '/api/media/import' |
   `/api/sessions/${string}/media` | `/api/media/import/${string}` | `/api/media/import/${string}/cancel` |
   '/api/summaries/upgrade' | '/api/summaries' | `/api/summaries/${string}` | `/api/summaries/${string}/cancel` | `/api/sessions/${string}/summary-runs` |
-  '/api/storage/upgrade' | '/api/tracking' | `/api/tracking/${string}` | `/api/summaries/${string}/tracking` | '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
+  '/api/storage/upgrade' | `/api/sessions/${string}/gates` | `/api/sessions/${string}/gates/${string}` | '/api/tracking' | `/api/tracking/${string}` | `/api/summaries/${string}/tracking` | '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
 
 /** Read only known, redacted startup codes from the Python process. */
 function safeStartupFailure(output: string): string | undefined {
@@ -277,6 +320,20 @@ export class BackendClient {
   getTracks(runID: string, segmentID: string, startPTS: string, endPTS: string | null): Promise<ApiResult<TrackRecord[]>> {
     if (!isUUID(runID) || !isUUID(segmentID) || !isPTS(startPTS) || (endPTS !== null && !isPTS(endPTS))) return Promise.resolve(invalid());
     return this.call(`/api/tracking/${runID}/tracks?segment_id=${segmentID}&start_pts=${startPTS}${endPTS === null ? '' : `&end_pts=${endPTS}`}`);
+  }
+  listGates(sessionID: string): Promise<ApiResult<Gate[]>> { return isUUID(sessionID) ? this.call(`/api/sessions/${sessionID}/gates`) : Promise.resolve(invalid()); }
+  saveGate(sessionID: string, gateID: string | null, change: GateChange): Promise<ApiResult<Gate>> {
+    if (!isUUID(sessionID) || !(gateID === null || isUUID(gateID)) || !isGateChange(change)) return Promise.resolve(invalid());
+    return gateID === null ? this.call(`/api/sessions/${sessionID}/gates`, 'POST', change) : this.call(`/api/sessions/${sessionID}/gates/${gateID}`, 'PUT', change);
+  }
+  getCounts(runID: string, gateID: string): Promise<ApiResult<GateCounts>> {
+    return isUUID(runID) && isUUID(gateID) ? this.call(`/api/tracking/${runID}/gates/${gateID}/counts`) : Promise.resolve(invalid());
+  }
+  saveCountReview(runID: string, gateID: string, input: CountReviewInput): Promise<ApiResult<GateCounts>> {
+    return isUUID(runID) && isUUID(gateID) && isCountReviewInput(input) ? this.call(`/api/tracking/${runID}/gates/${gateID}/review`, 'POST', input) : Promise.resolve(invalid());
+  }
+  saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>> {
+    return isUUID(runID) && isUUID(gateID) && isCountQAInput(input) ? this.call(`/api/tracking/${runID}/gates/${gateID}/qa`, 'POST', input) : Promise.resolve(invalid());
   }
   saveMedia(sessionID: string, input: SaveMedia): Promise<ApiResult<MediaSession>> {
     return isUUID(sessionID) && isSaveMedia(input) ? this.call(`/api/sessions/${sessionID}/media`, 'PUT', input) : Promise.resolve(invalid('Use only selected segment IDs, continuity evidence and an optional UTC clock anchor.'));
@@ -564,6 +621,11 @@ export class BackendRuntime {
   getTracks(runID: string, segmentID: string, startPTS: string, endPTS: string | null): Promise<ApiResult<TrackRecord[]>> {
     return this.ready(client => client.getTracks(runID, segmentID, startPTS, endPTS));
   }
+  listGates(sessionID: string): Promise<ApiResult<Gate[]>> { return this.ready(client => client.listGates(sessionID)); }
+  saveGate(sessionID: string, gateID: string | null, change: GateChange): Promise<ApiResult<Gate>> { return this.ready(client => client.saveGate(sessionID, gateID, change)); }
+  getCounts(runID: string, gateID: string): Promise<ApiResult<GateCounts>> { return this.ready(client => client.getCounts(runID, gateID)); }
+  saveCountReview(runID: string, gateID: string, input: CountReviewInput): Promise<ApiResult<GateCounts>> { return this.ready(client => client.saveCountReview(runID, gateID, input)); }
+  saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>> { return this.ready(client => client.saveCountQA(runID, gateID, input)); }
   importStatus(jobID: string): Promise<ApiResult<ImportJob>> { return this.ready(client => client.importStatus(jobID)); }
   cancelImport(jobID: string): Promise<ApiResult<ImportJob>> { return this.ready(client => client.cancelImport(jobID)); }
   startPreview(input: PreviewRequest): Promise<ApiResult<PreviewJob>> { return this.ready(client => client.startPreview(input)); }

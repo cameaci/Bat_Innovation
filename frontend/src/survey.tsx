@@ -1,11 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { ApiResult, BatAPI, Modality, ImportJob, MediaSession, RecordingSession, SaveMedia, SummaryDetail, SummaryRun, TrackingRun } from '../../electron/src/contracts';
+import type { ApiResult, BatAPI, Modality, ImportJob, MediaSession, RecordingSession, SaveMedia, SummaryDetail, SummaryRun, TrackingRun, Gate, GateChange } from '../../electron/src/contracts';
 import { getAPI } from './api';
 
 const unavailable = 'The local backend is unavailable. Retry, or close and reopen the app.';
 export const activeRun = (run: SummaryRun | null | undefined) => run?.state === 'queued' || run?.state === 'running';
-export const CURRENT_SCHEMA = 7;
+export const CURRENT_SCHEMA = 8;
 export const activeTracking = (run: TrackingRun | null | undefined) => run?.state === 'queued' || run?.state === 'running';
 export const THERMAL_LABEL = 'Rendered thermal - no radiometric temperature analysis';
 
@@ -41,6 +41,9 @@ export interface Survey {
   tracking: TrackingRun | null;
   startTracking: () => Promise<void>;
   cancelTracking: () => Promise<void>;
+  /** Counting gates drawn on this survey's scene (all revisions' current state, including retired). */
+  gates: Gate[];
+  saveGate: (gateID: string | null, change: GateChange) => Promise<Gate | undefined>;
 }
 
 const SurveyContext = createContext<Survey | null>(null);
@@ -67,6 +70,7 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
   const dirty = Object.values(drafts).some(Boolean);
   const [tracking, setTracking] = useState<TrackingRun | null>(null);
   const [trackingRefresh, setTrackingRefresh] = useState(0);
+  const [gates, setGates] = useState<Gate[]>([]);
   const busy = importJob?.state === 'running' || activeRun(run) || exportBusy || activeTracking(tracking);
 
   const request = useCallback(async <T,>(action: (api: BatAPI) => Promise<ApiResult<T>>): Promise<T | undefined> => {
@@ -227,6 +231,21 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
     return () => { current = false; clearTimeout(timer); };
   }, [runID, trackingRefresh, media?.schema_version]);
 
+  useEffect(() => {
+    if ((media?.schema_version ?? 0) < 8) { setGates([]); return; }
+    void request(api => api.listGates(session.id)).then(value => { if (value) setGates(value); });
+  }, [request, session.id, media?.schema_version]);
+
+  async function saveGate(gateID: string | null, change: GateChange) {
+    setError(''); setNotice('');
+    const value = await request(api => api.saveGate(session.id, gateID, change));
+    if (value) {
+      setGates(previous => [...previous.filter(item => item.id !== value.id), value]);
+      setNotice(value.state === 'retired' ? `Gate "${value.name}" retired. Its history is kept.` : `Gate "${value.name}" saved (revision ${value.revision}).`);
+    }
+    return value;
+  }
+
   async function startTracking() {
     if (!runID) return;
     setError(''); setNotice('');
@@ -258,7 +277,7 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
     refreshMedia, upgradeStorage, importJob, chooseVideos, cancelImport, saveTimeline,
     runs, runID, selectRun: id => { setRunID(id); setRefresh(current => current + 1); }, run, verified,
     startRun, cancelRun, cancelling, reloadRun: () => setRefresh(current => current + 1),
-    setDraft, dirty, busy, setExportBusy, tracking, startTracking, cancelTracking,
+    setDraft, dirty, busy, setExportBusy, tracking, startTracking, cancelTracking, gates, saveGate,
   };
   return <SurveyContext.Provider value={value}>{children}</SurveyContext.Provider>;
 }
