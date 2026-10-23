@@ -385,7 +385,7 @@ export class BackendClient {
   }
   /** Privileged disk sink only. Never exposed through the renderer bridge. */
   async downloadExportFile(jobID: string, kind: ExportKind, file: ExportFile, destination: string, signal: AbortSignal): Promise<void> {
-    if (!isUUID(jobID) || !['observations', 'audit', 'manifest'].includes(kind) || !Number.isSafeInteger(file.bytes) ||
+    if (!isUUID(jobID) || !['observations', 'audit', 'tracks', 'counts', 'manifest'].includes(kind) || !Number.isSafeInteger(file.bytes) ||
         file.bytes < 1 || file.bytes > (kind === 'manifest' ? 65536 : 8 * 1024 * 1024) || !/^[0-9a-f]{64}$/.test(file.sha256)) throw new Error('Invalid export');
     const req = request({ hostname: '127.0.0.1', port: this.port, path: `/api/exports/${jobID}/files/${kind}`, headers: { 'X-Bat-Token': this.token }, signal });
     const timeout = setTimeout(() => req.destroy(new Error('Export read timed out')), 30000);

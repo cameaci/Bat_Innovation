@@ -156,3 +156,57 @@ def test_gates_require_storage_upgrade_and_valid_geometry(tmp_path: Path) -> Non
         tiny = client.post(f"/api/sessions/{session_id}/gates", headers=HEADERS,
                            json={"actor": "R", "expected_revision": 0, "value": gate_value(points=[[64, 0], [64, 5]])})
         assert tiny.status_code == 422 and tiny.json()["detail"]["code"] == "gate_invalid"
+
+
+def wait_export(client: TestClient, run_id: str) -> dict:
+    job = client.post("/api/exports", headers=HEADERS, json={"run_id": run_id}).json()
+    return wait(client, f"/api/exports/{job['id']}", ("working",))
+
+
+def test_export_v2_includes_tracks_and_all_three_count_layers(tmp_path: Path) -> None:
+    import csv
+    import io
+
+    from backend.app import csv_export
+
+    with TestClient(create_app(Settings(tmp_path / "app-data", TOKEN))) as client:
+        session_id, run_id, summary = tracked(client, tmp_path, scenario("two_dots"))
+        gate = client.post(f"/api/sessions/{session_id}/gates", headers=HEADERS,
+                           json={"actor": "Reviewer One", "expected_revision": 0, "value": gate_value()}).json()
+        url = f"/api/tracking/{run_id}/gates/{gate['id']}"
+        first = client.get(f"{url}/counts", headers=HEADERS).json()["crossings"][0]
+        client.post(f"{url}/review", headers=HEADERS, json={"actor": "Reviewer One", "expected_revision": 0, "action": "confirm", "key": first["key"]})
+        job = wait_export(client, summary["id"])
+        assert job["manifest"]["schema_version"] == "bat-provisional-csv-v2"
+        assert job["manifest"]["tracking"]["tracking_run_id"] == run_id and job["manifest"]["tracking"]["tracks"] == 2
+
+        def rows(kind: str, columns: list[str]) -> list[dict]:
+            response = client.get(f"/api/exports/{job['id']}/files/{kind}", headers=HEADERS)
+            reader = csv.DictReader(io.StringIO(response.content.decode("utf-8"), newline=""))
+            assert reader.fieldnames == columns
+            return [{k: v if k in csv_export.NUMERIC else csv_export.decode_text(v) for k, v in row.items()} for row in reader]
+
+        tracks = rows("tracks", csv_export.TRACK_COLUMNS)
+        assert len(tracks) == 2 and all(row["tracking_run_id"] == run_id for row in tracks)
+        counted = rows("counts", csv_export.COUNT_COLUMNS)
+        totals = {row["layer"]: row for row in counted if row["row_kind"] == "total"}
+        assert (totals["algorithm"]["entered"], totals["algorithm"]["exited"]) == ("1", "1")
+        assert totals["reviewer"]["entered"] != "" and totals["qa"]["entered"] == "" and totals["qa"]["qa_decision"] == ""
+        crossings = [row for row in counted if row["row_kind"] == "crossing"]
+        assert len(crossings) == 2 and sorted(row["review_action"] for row in crossings) == ["", "confirm"]
+        audit = rows("audit", csv_export.AUDIT_COLUMNS)
+        assert {row["modality"] for row in audit} == {"active_ir"}
+
+
+def test_export_without_tracking_has_header_only_track_files(tmp_path: Path) -> None:
+
+    source = tmp_path / "quiet.mp4"
+    encode_frames(source, scenario("noise"), [index * 40 for index in range(20)])
+    with TestClient(create_app(Settings(tmp_path / "app-data", TOKEN))) as client:
+        session_id = session(client)
+        assert import_files(client, session_id, [source])["state"] == "complete"
+        summary = client.post("/api/summaries", headers=HEADERS, json={"session_id": session_id, "window_seconds": 30}).json()
+        summary = wait(client, f"/api/summaries/{summary['id']}", ("queued", "running"))
+        job = wait_export(client, summary["id"])
+        assert job["manifest"]["tracking"] is None
+        assert job["manifest"]["files"]["tracks"]["rows"] == 0 and job["manifest"]["files"]["counts"]["rows"] == 0

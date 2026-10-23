@@ -359,7 +359,7 @@ def create_app(settings: Settings) -> FastAPI:
         return exports.cancel(str(job_id))
 
     @app.get("/api/exports/{job_id}/files/{kind}", dependencies=[Depends(authenticate)])
-    def export_content(job_id: UUID, kind: Literal["observations", "audit", "manifest"]):
+    def export_content(job_id: UUID, kind: Literal["observations", "audit", "tracks", "counts", "manifest"]):
         chunks, size = exports.content(str(job_id), kind)
         mime = "application/json" if kind == "manifest" else "text/csv; charset=utf-8"
         return StreamingResponse(chunks, media_type=mime, headers={"Content-Length": str(size), "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})

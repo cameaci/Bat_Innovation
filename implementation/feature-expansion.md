@@ -1,6 +1,6 @@
 # Feature expansion plan: tracks, gates, counts, thermal and audio
 
-Status: **E1-E3 implemented (Linux-verified); E4-E7 in progress; E0 and E8 need the owner.** Project-owner decision 2026-10-22. Reviewed 2026-10-22.
+Status: **E1-E4 implemented (Linux-verified); E5-E7 in progress; E0 and E8 need the owner.** Project-owner decision 2026-10-22. Reviewed 2026-10-22.
 
 This plan adds a second layer to the existing reviewer: tracks, counting gates, trajectories, heatmaps, an activity timeline, highlight review, rendered thermal video and synchronised full-spectrum audio. It follows the owner's research summary of three reference demos and UK survey practice (BCT 4th-edition guidelines, CIEEM reporting guidance), recorded in the [research log](../docs/07-research-log.md). Read [AGENTS.md](../AGENTS.md), [design.md](design.md) and [plan.md](plan.md) first.
 
@@ -163,7 +163,7 @@ Every new dependency is pinned, listed in [docs/11](../docs/11-slice-0-developme
 
 ## 7. Feature expansion tracker
 
-Separate from the fixed 44/70 tracker in [plan.md](plan.md); the two are never added together. Baseline 2026-10-22: **0/27**; now **11/27**. Change the denominator only with owner approval.
+Separate from the fixed 44/70 tracker in [plan.md](plan.md); the two are never added together. Baseline 2026-10-22: **0/27**; now **13/27**. Change the denominator only with owner approval.
 
 | Milestone | Checked / total |
 | --- | ---: |
@@ -171,7 +171,7 @@ Separate from the fixed 44/70 tracker in [plan.md](plan.md); the two are never a
 | E1 Rendered thermal | 3 / 3 |
 | E2 Tracks | 4 / 4 |
 | E3 Gates and counts | 4 / 4 |
-| E4 Export v2 | 0 / 2 |
+| E4 Export v2 | 2 / 2 |
 | E5 Highlight review | 0 / 3 |
 | E6 Timeline and heatmaps | 0 / 2 |
 | E7 Audio | 0 / 4 |
@@ -191,8 +191,8 @@ Separate from the fixed 44/70 tracker in [plan.md](plan.md); the two are never a
 - [x] E3: hysteresis crossings recomputed on edit, invalidated on scene change.
 - [x] E3: algorithm, reviewer and QA count layers with audit.
 - [x] E3: counts panel showing Entered, Exited and Net per layer.
-- [ ] E4: v2 export files with provenance and explicit size failures.
-- [ ] E4: export traceability and no-double-count tests.
+- [x] E4: v2 export files with provenance and explicit size failures.
+- [x] E4: export traceability and no-double-count tests.
 - [ ] E5: event clips with pre/post roll and measured limits.
 - [ ] E5: loop, speed and manifest-verified frame stepping.
 - [ ] E5: event queue with append-only candidate review and receipts.

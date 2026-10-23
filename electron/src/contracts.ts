@@ -348,10 +348,12 @@ export interface QAHistory {
   next_after_revision: number | null;
 }
 
-export type ExportKind = 'observations' | 'audit' | 'manifest';
+export type ExportKind = 'observations' | 'audit' | 'tracks' | 'counts' | 'manifest';
 export interface ExportFile { name: string; bytes: number; sha256: string; rows?: number }
 export interface ExportManifest {
-  schema_version: 'bat-provisional-csv-v1';
+  schema_version: 'bat-provisional-csv-v2';
+  /** Latest complete tracking run included in tracks and counts CSVs, or null. */
+  tracking?: { tracking_run_id: string; algorithm_version: string; parameter_sha256: string; tracks: number; gates: number; note: string } | null;
   provisional_label: string;
   as_of_utc: string;
   run_id: string;
@@ -364,7 +366,7 @@ export interface ExportManifest {
  * descriptor (including its SHA256) exists only in the authenticated
  * transport manifest: a file cannot embed its own content hash. */
 export type ExportDiskManifest = Omit<ExportManifest, 'files'> & {
-  files: Pick<ExportManifest['files'], 'observations' | 'audit'>;
+  files: Pick<ExportManifest['files'], 'observations' | 'audit' | 'tracks' | 'counts'>;
 };
 export interface ExportJob {
   id: string;

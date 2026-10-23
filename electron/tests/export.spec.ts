@@ -94,7 +94,7 @@ test('provisional native CSV export includes all windows despite filters, protec
     await quit(shell); shell = undefined;
     expect(await readdir(join(data, 'exports'))).toEqual([]);
     shell = await launch(data); await quit(shell); shell = undefined;
-    expect(await readdir(folder)).toEqual(['manifest.json', 'provisional-observations.csv', 'technical-window-audit.csv']);
+    expect(await readdir(folder)).toEqual(['manifest.json', 'provisional-counts.csv', 'provisional-observations.csv', 'provisional-tracks.csv', 'technical-window-audit.csv']);
     expect(await digests(paths)).toEqual(hashes);
   } finally {
     await cleanupDraftShell(shell);

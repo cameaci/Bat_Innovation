@@ -15,14 +15,15 @@ import sqlite3
 from threading import Lock
 
 LABEL = "PROVISIONAL — NOT ECOLOGICALLY FINALISED"
-SCHEMA = "bat-provisional-csv-v1"
+SCHEMA = "bat-provisional-csv-v2"
 MAX_CSV_BYTES = 8 * 1024 * 1024
 MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024
 MAX_MANIFEST_BYTES = 64 * 1024
 MAX_ROWS = 50000
 MAX_ROW_BYTES = 64 * 1024
 MAX_SECONDS = 30
-FILES = {"observations": "provisional-observations.csv", "audit": "technical-window-audit.csv", "manifest": "manifest.json"}
+FILES = {"observations": "provisional-observations.csv", "audit": "technical-window-audit.csv", "tracks": "provisional-tracks.csv",
+         "counts": "provisional-counts.csv", "manifest": "manifest.json"}
 COMMON = ["schema_version", "provisional_label", "as_of_utc", "run_id", "session_id", "summary_window_id", "segment_id",
           "segment_order", "window_index", "source_sha256", "source_filename", "time_base_num", "time_base_den",
           "first_review_revision", "first_review_actor", "first_review_decision", "first_review_effective_decision",
@@ -36,11 +37,21 @@ AUDIT_COLUMNS = COMMON + ["source_state", "evidence_revision", "evidence_fingerp
     "elapsed_start_seconds_num", "elapsed_start_seconds_den", "elapsed_end_seconds_num", "elapsed_end_seconds_den",
     "image_sha256", "image_bytes", "frame_count", "motion_pixels", "timestamp_gap_count", "continuity_before",
     "observation_count", "start_utc", "end_utc_exclusive", "clock_provenance", "clock_reason",
-    "first_history_endpoint", "first_history_through_revision", "qa_history_endpoint", "qa_history_through_revision", "canonical_json"]
+    "first_history_endpoint", "first_history_through_revision", "qa_history_endpoint", "qa_history_through_revision", "modality", "canonical_json"]
+# Feature expansion (E2/E3): derived tracks and gate counts of the latest complete tracking run of this summary run.
+TRACKING = ["schema_version", "provisional_label", "as_of_utc", "run_id", "tracking_run_id", "tracking_algorithm_version", "tracking_parameter_sha256"]
+TRACK_COLUMNS = TRACKING + ["track_id", "segment_id", "source_sha256", "track_index", "first_pts", "last_pts", "point_count", "bbox_json",
+                            "points_sha256", "canonical_json"]
+COUNT_COLUMNS = TRACKING + ["gate_id", "gate_name", "gate_revision", "gate_kind", "gate_points_json", "gate_frame_w", "gate_frame_h",
+    "label_a", "label_b", "entry_direction", "hysteresis_px", "gate_algorithm_version", "row_kind", "layer", "crossing_key", "track_id",
+    "segment_id", "source_pts", "direction", "scene_changed", "review_action", "flipped", "count", "reviewer", "rationale",
+    "qa_decision", "qa_actor", "qa_stale", "entered", "exited", "net", "canonical_json"]
 NUMERIC = {"evidence_revision", "segment_order", "window_index", "time_base_num", "time_base_den", "first_review_revision", "qa_revision",
     "first_review_needs_reverification", "qa_needs_reverification", "has_disagreement", "has_clarification",
     "observation_revision", "start_pts", "end_pts_exclusive", "count", "uncertain", "image_bytes", "frame_count", "motion_pixels",
-    "timestamp_gap_count", "observation_count", "first_history_through_revision", "qa_history_through_revision"} | {
+    "timestamp_gap_count", "observation_count", "first_history_through_revision", "qa_history_through_revision",
+    "track_index", "first_pts", "last_pts", "point_count", "gate_revision", "gate_frame_w", "gate_frame_h", "source_pts",
+    "scene_changed", "flipped", "qa_stale", "entered", "exited", "net"} | {
     f"{field}_{part}" for field in ("window_start_pts", "window_end_pts", "source_start_seconds", "source_end_seconds",
                                      "elapsed_start_seconds", "elapsed_end_seconds") for part in ("num", "den")}
 
@@ -174,6 +185,67 @@ def clock(anchor: dict | None, source: dict, start: dict, end: dict | None) -> d
     return result
 
 
+def expansion_rows(database: Path, directory: Path, run_id: str, as_of: str, check, files: dict) -> dict | None:
+    """Tracks and three-layer gate counts; header-only files when no complete tracking run exists."""
+    from . import count_store, store
+
+    tracks_file = CSVFile(directory / FILES["tracks"], TRACK_COLUMNS, check)
+    counts_file = None
+    try:
+        counts_file = CSVFile(directory / FILES["counts"], COUNT_COLUMNS, check)
+        info = None
+        if store.schema_version(database) >= store.TRACKING_SCHEMA_VERSION:
+            with closing(readonly(database)) as connection:
+                run = connection.execute("""SELECT * FROM tracking_run WHERE summary_run_id=? AND state='complete'
+                    ORDER BY started_at_utc DESC, rowid DESC LIMIT 1""", (run_id,)).fetchone()
+                rows = connection.execute("""SELECT t.*, s.sha256 FROM track t JOIN segment s ON s.id = t.segment_id
+                    WHERE t.run_id=? ORDER BY t.segment_id, t.track_index""", (run["id"],)).fetchall() if run else []
+            if run is not None:
+                base = {"schema_version": SCHEMA, "provisional_label": LABEL, "as_of_utc": as_of, "run_id": run_id,
+                        "tracking_run_id": run["id"], "tracking_algorithm_version": run["algorithm_version"],
+                        "tracking_parameter_sha256": run["parameter_hash"]}
+                for row in rows:
+                    check()
+                    tracks_file.row({**base, "track_id": row["id"], "segment_id": row["segment_id"], "source_sha256": row["sha256"],
+                                     "track_index": row["track_index"], "first_pts": row["first_pts"], "last_pts": row["last_pts"],
+                                     "point_count": row["point_count"], "bbox_json": row["bbox_json"], "points_sha256": row["points_sha256"]})
+                gates = count_store.list_gates(database, run["session_id"])
+                for gate in gates:
+                    if gate["state"] != "active":
+                        continue
+                    result = count_store.counts(database, run["id"], gate["id"])
+                    head = {**base, "gate_id": gate["id"], "gate_name": gate["name"], "gate_revision": gate["revision"], "gate_kind": gate["kind"],
+                            "gate_points_json": json.dumps(gate["points"]), "gate_frame_w": gate["frame_w"], "gate_frame_h": gate["frame_h"],
+                            "label_a": gate["label_a"], "label_b": gate["label_b"], "entry_direction": gate["entry_direction"],
+                            "hysteresis_px": str(gate["hysteresis_px"]), "gate_algorithm_version": result["algorithm_version"]}
+                    for crossing in result["crossings"]:
+                        review = crossing["review"] or {}
+                        counts_file.row({**head, "row_kind": "crossing", "crossing_key": crossing["key"], "track_id": crossing["track_id"],
+                                         "segment_id": crossing["segment_id"], "source_pts": crossing["pts"], "direction": crossing["direction"],
+                                         "scene_changed": crossing["scene_changed"], "review_action": review.get("action"),
+                                         "flipped": review.get("flipped"), "count": review.get("count"), "reviewer": review.get("actor"),
+                                         "rationale": review.get("rationale")})
+                    for added in result["missed"]:
+                        counts_file.row({**head, "row_kind": "added", "layer": "reviewer", "crossing_key": added["key"], "segment_id": added["segment_id"],
+                                         "source_pts": added["pts"], "direction": added["direction"], "review_action": "add_missed",
+                                         "count": added["count"], "reviewer": added["actor"], "rationale": added["rationale"]})
+                    qa = result["layers"]["qa"]
+                    for layer, totals in (("algorithm", result["layers"]["algorithm"]), ("reviewer", result["layers"]["reviewer"]),
+                                          ("qa", qa["counts"] if qa else None)):
+                        counts_file.row({**head, "row_kind": "total", "layer": layer, "qa_decision": qa["decision"] if qa else None,
+                                         "qa_actor": qa["actor"] if qa else None, "qa_stale": qa["stale"] if qa else None,
+                                         **({key: totals[key] for key in ("entered", "exited", "net")} if totals else {})})
+                info = {"tracking_run_id": run["id"], "algorithm_version": run["algorithm_version"], "parameter_sha256": run["parameter_hash"],
+                        "tracks": len(rows), "gates": sum(1 for gate in gates if gate["state"] == "active"),
+                        "note": "Tracks and crossings are review candidates, not animals. Layers: algorithm (unverified), reviewer, qa (null until approved)."}
+        files["tracks"], files["counts"] = tracks_file.close(), counts_file.close()
+        return info
+    finally:
+        tracks_file.handle.close()
+        if counts_file is not None:
+            counts_file.handle.close()
+
+
 def export_rows(database: Path, data_dir: Path, run_id: str, directory: Path, as_of: str, check) -> dict:
     from . import qa_store, review_store, summary_store, windows
     from .qa import QAService
@@ -285,6 +357,7 @@ def export_rows(database: Path, data_dir: Path, run_id: str, directory: Path, as
                           "image_sha256": row["image_sha256"], "image_bytes": row["image_bytes"], "frame_count": row["stats"].get("frame_count"),
                           "motion_pixels": row["stats"].get("motion_pixels"), "timestamp_gap_count": row["stats"].get("gap_count"),
                           "continuity_before": source["continuity"], "observation_count": len(first["observations"]),
+                          "modality": source.get("modality", "active_ir"),
                           "first_history_endpoint": f"/api/summary-windows/{row['id']}/review-history" if row["id"] else "",
                           "first_history_through_revision": first["revision"], "qa_history_endpoint": f"/api/summary-windows/{row['id']}/qa-history" if row["id"] else "",
                           "qa_history_through_revision": qa["revision"], **clock(anchor, source, interval["start_pts"], interval["end_pts"])}
@@ -308,10 +381,11 @@ def export_rows(database: Path, data_dir: Path, run_id: str, directory: Path, as
                 if seen_evidence[f"{source['id']}:{row['index']}"] != windows.parameter_hash(effective(row)[-1]):
                     raise ExportFailure("export_stale")
         files = {"observations": observations.close(), "audit": audit.close()}
-        return {"schema_version": SCHEMA, "provisional_label": LABEL, "as_of_utc": as_of, "run_id": run_id,
+        tracking = expansion_rows(database, directory, run_id, as_of, check, files)
+        return {"schema_version": SCHEMA, "tracking": tracking, "provisional_label": LABEL, "as_of_utc": as_of, "run_id": run_id,
                 "counts": counts, "manifest_complete": counts["missing"] == 0, "processing_complete": run["state"] == "complete" and counts["processing"]["complete"] == counts["planned"],
                 "source_continuity": [{"segment_id": s["id"], "continuity_before": s["continuity"]} for s in sources], "files": files,
-                "columns": {"observations": OBS_COLUMNS, "audit": AUDIT_COLUMNS}, "numeric_columns": sorted(NUMERIC),
+                "columns": {"observations": OBS_COLUMNS, "audit": AUDIT_COLUMNS, "tracks": TRACK_COLUMNS, "counts": COUNT_COLUMNS}, "numeric_columns": sorted(NUMERIC),
                 "text_encoding": "apostrophe-backslash-v1: remove one leading apostrophe; decode doubled backslash and backslash-uXXXX; empty stays empty",
                 "history": "Use existing authenticated history endpoints with after_revision pagination; include only revisions <= the exported through_revision. Append-only histories are immutable.",
                 "limits": {"csv_bytes_each": MAX_CSV_BYTES, "rows_each": MAX_ROWS, "snapshot_bytes": MAX_SNAPSHOT_BYTES, "wall_seconds": MAX_SECONDS}}

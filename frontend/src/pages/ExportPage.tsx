@@ -79,7 +79,7 @@ export function ExportPage() {
       <Card role="region" aria-label="Provisional CSV export">
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><FileSpreadsheet className="h-5 w-5" aria-hidden />Provisional CSV bundle</CardTitle>
-          <CardDescription>Two CSV files and a manifest: your observations, and an audit row for every planned window (reviewed or not). <strong>PROVISIONAL: not an ecologically finalised report.</strong> Reviewer names are local labels, not verified identities.</CardDescription>
+          <CardDescription>Four CSV files and a manifest: your observations, an audit row for every planned window (reviewed or not), and the tracks and gate counts of the latest finished tracking run (algorithm, reviewer and QA layers kept apart). <strong>PROVISIONAL: not an ecologically finalised report.</strong> Reviewer names are local labels, not verified identities.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {!run ? <p className="text-sm text-muted-foreground">Generate motion summaries first.</p> : <>
@@ -98,6 +98,7 @@ export function ExportPage() {
             </div>
             {working && <p role="status" className="text-sm text-muted-foreground">Creating a read-only snapshot of this run...</p>}
             {manifest && <div className="space-y-1 rounded-lg border bg-muted/40 p-3 text-sm">
+              <p className="text-xs text-muted-foreground">{manifest.tracking ? `Tracks and counts from tracking run ${manifest.tracking.tracking_run_id.slice(0, 8)} (${manifest.tracking.tracks} tracks, ${manifest.tracking.gates} gates).` : 'No finished tracking run: the tracks and counts files contain headers only.'}</p>
               <p role="status">Ready: {manifest.counts.planned} planned windows, {manifest.counts.reviewed} reviewed, {manifest.counts.qa.pending} QA pending{manifest.counts.missing ? `, ${manifest.counts.missing} missing records` : ''}.</p>
               <p className="text-xs text-muted-foreground">Coverage: manifest {manifest.manifest_complete ? 'complete' : 'INCOMPLETE'}, processing {manifest.processing_complete ? 'complete' : 'INCOMPLETE'}. Snapshot of {localDate(manifest.as_of_utc)}.</p>
               <ul className="text-xs text-muted-foreground">{Object.values(manifest.files).map(file => <li key={file.name}>{file.name}: {file.bytes} bytes{file.rows === undefined ? '' : `, ${file.rows} rows`}</li>)}</ul>
