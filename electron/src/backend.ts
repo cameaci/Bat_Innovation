@@ -8,7 +8,9 @@ import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia, SummaryRequest, SummaryRun, SummaryDetail, ReviewChange, WindowReview, ReviewHistory } from './contracts';
-import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, TrackingRun, TrackRecord, Gate, GateChange, GateCounts, CountReviewInput, CountQAInput, Candidate, CandidateDecisionInput } from './contracts';
+import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, TrackingRun, TrackRecord, Gate, GateChange, GateCounts, CountReviewInput, CountQAInput, Candidate, CandidateDecisionInput, Heatmap, HeatmapMode } from './contracts';
+
+export const isHeatmapMode = (value: unknown): value is HeatmapMode => value === 'first' || value === 'all' || value === 'confirmed';
 
 const within = (input: Record<string, unknown>, keys: string[]) => Object.keys(input).every(key => keys.includes(key));
 const text = (value: unknown, max: number, required = true) => typeof value === 'string' && value.length <= max && (!required || value.trim().length > 0);
@@ -347,6 +349,9 @@ export class BackendClient {
     return isUUID(runID) && isUUID(gateID) && isCountQAInput(input) ? this.call(`/api/tracking/${runID}/gates/${gateID}/qa`, 'POST', input) : Promise.resolve(invalid());
   }
   listCandidates(runID: string): Promise<ApiResult<Candidate[]>> { return isUUID(runID) ? this.call(`/api/tracking/${runID}/candidates`) : Promise.resolve(invalid()); }
+  getHeatmap(runID: string, segmentID: string, mode: HeatmapMode): Promise<ApiResult<Heatmap>> {
+    return isUUID(runID) && isUUID(segmentID) && isHeatmapMode(mode) ? this.call(`/api/tracking/${runID}/heatmap?segment_id=${segmentID}&mode=${mode}`) : Promise.resolve(invalid());
+  }
   decideCandidate(runID: string, trackID: string, input: CandidateDecisionInput): Promise<ApiResult<Candidate>> {
     return isUUID(runID) && isUUID(trackID) && isCandidateDecision(input) ? this.call(`/api/tracking/${runID}/candidates/${trackID}/decision`, 'POST', input) : Promise.resolve(invalid());
   }
@@ -642,6 +647,7 @@ export class BackendRuntime {
   saveCountReview(runID: string, gateID: string, input: CountReviewInput): Promise<ApiResult<GateCounts>> { return this.ready(client => client.saveCountReview(runID, gateID, input)); }
   saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>> { return this.ready(client => client.saveCountQA(runID, gateID, input)); }
   listCandidates(runID: string): Promise<ApiResult<Candidate[]>> { return this.ready(client => client.listCandidates(runID)); }
+  getHeatmap(runID: string, segmentID: string, mode: HeatmapMode): Promise<ApiResult<Heatmap>> { return this.ready(client => client.getHeatmap(runID, segmentID, mode)); }
   decideCandidate(runID: string, trackID: string, input: CandidateDecisionInput): Promise<ApiResult<Candidate>> { return this.ready(client => client.decideCandidate(runID, trackID, input)); }
   importStatus(jobID: string): Promise<ApiResult<ImportJob>> { return this.ready(client => client.importStatus(jobID)); }
   cancelImport(jobID: string): Promise<ApiResult<ImportJob>> { return this.ready(client => client.cancelImport(jobID)); }

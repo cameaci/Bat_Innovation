@@ -110,6 +110,8 @@ export interface Candidate {
   track_id: string; segment_id: string; track_index: number; first_pts: string; last_pts: string; point_count: number; window_id: string | null;
   revision: number; decision: { decision: 'bat' | 'not_bat' | 'uncertain'; actor: string; note: string; utc: string } | null;
 }
+export type HeatmapMode = 'first' | 'all' | 'confirmed';
+export interface Heatmap { segment_id: string; mode: HeatmapMode; width: number; height: number; columns: number; rows: number; cells: number[]; points: number; tracks: number }
 export interface CandidateDecisionInput { actor: string; expected_revision: number; decision: 'bat' | 'not_bat' | 'uncertain'; note: string; preview_id: string }
 
 /** points: [source_pts, x, y, area] in original source pixels. */
@@ -421,6 +423,7 @@ export interface BatAPI {
   saveCountReview(runID: string, gateID: string, input: CountReviewInput): Promise<ApiResult<GateCounts>>;
   saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>>;
   listCandidates(runID: string): Promise<ApiResult<Candidate[]>>;
+  getHeatmap(runID: string, segmentID: string, mode: HeatmapMode): Promise<ApiResult<Heatmap>>;
   decideCandidate(runID: string, trackID: string, input: CandidateDecisionInput): Promise<ApiResult<Candidate>>;
   importStatus(jobID: string): Promise<ApiResult<ImportJob>>;
   cancelImport(jobID: string): Promise<ApiResult<ImportJob>>;

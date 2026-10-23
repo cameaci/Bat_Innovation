@@ -1,5 +1,13 @@
 # 07 - Research log
 
+## 2026-10-23 - Feature expansion E6: activity timeline and heatmaps
+
+**Design:** the Review page shows one timeline lane per original video in recording order, built from the existing run windows and per-window track counts: bar height is candidate tracks, a dot marks recorded observations, failed or incomplete windows are shaded, and the continuity between videos (contiguous, gap or unknown) is written between lanes rather than compressed. Clicking a window opens it in the dialog. A heatmap endpoint returns a 64-column grid in source coordinates for the first point of each track, all points, or tracks a reviewer marked as bat (empty until a person decides); it is drawn with active gate outlines and labelled as track points, not individuals, with an empty area not being proof of absence. No schema change.
+
+**Verified (Linux):** backend 412 passed, 45 skipped, including all heatmap modes and the confirmed mode staying empty without a decision (one earlier full run had one intermittent failure that did not reproduce on rerun and was not identified); 58 Node tests; Electron end-to-end 24 passed, 1 skipped, including timeline items, opening a window from the timeline and two heatmap modes.
+
+**Not verified:** gate crossings on the timeline, heatmaps over a real reference frame, very long recordings, Windows.
+
 ## 2026-10-23 - Feature expansion E5: highlight and block review
 
 **Design:** the original preview accepts 2 s clips (unchanged limits) or 6 s and 12 s blocks. Frame, decoded-frame and CPU limits scale with the length, the wall deadline scales from the existing 25 s, and longer clips may use up to 32 MiB (measured: 12 s of the 640x360 noisy synthetic IR clip is 4.4 MB lossless VP9; 2 s is 0.8 MB). The renderer adds clip length, playback speed (0.25x to 2x), loop and previous/next frame. Frame stepping seeks to the middle of the neighbouring frame of the preview manifest and the displayed source PTS is still confirmed by the existing frame callback, never an FPS estimate. Keys in the window dialog: Space, comma and full stop, L, 1-5. Schema v9 adds append-only `candidate_event` (bat, not a bat, uncertain) on a track. Each decision needs a receipt: a ready preview of the same unchanged segment whose frames overlap the track's PTS span. The Events page shows each candidate in a 6 s block starting 1 s before it, with its trail, and "Not a bat + next" (N). Candidate decisions never change window review or the all-window progress. The preview section no longer shrinks under the new gate panel, which had covered its controls.

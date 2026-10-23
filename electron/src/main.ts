@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import { existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, isGateChange, isCountReviewInput, isCountQAInput, isCandidateDecision, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
+import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, isGateChange, isCountReviewInput, isCountQAInput, isCandidateDecision, isHeatmapMode, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
 import { ExportSaver } from './export_saver';
 import type { NewSession } from './contracts';
 
@@ -197,6 +197,7 @@ async function open(): Promise<void> {
   handle('bat:get-counts', 2, ([run, gate]) => isUUID(run) && isUUID(gate) ? backend.getCounts(run, gate) : invalid());
   handle('bat:save-count-review', 3, ([run, gate, input]) => isUUID(run) && isUUID(gate) && isCountReviewInput(input) ? backend.saveCountReview(run, gate, input) : invalid('Use a valid count review action.'));
   handle('bat:save-count-qa', 3, ([run, gate, input]) => isUUID(run) && isUUID(gate) && isCountQAInput(input) ? backend.saveCountQA(run, gate, input) : invalid('Use a valid count QA action.'));
+  handle('bat:get-heatmap', 3, ([run, segment, mode]) => isUUID(run) && isUUID(segment) && isHeatmapMode(mode) ? backend.getHeatmap(run, segment, mode) : invalid());
   handle('bat:list-candidates', 1, ([id]) => isUUID(id) ? backend.listCandidates(id) : invalid());
   handle('bat:decide-candidate', 3, ([run, track, input]) => isUUID(run) && isUUID(track) && isCandidateDecision(input) ? backend.decideCandidate(run, track, input) : invalid('Use a valid candidate decision.'));
   handle('bat:start-tracking', 1, ([id]) => isUUID(id) ? backend.startTracking(id) : invalid('Select a valid summary run ID.'));

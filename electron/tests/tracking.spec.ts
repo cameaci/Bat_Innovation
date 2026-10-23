@@ -23,6 +23,16 @@ test('tracks are computed from a finished summary run and drawn as trails over t
     await expect(shell.page.getByRole('status').filter({ hasText: /^Tracking complete: 2 tracks \(unverified\)$/ })).toBeVisible({ timeout: 60_000 });
     await goTo(shell, 'Review');
     await expect(windowCards(shell).first()).toContainText('2 tracks (unverified)');
+    const timeline = shell.page.getByRole('list', { name: /^Timeline of / });
+    await expect(timeline.getByRole('listitem')).toHaveCount(1);
+    await expect(timeline.getByRole('listitem').first()).toHaveAccessibleName('0:00: 2 tracks');
+    await shell.page.getByText('Heatmap of candidate tracks', { exact: true }).click();
+    await expect(shell.page.getByRole('region', { name: 'Heatmap' }).getByRole('status')).toContainText('2 track points from 2 tracks');
+    await shell.page.getByLabel('Show', { exact: true }).selectOption('confirmed');
+    await expect(shell.page.getByRole('region', { name: 'Heatmap' }).getByRole('status')).toContainText('0 track points from 0 tracks');
+    await timeline.getByRole('listitem').first().click({ force: true });
+    await expect(shell.page.getByRole('dialog')).toBeVisible();
+    await shell.page.getByRole('dialog').getByRole('button', { name: 'Close window', exact: true }).click();
     const view = await openAt(shell, 0);
     await expect(view.getByRole('list', { name: 'Tracks in this window', exact: true }).getByRole('listitem')).toHaveCount(2);
     await previewReady(view);

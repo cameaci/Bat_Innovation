@@ -198,3 +198,17 @@ def install_routes(app: FastAPI, jobs: TrackingJobs, authenticate, previews) -> 
             raise candidate_store.CandidateError("candidate_unverified", "Watch an original preview that covers this candidate before deciding.") from None
         return candidate_store.decide(jobs.db_path, str(run_id), str(track_id), payload.actor, payload.expected_revision,
                                       payload.decision, payload.note, {**preview, "id": str(payload.preview_id)})
+
+    @app.get("/api/tracking/{run_id}/heatmap", dependencies=[Depends(authenticate)])
+    def heatmap(run_id: UUID, segment_id: UUID, mode: Literal["first", "all", "confirmed"]) -> dict:
+        jobs.get(str(run_id))
+        confirmed = set()
+        if mode == "confirmed":
+            confirmed = {item["track_id"] for item in candidate_store.candidates(jobs.db_path, str(run_id))
+                         if item["decision"] and item["decision"]["decision"] == "bat"}
+        try:
+            return tracking_store.heatmap(jobs.db_path, str(run_id), str(segment_id), mode, confirmed)
+        except LookupError:
+            raise TrackingError("tracking_missing", 404) from None
+        except ValueError:
+            raise TrackingError("tracking_integrity") from None
