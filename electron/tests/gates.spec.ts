@@ -10,6 +10,7 @@ test.skip(process.platform !== 'linux', 'Media processing E2E is verified on Lin
 /** Click a point given in original source pixels on the gate drawing area. */
 async function clickSource(view: Locator, x: number, y: number): Promise<void> {
   const area = view.getByRole('img', { name: 'Gate drawing area', exact: true });
+  await area.scrollIntoViewIfNeeded();
   const point = await area.evaluate((svg, [sx, sy]) => {
     const matrix = (svg as SVGSVGElement).getScreenCTM()!;
     const screen = new DOMPoint(sx, sy).matrixTransform(matrix);

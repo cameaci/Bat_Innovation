@@ -9,9 +9,11 @@ from threading import Event, Lock, Thread
 from uuid import UUID
 
 from fastapi import Body, Depends, FastAPI
-from pydantic import BaseModel, ConfigDict
+from typing import Literal
 
-from . import store, summary_store, tracking_store, workers
+from pydantic import BaseModel, ConfigDict, Field
+
+from . import candidate_store, store, summary_store, tracking_store, workers
 from .imports import ImportErrorResponse, source_state
 from .track_worker import CPU_SECONDS, ERRORS as WORKER_ERRORS, MAX_REQUEST_BYTES, MEMORY_BYTES
 
@@ -148,7 +150,16 @@ class Empty(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-def install_routes(app: FastAPI, jobs: TrackingJobs, authenticate) -> None:
+class CandidateDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    actor: str = Field(min_length=1, max_length=120)
+    expected_revision: int = Field(ge=0)
+    decision: Literal["bat", "not_bat", "uncertain"]
+    note: str = Field(default="", max_length=2000)
+    preview_id: UUID
+
+
+def install_routes(app: FastAPI, jobs: TrackingJobs, authenticate, previews) -> None:
     @app.post("/api/tracking", status_code=202, dependencies=[Depends(authenticate)])
     def start(payload: NewTracking) -> dict:
         return jobs.start(str(payload.summary_run_id))
@@ -174,3 +185,16 @@ def install_routes(app: FastAPI, jobs: TrackingJobs, authenticate) -> None:
             raise TrackingError("track_limit") from None
         except ValueError:
             raise TrackingError("tracking_integrity") from None
+
+    @app.get("/api/tracking/{run_id}/candidates", dependencies=[Depends(authenticate)])
+    def list_candidates(run_id: UUID) -> list[dict]:
+        return candidate_store.candidates(jobs.db_path, str(run_id))
+
+    @app.post("/api/tracking/{run_id}/candidates/{track_id}/decision", dependencies=[Depends(authenticate)])
+    def decide(run_id: UUID, track_id: UUID, payload: CandidateDecision) -> dict:
+        try:
+            preview = previews.get(str(payload.preview_id))
+        except ImportErrorResponse:
+            raise candidate_store.CandidateError("candidate_unverified", "Watch an original preview that covers this candidate before deciding.") from None
+        return candidate_store.decide(jobs.db_path, str(run_id), str(track_id), payload.actor, payload.expected_revision,
+                                      payload.decision, payload.note, {**preview, "id": str(payload.preview_id)})

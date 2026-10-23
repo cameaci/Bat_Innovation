@@ -8,7 +8,7 @@ import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia, SummaryRequest, SummaryRun, SummaryDetail, ReviewChange, WindowReview, ReviewHistory } from './contracts';
-import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, TrackingRun, TrackRecord, Gate, GateChange, GateCounts, CountReviewInput, CountQAInput } from './contracts';
+import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, TrackingRun, TrackRecord, Gate, GateChange, GateCounts, CountReviewInput, CountQAInput, Candidate, CandidateDecisionInput } from './contracts';
 
 const within = (input: Record<string, unknown>, keys: string[]) => Object.keys(input).every(key => keys.includes(key));
 const text = (value: unknown, max: number, required = true) => typeof value === 'string' && value.length <= max && (!required || value.trim().length > 0);
@@ -34,6 +34,10 @@ export function isCountReviewInput(input: unknown): input is CountReviewInput {
 export function isCountQAInput(input: unknown): input is CountQAInput {
   return object(input) && exactKeys(input, ['actor', 'expected_revision', 'review_revision', 'decision', 'note']) && text(input.actor, 120) &&
     isReviewCursor(input.expected_revision) && isReviewCursor(input.review_revision) && ['approve', 'reject'].includes(String(input.decision)) && text(input.note, 2000, false);
+}
+export function isCandidateDecision(input: unknown): input is CandidateDecisionInput {
+  return object(input) && exactKeys(input, ['actor', 'expected_revision', 'decision', 'note', 'preview_id']) && text(input.actor, 120) &&
+    isReviewCursor(input.expected_revision) && ['bat', 'not_bat', 'uncertain'].includes(String(input.decision)) && text(input.note, 2000, false) && isUUID(input.preview_id);
 }
 export const isPTS = (value: unknown): value is string => typeof value === 'string' && /^-?\d{1,19}$/.test(value);
 export const isModality = (value: unknown): value is Modality => value === 'active_ir' || value === 'rendered_thermal';
@@ -105,10 +109,12 @@ export function isSummaryRequest(input: unknown): input is SummaryRequest {
     typeof input.window_seconds === 'number' && Number.isInteger(input.window_seconds) && input.window_seconds >= 1 && input.window_seconds <= 120;
 }
 
-export const MAX_PREVIEW_BYTES = 8 * 1024 * 1024;
+// Highlight clips (E5) of up to 12 s; measured 4.4 MB for 12 s of 640x360 noise, so this leaves room for 960x540.
+export const MAX_PREVIEW_BYTES = 32 * 1024 * 1024;
 export function isPreviewRequest(input: unknown): input is PreviewRequest {
-  if (!object(input) || !exactKeys(input, ['segment_id', 'source_pts']) || !isUUID(input.segment_id) ||
-      typeof input.source_pts !== 'string' || !/^-?\d{1,19}$/.test(input.source_pts)) return false;
+  if (!object(input) || !(exactKeys(input, ['segment_id', 'source_pts']) || exactKeys(input, ['segment_id', 'source_pts', 'clip_seconds'])) ||
+      !isUUID(input.segment_id) || typeof input.source_pts !== 'string' || !/^-?\d{1,19}$/.test(input.source_pts) ||
+      (input.clip_seconds !== undefined && ![2, 6, 12].includes(input.clip_seconds as number))) return false;
   const pts = BigInt(input.source_pts);
   return pts >= -(2n ** 63n) && pts < 2n ** 63n;
 }
@@ -149,6 +155,11 @@ const mediaErrors: Record<string, string> = {
   count_same_actor: 'QA must be done by a different person than the count reviewer.',
   gate_missing: 'The gate does not exist.',
   gate_conflict: 'The gate changed or was retired. Reload it before editing.',
+  candidate_upgrade_required: 'Upgrade storage before reviewing candidates.',
+  candidate_invalid: 'Enter your name and choose bat, not a bat or uncertain.',
+  candidate_missing: 'The candidate track does not exist.',
+  candidate_unverified: 'Watch an original preview that covers this candidate before deciding.',
+  candidate_conflict: 'This candidate changed since you loaded it. Reload before saving.',
   gate_invalid: 'The gate is too small, outside the frame or has the wrong number of points for its type.',
   export_busy: 'Another export or this processing run is active. Wait or cancel, then retry.',
   export_too_large: 'Export exceeds a row, byte, CPU, memory, snapshot or time limit. No partial export was published.',
@@ -334,6 +345,10 @@ export class BackendClient {
   }
   saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>> {
     return isUUID(runID) && isUUID(gateID) && isCountQAInput(input) ? this.call(`/api/tracking/${runID}/gates/${gateID}/qa`, 'POST', input) : Promise.resolve(invalid());
+  }
+  listCandidates(runID: string): Promise<ApiResult<Candidate[]>> { return isUUID(runID) ? this.call(`/api/tracking/${runID}/candidates`) : Promise.resolve(invalid()); }
+  decideCandidate(runID: string, trackID: string, input: CandidateDecisionInput): Promise<ApiResult<Candidate>> {
+    return isUUID(runID) && isUUID(trackID) && isCandidateDecision(input) ? this.call(`/api/tracking/${runID}/candidates/${trackID}/decision`, 'POST', input) : Promise.resolve(invalid());
   }
   saveMedia(sessionID: string, input: SaveMedia): Promise<ApiResult<MediaSession>> {
     return isUUID(sessionID) && isSaveMedia(input) ? this.call(`/api/sessions/${sessionID}/media`, 'PUT', input) : Promise.resolve(invalid('Use only selected segment IDs, continuity evidence and an optional UTC clock anchor.'));
@@ -626,6 +641,8 @@ export class BackendRuntime {
   getCounts(runID: string, gateID: string): Promise<ApiResult<GateCounts>> { return this.ready(client => client.getCounts(runID, gateID)); }
   saveCountReview(runID: string, gateID: string, input: CountReviewInput): Promise<ApiResult<GateCounts>> { return this.ready(client => client.saveCountReview(runID, gateID, input)); }
   saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>> { return this.ready(client => client.saveCountQA(runID, gateID, input)); }
+  listCandidates(runID: string): Promise<ApiResult<Candidate[]>> { return this.ready(client => client.listCandidates(runID)); }
+  decideCandidate(runID: string, trackID: string, input: CandidateDecisionInput): Promise<ApiResult<Candidate>> { return this.ready(client => client.decideCandidate(runID, trackID, input)); }
   importStatus(jobID: string): Promise<ApiResult<ImportJob>> { return this.ready(client => client.importStatus(jobID)); }
   cancelImport(jobID: string): Promise<ApiResult<ImportJob>> { return this.ready(client => client.cancelImport(jobID)); }
   startPreview(input: PreviewRequest): Promise<ApiResult<PreviewJob>> { return this.ready(client => client.startPreview(input)); }

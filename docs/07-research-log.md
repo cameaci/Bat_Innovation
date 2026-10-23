@@ -1,5 +1,13 @@
 # 07 - Research log
 
+## 2026-10-23 - Feature expansion E5: highlight and block review
+
+**Design:** the original preview accepts 2 s clips (unchanged limits) or 6 s and 12 s blocks. Frame, decoded-frame and CPU limits scale with the length, the wall deadline scales from the existing 25 s, and longer clips may use up to 32 MiB (measured: 12 s of the 640x360 noisy synthetic IR clip is 4.4 MB lossless VP9; 2 s is 0.8 MB). The renderer adds clip length, playback speed (0.25x to 2x), loop and previous/next frame. Frame stepping seeks to the middle of the neighbouring frame of the preview manifest and the displayed source PTS is still confirmed by the existing frame callback, never an FPS estimate. Keys in the window dialog: Space, comma and full stop, L, 1-5. Schema v9 adds append-only `candidate_event` (bat, not a bat, uncertain) on a track. Each decision needs a receipt: a ready preview of the same unchanged segment whose frames overlap the track's PTS span. The Events page shows each candidate in a 6 s block starting 1 s before it, with its trail, and "Not a bat + next" (N). Candidate decisions never change window review or the all-window progress. The preview section no longer shrinks under the new gate panel, which had covered its controls.
+
+**Verified (Linux):** backend 411 passed, 45 skipped, including clip-length bounds, receipt refusal without a covering preview, optimistic conflicts and append-only triggers; 58 Node tests; Electron end-to-end 24 passed, 1 skipped, including an events spec with a 6 s block, a verified next-frame step, 0.25x speed and "not a bat + next".
+
+**Not verified:** clip sizes for full-HD noisy IR originals, audio in highlight blocks (E7), zoom, Windows.
+
 ## 2026-10-23 - Feature expansion E4: provisional export v2
 
 **Design:** `bat-provisional-csv-v2` keeps the observation and audit CSVs (the audit gains `modality`) and adds `provisional-tracks.csv` (one row per track of the latest complete tracking run of the exported summary run, with run, parameter hash, source SHA-256 and a points SHA-256; points stay in the database and API) and `provisional-counts.csv` (per gate revision: every derived crossing with its reviewer action, hand-added crossings, and one total row each for the algorithm, reviewer and QA layers, the QA totals empty unless a current approval exists). Without a finished tracking run both new files contain headers only and the manifest says `tracking: null`. The same read-only snapshot, row and byte limits, text encoding, worker containment and atomic native save apply; the Electron saver now validates five files. Track points are not exported in CSV because a long track would exceed the 64 KiB row limit.

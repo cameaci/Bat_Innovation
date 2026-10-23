@@ -94,6 +94,7 @@ class NewPreview(BaseModel):
     model_config = ConfigDict(extra="forbid")
     segment_id: UUID
     source_pts: str = Field(pattern=r"^-?\d{1,19}$", max_length=20)
+    clip_seconds: Literal[2, 6, 12] = 2
 
     @field_validator("source_pts")
     @classmethod
@@ -298,7 +299,7 @@ def create_app(settings: Settings) -> FastAPI:
 
     @app.post("/api/media/preview", status_code=202, dependencies=[Depends(authenticate)])
     def post_preview(payload: NewPreview) -> dict:
-        return previews.start(str(payload.segment_id), payload.source_pts)
+        return previews.start(str(payload.segment_id), payload.source_pts, payload.clip_seconds)
 
     @app.get("/api/media/preview/{preview_id}", dependencies=[Depends(authenticate)])
     def get_preview(preview_id: UUID) -> dict:
@@ -366,6 +367,6 @@ def create_app(settings: Settings) -> FastAPI:
 
     install_review_routes(app, reviews, authenticate)
     install_qa_routes(app, qa, authenticate)
-    install_tracking_routes(app, tracking, authenticate)
+    install_tracking_routes(app, tracking, authenticate, previews)
     install_count_routes(app, db_path, authenticate)
     return app

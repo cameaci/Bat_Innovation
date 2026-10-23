@@ -114,7 +114,7 @@ Reviewed 2026-10-20. Status: **Slices 0 (Linux foundation), 1A, 1B, 2A, 3A, 3B, 
 - [x] Inspect the reference app's navigation/keyboard patterns and licence; independently implement the small scoped interaction without copying source or adding dependencies.
 - [x] Add seven filters and bounded 12-card pages without changing the all-window review denominator.
 - [x] Select a summary and open its source preview at original PTS; retain relative time, separate clock provenance and exact displayed-PTS draft helpers.
-- [ ] Add zoom and frame-step only when playback support can prove exact behavior; outside this gallery increment.
+- [ ] Add zoom and frame-step only when playback support can prove exact behavior; outside this gallery increment. (Frame stepping verified by the manifest frame ledger is delivered by feature expansion E5; zoom is not. The box stays open because zoom is missing.)
 - [x] Allow multiple provisional observations within one window, each with one exact original source-PTS span.
 - [ ] Allow a single observation to cite multiple source spans when continuity is validated (separate future follow-up, outside this gallery increment).
 - [x] Store provisional visual category, optional activity, uncertain/unknown counts and notes. A movement trace never automatically becomes a confirmed bat.

@@ -25,7 +25,7 @@ test('real backend readiness, SQLite session persistence and narrow renderer bri
     }))).toEqual({
       nodeProcess: 'undefined',
       nodeRequire: 'undefined',
-      bridge: ['cancelExport', 'cancelImport', 'cancelPreview', 'cancelSummaries', 'cancelTracking', 'chooseMedia', 'createSession', 'exportStatus', 'getCounts', 'getMedia', 'getTracks', 'getWindowQA', 'getWindowReview', 'health', 'importStatus', 'listGates', 'listSessions', 'listSummaryRuns', 'listTracking', 'previewContent', 'previewStatus', 'qaHistory', 'reviewHistory', 'saveCountQA', 'saveCountReview', 'saveExportBundle', 'saveGate', 'saveMedia', 'saveQA', 'saveReview', 'setDraftDirty', 'startExport', 'startPreview', 'startSummaries', 'startTracking', 'summaryImage', 'summaryRun', 'trackingRun', 'upgradeMedia', 'upgradeQA', 'upgradeReviews', 'upgradeStorage', 'upgradeSummaries'],
+      bridge: ['cancelExport', 'cancelImport', 'cancelPreview', 'cancelSummaries', 'cancelTracking', 'chooseMedia', 'createSession', 'decideCandidate', 'exportStatus', 'getCounts', 'getMedia', 'getTracks', 'getWindowQA', 'getWindowReview', 'health', 'importStatus', 'listCandidates', 'listGates', 'listSessions', 'listSummaryRuns', 'listTracking', 'previewContent', 'previewStatus', 'qaHistory', 'reviewHistory', 'saveCountQA', 'saveCountReview', 'saveExportBundle', 'saveGate', 'saveMedia', 'saveQA', 'saveReview', 'setDraftDirty', 'startExport', 'startPreview', 'startSummaries', 'startTracking', 'summaryImage', 'summaryRun', 'trackingRun', 'upgradeMedia', 'upgradeQA', 'upgradeReviews', 'upgradeStorage', 'upgradeSummaries'],
       bridgeFrozen: true,
     });
     expect(await page.evaluate(() => new Promise<string>((resolve) => {

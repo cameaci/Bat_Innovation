@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Loader2, RotateCcw } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { MediaSegment, PreviewFrame, PreviewJob } from '../../../electron/src/contracts';
@@ -9,13 +9,17 @@ import { clock, ptsAfter, ptsSeconds, rational } from '../lib/time';
 import { Button } from './ui/button';
 
 const unavailable = 'The local backend is unavailable. Close the window and retry after checking the backend.';
-const STEP_MS = 2000;
+const SPEEDS = [0.25, 0.5, 1, 1.5, 2] as const;
+export type ClipSeconds = 2 | 6 | 12;
+
+/** Keyboard-reachable player controls for the window dialog. */
+export interface SourcePreviewHandle { togglePlay: () => void; step: (direction: 1 | -1) => void; toggleLoop: () => void; setSpeed: (index: number) => void }
 
 /**
  * Two-second derived WebM preview of the original, started at `initialPTS` when `enabled`. Displayed frames are
  * mapped to exact original PTS through the preview manifest (requestVideoFrameCallback), never a browser timer.
  */
-export function SourcePreview({ segment, initialPTS, minPTS, maxPTS, enabled, disabledReason, onReady, onDisplayedFrame, overlay }: {
+export const SourcePreview = forwardRef<SourcePreviewHandle, {
   segment: MediaSegment;
   initialPTS: string;
   /** Stepping stays inside this window: [minPTS, maxPTS). */
@@ -27,7 +31,12 @@ export function SourcePreview({ segment, initialPTS, minPTS, maxPTS, enabled, di
   onDisplayedFrame?: (frame: DisplayedSourceFrame | null) => void;
   /** Drawn over the loaded preview, given the displayed original source PTS (tracks, gates, gate drawing). */
   overlay?: (displayedPTS: string | null) => ReactNode;
-}) {
+  /** Initial clip length; 6 and 12 s are highlight blocks. */
+  initialSeconds?: ClipSeconds;
+}>(function SourcePreview({ segment, initialPTS, minPTS, maxPTS, enabled, disabledReason, onReady, onDisplayedFrame, overlay, initialSeconds = 2 }, handle) {
+  const [clipSeconds, setClipSeconds] = useState<ClipSeconds>(initialSeconds);
+  const [speed, setSpeedIndex] = useState(2);
+  const [looping, setLooping] = useState(false);
   const [sourcePTS, setSourcePTS] = useState(initialPTS);
   const [exact, setExact] = useState(initialPTS);
   const [job, setJob] = useState<PreviewJob | null>(null);
@@ -101,7 +110,7 @@ export function SourcePreview({ segment, initialPTS, minPTS, maxPTS, enabled, di
     };
   }, []);
 
-  async function start(requested: string) {
+  async function start(requested: string, seconds: ClipSeconds = clipSeconds) {
     invalidate();
     setError(''); setNotice('');
     setSourcePTS(requested); setExact(requested);
@@ -112,7 +121,7 @@ export function SourcePreview({ segment, initialPTS, minPTS, maxPTS, enabled, di
       if (!api) { fail(unavailable); return; }
       // Moving to another window cancels the previous preview, whose worker may still be stopping.
       // Wait a bounded time for that release instead of failing the new window's preview.
-      const result = await whileBusy('preview_busy', () => api.startPreview({ segment_id: segment.id, source_pts: requested }), () => ticket !== generation.current);
+      const result = await whileBusy('preview_busy', () => api.startPreview({ segment_id: segment.id, source_pts: requested, ...(seconds === 2 ? {} : { clip_seconds: seconds }) }), () => ticket !== generation.current);
       if (ticket !== generation.current) {
         if (result.ok) void api.cancelPreview(result.value.id).catch(() => undefined);
         return;
@@ -159,7 +168,7 @@ export function SourcePreview({ segment, initialPTS, minPTS, maxPTS, enabled, di
           if (!current()) return;
           if (!content?.ok) { fail(content?.error.message ?? unavailable); return; }
           const bytes = new Uint8Array(content.value.bytes);
-          if (bytes.byteLength < 1 || bytes.byteLength > 8 * 1024 * 1024) { fail('The preview content is empty or exceeds its 8 MiB limit.'); return; }
+          if (bytes.byteLength < 1 || bytes.byteLength > 32 * 1024 * 1024) { fail('The preview content is empty or exceeds its 32 MiB limit.'); return; }
           clipURL.current = URL.createObjectURL(new Blob([bytes.buffer], { type: 'video/webm' }));
           setURL(clipURL.current);
         }
@@ -280,14 +289,32 @@ export function SourcePreview({ segment, initialPTS, minPTS, maxPTS, enabled, di
 
   const timeBase = segment.metadata.time_base;
   const clipStart = manifest?.actual_pts ?? sourcePTS;
-  const previous = ptsAfter(clipStart, -STEP_MS, timeBase);
-  const next = ptsAfter(clipStart, STEP_MS, timeBase);
+  const previous = ptsAfter(clipStart, -clipSeconds * 1000, timeBase);
+  const next = ptsAfter(clipStart, clipSeconds * 1000, timeBase);
   const canPrevious = BigInt(clipStart) > BigInt(minPTS);
   const canNext = maxPTS === null ? BigInt(next) <= BigInt(segment.metadata.last_pts) : BigInt(next) < BigInt(maxPTS);
   const busy = starting || job?.state === 'running' || pendingCancellation !== null;
   const offset = (pts: string) => clock(ptsSeconds(pts, minPTS, timeBase));
 
-  return <section aria-label="Original video" className="flex min-h-0 flex-col gap-2">
+  useEffect(() => { if (video.current) video.current.playbackRate = SPEEDS[speed]!; }, [speed, url]);
+  useEffect(() => { if (video.current) video.current.loop = looping; }, [looping, url]);
+  /** Seek to the middle of the neighbouring manifest frame; the frame callback then confirms its exact source PTS. */
+  function step(direction: 1 | -1) {
+    const player = video.current;
+    if (!player || !manifest || !loaded) return;
+    player.pause();
+    const frames = manifest.frames;
+    const index = displayed ? frames.findIndex(frame => frame.source_pts === displayed.source_pts) : 0;
+    const target = Math.max(0, Math.min(frames.length - 1, index + direction));
+    const end = frames[target + 1]?.preview_ms ?? manifest.preview_duration_ms;
+    player.currentTime = (frames[target]!.preview_ms + end) / 2000;
+  }
+  useImperativeHandle(handle, () => ({
+    togglePlay: () => { const player = video.current; if (player) { if (player.paused) void player.play().catch(() => undefined); else player.pause(); } },
+    step, toggleLoop: () => setLooping(value => !value), setSpeed: index => { if (SPEEDS[index] !== undefined) setSpeedIndex(index); },
+  }));
+
+  return <section aria-label="Original video" className="flex shrink-0 flex-col gap-2">
     <div className="relative flex min-h-[180px] flex-1 items-center justify-center overflow-hidden rounded-md bg-black">
       {url ? <video ref={video} src={url} controls preload="auto" aria-label="Derived source preview" className="h-full max-h-[60vh] w-full object-contain"
         onLoadedData={() => { setLoaded(true); if (job?.state === 'ready') readyCallback.current?.(job.id); }} onSeeking={clearDisplayed}
@@ -300,10 +327,22 @@ export function SourcePreview({ segment, initialPTS, minPTS, maxPTS, enabled, di
     </div>
     <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300">
       <div className="flex items-center gap-1">
-        <Button size="sm" variant="secondary" className="h-8" disabled={!enabled || busy || !canPrevious} onClick={() => void start(BigInt(previous) < BigInt(minPTS) ? minPTS : previous)}><ChevronLeft />2 s back</Button>
-        <Button size="sm" variant="secondary" className="h-8" disabled={!enabled || busy || !canNext} onClick={() => void start(next)}>2 s on<ChevronRight /></Button>
+        <Button size="sm" variant="secondary" className="h-8" disabled={!enabled || busy || !canPrevious} onClick={() => void start(BigInt(previous) < BigInt(minPTS) ? minPTS : previous)}><ChevronLeft />{clipSeconds} s back</Button>
+        <Button size="sm" variant="secondary" className="h-8" disabled={!enabled || busy || !canNext} onClick={() => void start(next)}>{clipSeconds} s on<ChevronRight /></Button>
         <Button size="sm" variant="secondary" className="h-8" disabled={!enabled || busy} onClick={() => void start(initialPTS)}><RotateCcw />Window start</Button>
         {(starting || job) && <Button size="sm" variant="ghost" className="h-8 text-slate-200" onClick={() => void cancel()}>Cancel preview</Button>}
+      </div>
+      <div className="flex flex-wrap items-center gap-1" aria-label="Player controls">
+        <select aria-label="Clip length" className="h-8 rounded-md border border-slate-600 bg-slate-900 px-1 text-slate-100" value={clipSeconds} disabled={!enabled || busy}
+          onChange={event => { const seconds = Number(event.target.value) as ClipSeconds; setClipSeconds(seconds); void start(clipStart, seconds); }}>
+          <option value={2}>2 s clip</option><option value={6}>6 s block</option><option value={12}>12 s block</option>
+        </select>
+        <select aria-label="Playback speed" className="h-8 rounded-md border border-slate-600 bg-slate-900 px-1 text-slate-100" value={speed} onChange={event => setSpeedIndex(Number(event.target.value))}>
+          {SPEEDS.map((value, index) => <option key={value} value={index}>{value}x</option>)}
+        </select>
+        <label className="flex items-center gap-1"><input type="checkbox" checked={looping} onChange={event => setLooping(event.target.checked)} />Loop</label>
+        <Button size="sm" variant="secondary" className="h-8 px-2" aria-label="Previous frame" title="Previous frame (,)" disabled={!loaded} onClick={() => step(-1)}><ChevronLeft /></Button>
+        <Button size="sm" variant="secondary" className="h-8 px-2" aria-label="Next frame" title="Next frame (.)" disabled={!loaded} onClick={() => step(1)}><ChevronRight /></Button>
       </div>
       <span role="status">{url && <span>{loaded ? 'Preview ready' : 'Loading preview...'}</span>}{manifest && <span> · clip {offset(manifest.actual_pts)} to {clock(ptsSeconds(manifest.actual_pts, minPTS, timeBase) + manifest.preview_duration_ms / 1000)} of this window</span>}</span>
     </div>
@@ -327,4 +366,4 @@ export function SourcePreview({ segment, initialPTS, minPTS, maxPTS, enabled, di
     {manifest && manifest.warnings.length > 0 && <details className="text-xs text-slate-400"><summary className="cursor-pointer">About this preview ({manifest.warnings.length} notes)</summary>
       <ul aria-label="Preview fidelity warnings" className="mt-1 list-disc pl-4">{manifest.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul></details>}
   </section>;
-}
+});

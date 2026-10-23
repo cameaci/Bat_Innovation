@@ -210,3 +210,39 @@ def test_export_without_tracking_has_header_only_track_files(tmp_path: Path) -> 
         job = wait_export(client, summary["id"])
         assert job["manifest"]["tracking"] is None
         assert job["manifest"]["files"]["tracks"]["rows"] == 0 and job["manifest"]["files"]["counts"]["rows"] == 0
+
+
+def test_candidate_decisions_need_a_covering_preview_and_are_append_only(tmp_path: Path) -> None:
+    from backend.tests.test_tracking import wait as wait_state
+
+    with TestClient(create_app(Settings(tmp_path / "app-data", TOKEN))) as client:
+        _session_id, run_id, _summary = tracked(client, tmp_path, scenario("two_dots"))
+        items = client.get(f"/api/tracking/{run_id}/candidates", headers=HEADERS).json()
+        assert len(items) == 2 and all(item["decision"] is None and item["window_id"] for item in items)
+        track = items[0]
+        url = f"/api/tracking/{run_id}/candidates/{track['track_id']}/decision"
+        bogus = client.post(url, headers=HEADERS, json={"actor": "R", "expected_revision": 0, "decision": "not_bat", "preview_id": "12345678-1234-4234-8234-123456789abc"})
+        assert bogus.status_code == 409 and bogus.json()["detail"]["code"] == "candidate_unverified"
+        preview = client.post("/api/media/preview", headers=HEADERS, json={"segment_id": track["segment_id"], "source_pts": track["first_pts"], "clip_seconds": 6}).json()
+        preview = wait_state(client, f"/api/media/preview/{preview['id']}", ("running",))
+        assert preview["state"] == "ready" and preview["manifest"]["clip_seconds"] == 6
+        saved = client.post(url, headers=HEADERS, json={"actor": "Reviewer One", "expected_revision": 0, "decision": "not_bat",
+                                                         "note": "Moth near the light", "preview_id": preview["id"]})
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["decision"]["decision"] == "not_bat" and saved.json()["revision"] == 1
+        stale = client.post(url, headers=HEADERS, json={"actor": "Reviewer One", "expected_revision": 0, "decision": "bat", "preview_id": preview["id"]})
+        assert stale.status_code == 409 and stale.json()["detail"]["code"] == "candidate_conflict"
+        with sqlite3.connect(tmp_path / "app-data" / "bat_innovation.sqlite3") as connection:
+            with pytest.raises(sqlite3.IntegrityError):
+                connection.execute("UPDATE candidate_event SET decision='bat'")
+
+
+def test_highlight_clip_lengths_are_bounded(tmp_path: Path) -> None:
+    source = tmp_path / "clip.mp4"
+    encode_frames(source, scenario("two_dots"), [index * 40 for index in range(20)])
+    with TestClient(create_app(Settings(tmp_path / "app-data", TOKEN))) as client:
+        session_id = session(client)
+        assert import_files(client, session_id, [source])["state"] == "complete"
+        segment = client.get(f"/api/sessions/{session_id}/media", headers=HEADERS).json()["segments"][0]
+        refused = client.post("/api/media/preview", headers=HEADERS, json={"segment_id": segment["id"], "source_pts": segment["metadata"]["first_pts"], "clip_seconds": 30})
+        assert refused.status_code == 422

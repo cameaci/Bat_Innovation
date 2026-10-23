@@ -12,6 +12,7 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { SummaryImage } from './SummaryImage';
 import { SourcePreview } from './SourcePreview';
+import type { SourcePreviewHandle } from './SourcePreview';
 import { ReviewPanel } from './ReviewPanel';
 import type { ReviewPanelHandle } from './ReviewPanel';
 import { QAPanel } from './QAPanel';
@@ -42,6 +43,7 @@ export function WindowDialog({ windows, initialID, onClose }: { windows: Summary
   const [tracksError, setTracksError] = useState('');
   const [gateDraft, setGateDraft] = useState<GateDraft | null>(null);
   const review = useRef<ReviewPanelHandle>(null);
+  const player = useRef<SourcePreviewHandle>(null);
   const snapshot = useRef<SummaryWindow | null>(null);
   const dirty = firstDirty || qaDirty;
   const latest = windows.find(window => window.id === id);
@@ -93,6 +95,11 @@ export function WindowDialog({ windows, initialID, onClose }: { windows: Summary
     else if (key === 'u') navigate('unreviewed');
     else if (key === 'n') review.current?.markNoEvent();
     else if (key === 'o') review.current?.addObservation();
+    else if (event.key === ' ') player.current?.togglePlay();
+    else if (event.key === ',') player.current?.step(-1);
+    else if (event.key === '.') player.current?.step(1);
+    else if (key === 'l') player.current?.toggleLoop();
+    else if (/^[1-5]$/.test(event.key)) player.current?.setSpeed(Number(event.key) - 1);
     else return;
     event.preventDefault();
   }
@@ -109,7 +116,7 @@ export function WindowDialog({ windows, initialID, onClose }: { windows: Summary
           <SummaryImage window={selected} enabled={survey.verified} lazy={false} priority={1} alt={`Reference and motion evidence for ${title}`} className="max-h-[42vh] w-full" />
           <p className="text-xs text-slate-400">Left: first frame. Right: where things moved. Cyan = early, yellow = middle, magenta = late third of the window. Colours do not identify animals.</p>
         </section>
-        {segment && selected.preview_pts !== null && <SourcePreview key={selected.id} segment={segment} initialPTS={selected.preview_pts}
+        {segment && selected.preview_pts !== null && <SourcePreview ref={player} key={selected.id} segment={segment} initialPTS={selected.preview_pts}
           minPTS={selected.stats.first_pts ?? selected.preview_pts} maxPTS={selected.interval.end_pts?.den === '1' ? selected.interval.end_pts.num : null}
           enabled={previewEnabled} disabledReason={processing ? 'The original video opens when processing finishes.' : !sourceReady ? 'The original video is missing or changed.' : 'Original video unavailable.'}
           onReady={previewID => setReceipt(previewID ? { windowID: selected.id, previewID } : null)} onDisplayedFrame={displayed}
@@ -181,7 +188,7 @@ export function WindowDialog({ windows, initialID, onClose }: { windows: Summary
               <dt className="text-muted-foreground">Decoded PTS SHA256</dt><dd className="font-mono">{selected.stats.pts_digest ?? '-'}</dd>
             </dl>
           </details></Card>
-          <p className="mx-3 mt-3 text-[11px] text-muted-foreground">Keys: Left/Right previous/next, U next unreviewed, N no activity, O add observation, Esc close.</p>
+          <p className="mx-3 mt-3 text-[11px] text-muted-foreground">Keys: Left/Right previous/next, U next unreviewed, N no activity, O add observation, Space play/pause, comma/full stop frame step, L loop, 1-5 speed, Esc close.</p>
         </div>
       </aside>
     </div> : <div className="flex items-center justify-between p-6"><p>This window is no longer part of the run.</p><Button onClick={onClose}>Close</Button></div>}

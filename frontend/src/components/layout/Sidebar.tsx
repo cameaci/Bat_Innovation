@@ -1,6 +1,6 @@
 import type React from 'react';
 import { NavLink } from 'react-router-dom';
-import { ArrowLeft, Download, ListChecks, MoonStar, PanelLeftClose, PanelLeftOpen, Sparkles, Sigma } from 'lucide-react';
+import { ArrowLeft, Download, ListChecks, MoonStar, PanelLeftClose, PanelLeftOpen, Sparkles, Sigma, Clapperboard } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 // Layout and classes follow Camera_Trap's Sidebar (see ../ui/NOTICE): a 256 px column that collapses to a 72 px rail.
@@ -17,6 +17,7 @@ export function Sidebar({ surveyID, surveyName, collapsed, locked, onToggle }: {
   const items = [
     { to: `/surveys/${surveyID}/process`, icon: Sparkles, label: 'Process' },
     { to: `/surveys/${surveyID}/review`, icon: ListChecks, label: 'Review' },
+    { to: `/surveys/${surveyID}/events`, icon: Clapperboard, label: 'Events' },
     { to: `/surveys/${surveyID}/counts`, icon: Sigma, label: 'Counts' },
     { to: `/surveys/${surveyID}/export`, icon: Download, label: 'Export' },
   ];

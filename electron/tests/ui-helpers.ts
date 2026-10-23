@@ -65,13 +65,13 @@ export async function summarize(shell: RunningShell, state: RegExp = /^Run (comp
   await expect(shell.page.getByRole('status').filter({ hasText: state })).toBeVisible({ timeout: 60_000 });
 }
 
-export async function goTo(shell: RunningShell, page: 'Process' | 'Review' | 'Counts' | 'Export'): Promise<void> {
+export async function goTo(shell: RunningShell, page: 'Process' | 'Review' | 'Events' | 'Counts' | 'Export'): Promise<void> {
   await shell.page.getByRole('navigation').getByRole('link', { name: page, exact: true }).click();
   await expect(shell.page.getByRole('heading', { name: page, exact: true, level: 1 })).toBeVisible();
 }
 
 /** Open the survey with this display name from the Surveys page (after a relaunch). */
-export async function openSurvey(shell: RunningShell, name: string, page: 'Process' | 'Review' | 'Counts' | 'Export' = 'Process'): Promise<void> {
+export async function openSurvey(shell: RunningShell, name: string, page: 'Process' | 'Review' | 'Events' | 'Counts' | 'Export' = 'Process'): Promise<void> {
   await shell.page.getByRole('link', { name: `Open survey ${name}`, exact: true }).click();
   await expect(shell.page.getByRole('heading', { name: 'Process', exact: true })).toBeVisible();
   if (page !== 'Process') await goTo(shell, page);

@@ -106,6 +106,12 @@ export interface CountReviewInput {
 }
 export interface CountQAInput { actor: string; expected_revision: number; review_revision: number; decision: 'approve' | 'reject'; note: string }
 
+export interface Candidate {
+  track_id: string; segment_id: string; track_index: number; first_pts: string; last_pts: string; point_count: number; window_id: string | null;
+  revision: number; decision: { decision: 'bat' | 'not_bat' | 'uncertain'; actor: string; note: string; utc: string } | null;
+}
+export interface CandidateDecisionInput { actor: string; expected_revision: number; decision: 'bat' | 'not_bat' | 'uncertain'; note: string; preview_id: string }
+
 /** points: [source_pts, x, y, area] in original source pixels. */
 export interface TrackRecord {
   id: string; segment_id: string; track_index: number; first_pts: string; last_pts: string; point_count: number;
@@ -138,7 +144,7 @@ export interface ImportJob {
   error: { code: string; message: string } | null;
 }
 
-export interface PreviewRequest { segment_id: string; source_pts: string }
+export interface PreviewRequest { segment_id: string; source_pts: string; clip_seconds?: 2 | 6 | 12 }
 export interface PreviewFrame {
   source_pts: string;
   source_time: Rational;
@@ -158,6 +164,7 @@ export interface PreviewManifest {
   elapsed_start: Rational;
   elapsed_end: Rational;
   preview_duration_ms: number;
+  clip_seconds?: 2 | 6 | 12;
   width: number;
   height: number;
   frames: PreviewFrame[];
@@ -413,6 +420,8 @@ export interface BatAPI {
   getCounts(runID: string, gateID: string): Promise<ApiResult<GateCounts>>;
   saveCountReview(runID: string, gateID: string, input: CountReviewInput): Promise<ApiResult<GateCounts>>;
   saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>>;
+  listCandidates(runID: string): Promise<ApiResult<Candidate[]>>;
+  decideCandidate(runID: string, trackID: string, input: CandidateDecisionInput): Promise<ApiResult<Candidate>>;
   importStatus(jobID: string): Promise<ApiResult<ImportJob>>;
   cancelImport(jobID: string): Promise<ApiResult<ImportJob>>;
   saveMedia(sessionID: string, input: SaveMedia): Promise<ApiResult<MediaSession>>;

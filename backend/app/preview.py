@@ -16,7 +16,7 @@ from uuid import uuid4
 
 from . import media, store, workers
 from .imports import ImportErrorResponse, source_state
-from .preview_worker import MAX_BYTES, MAX_MANIFEST_BYTES, MAX_REQUEST_BYTES
+from .preview_worker import CLIP_SECONDS, MAX_BYTES, MAX_MANIFEST_BYTES, MAX_REQUEST_BYTES, budget
 
 WALL_SECONDS = 25
 ERRORS = {
@@ -67,7 +67,7 @@ class PreviewJobs:
             if re.fullmatch(r"[0-9a-f-]{36}(?:\.part)?\.webm", path.name) and (job_id is None or path.name.startswith(job_id)):
                 path.unlink(missing_ok=True)
 
-    def start(self, segment_id: str, source_pts: str) -> dict:
+    def start(self, segment_id: str, source_pts: str, clip_seconds: int = CLIP_SECONDS) -> dict:
         if not workers.supported():
             raise failure("preview_limits_unavailable")
         row = store.segment_by_id(self.db_path, segment_id)
@@ -97,7 +97,7 @@ class PreviewJobs:
                 job_id, cancelled = str(uuid4()), Event()
                 job = {"id": job_id, "segment_id": segment_id, "state": "running", "phase": "generating", "error": None, "manifest": None}
                 self._jobs[job_id], self._sources[job_id], self._cancel[job_id] = job, row, cancelled
-                self._thread = Thread(target=self._run, args=(job_id, source_pts, cancelled), daemon=True)
+                self._thread = Thread(target=self._run, args=(job_id, source_pts, cancelled, clip_seconds), daemon=True)
                 self._thread.start()
             except Exception:
                 # Thread.start() can fail before a native thread is launched.
@@ -185,7 +185,8 @@ class PreviewJobs:
         """Windows: one worker in a Job Object (1 GiB, 20 CPU seconds, one process) with a parent wall deadline."""
         from . import winjob
 
-        limits = winjob.Limits(1024 ** 3, 20, 1, WALL_SECONDS)
+        seconds = int(payload.get("clip_seconds", CLIP_SECONDS))
+        limits = winjob.Limits(1024 ** 3, budget(seconds)["cpu"], 1, round(WALL_SECONDS * seconds / CLIP_SECONDS))
         try:
             status, result = workers.run_contained("preview_worker", payload, limits, cancelled.is_set,
                                                    MAX_REQUEST_BYTES, MAX_MANIFEST_BYTES + 1024)
@@ -195,14 +196,14 @@ class PreviewJobs:
             raise failure("cancelled" if status == "cancelled" else "preview_limit")
         return result
 
-    def _run(self, job_id: str, source_pts: str, cancelled: Event) -> None:
+    def _run(self, job_id: str, source_pts: str, cancelled: Event, clip_seconds: int = CLIP_SECONDS) -> None:
         process = None
         manifest = None
         code = "preview_failed"
         try:
             row = self._sources[job_id]
             partial = self.directory / f"{job_id}.part.webm"
-            payload = {"parent_pid": os.getpid(), "segment_id": row["id"], "source_pts": source_pts,
+            payload = {"parent_pid": os.getpid(), "segment_id": row["id"], "source_pts": source_pts, "clip_seconds": clip_seconds,
                        "source_path": row["source_path"], "output_path": str(partial),
                        "identity": json.loads(row["identity_json"]), "metadata": json.loads(row["metadata_json"])}
             if cancelled.is_set():
@@ -217,7 +218,7 @@ class PreviewJobs:
                 with self._lock:
                     self._process = process
                 incoming = json.dumps(payload).encode()
-                deadline = time.monotonic() + WALL_SECONDS
+                deadline = time.monotonic() + WALL_SECONDS * clip_seconds / CLIP_SECONDS
                 while True:
                     if cancelled.is_set():
                         raise failure("cancelled")

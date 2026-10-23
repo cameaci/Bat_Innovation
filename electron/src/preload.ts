@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { Modality, GateChange, CountReviewInput, CountQAInput, BatAPI, NewSession, PreviewRequest, SaveMedia, SummaryRequest, ReviewChange, QAChange } from './contracts';
+import type { Modality, CandidateDecisionInput, GateChange, CountReviewInput, CountQAInput, BatAPI, NewSession, PreviewRequest, SaveMedia, SummaryRequest, ReviewChange, QAChange } from './contracts';
 
 const api: BatAPI = {
   startExport: (...args: [string]) => ipcRenderer.invoke('bat:start-export', ...args),
@@ -29,6 +29,8 @@ const api: BatAPI = {
   chooseMedia: (...args: [string, Modality]) => ipcRenderer.invoke('bat:choose-media', ...args),
   upgradeStorage: (...args: []) => ipcRenderer.invoke('bat:upgrade-storage', ...args),
   startTracking: (...args: [string]) => ipcRenderer.invoke('bat:start-tracking', ...args),
+  listCandidates: (...args: [string]) => ipcRenderer.invoke('bat:list-candidates', ...args),
+  decideCandidate: (...args: [string, string, CandidateDecisionInput]) => ipcRenderer.invoke('bat:decide-candidate', ...args),
   listGates: (...args: [string]) => ipcRenderer.invoke('bat:list-gates', ...args),
   saveGate: (...args: [string, string | null, GateChange]) => ipcRenderer.invoke('bat:save-gate', ...args),
   getCounts: (...args: [string, string]) => ipcRenderer.invoke('bat:get-counts', ...args),
