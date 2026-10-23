@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { AlertTriangle, ChevronLeft, ChevronRight, ChevronsRight, X } from 'lucide-react';
-import type { SummaryWindow } from '../../../electron/src/contracts';
+import type { SummaryWindow, TrackRecord } from '../../../electron/src/contracts';
 import { activeRun, THERMAL_LABEL, useSurvey } from '../survey';
 import type { DisplayedSourceFrame, WindowSourceFrame } from '../sourceFrame';
-import { rational, span } from '../lib/time';
+import { clock, ptsSeconds, rational, span } from '../lib/time';
+import { getAPI } from '../api';
 import { flagText, isThermal, isUnreviewed, motionText, warningFlags } from '../lib/windows';
 import { Dialog } from './ui/dialog';
 import { Button } from './ui/button';
@@ -34,6 +35,8 @@ export function WindowDialog({ windows, initialID, onClose }: { windows: Summary
   const [qaDirty, setQADirty] = useState(false);
   const [message, setMessage] = useState('');
   const [reviewer, setReviewer] = useState(savedReviewer);
+  const [tracks, setTracks] = useState<TrackRecord[]>([]);
+  const [tracksError, setTracksError] = useState('');
   const review = useRef<ReviewPanelHandle>(null);
   const snapshot = useRef<SummaryWindow | null>(null);
   const dirty = firstDirty || qaDirty;
@@ -48,6 +51,20 @@ export function WindowDialog({ windows, initialID, onClose }: { windows: Summary
 
   useEffect(() => { survey.setDraft('review', dirty); return () => survey.setDraft('review', false); }, [dirty]);
   useEffect(() => { setReceipt(null); setFrame(null); setMessage(''); }, [id]);
+  const windowStart = selected ? (BigInt(selected.interval.start_pts.num) / BigInt(selected.interval.start_pts.den)).toString() : '0';
+  const trackingID = survey.tracking?.state === 'complete' && survey.tracking.summary_run_id === selected?.run_id ? survey.tracking.id : null;
+  useEffect(() => {
+    setTracks([]); setTracksError('');
+    if (!trackingID || !selected) return;
+    const end = selected.interval.end_pts;
+    let current = true;
+    void getAPI()?.getTracks(trackingID, selected.segment_id, windowStart,
+      end ? (BigInt(end.num) / BigInt(end.den)).toString() : null).then(result => {
+      if (!current) return;
+      if (result.ok) setTracks(result.value); else setTracksError(result.error.message);
+    }).catch(() => { if (current) setTracksError('Tracks could not be loaded.'); });
+    return () => { current = false; };
+  }, [trackingID, id]);
 
   function go(target: SummaryWindow | undefined) {
     if (!target) return;
@@ -91,7 +108,7 @@ export function WindowDialog({ windows, initialID, onClose }: { windows: Summary
         {segment && selected.preview_pts !== null && <SourcePreview key={selected.id} segment={segment} initialPTS={selected.preview_pts}
           minPTS={selected.stats.first_pts ?? selected.preview_pts} maxPTS={selected.interval.end_pts?.den === '1' ? selected.interval.end_pts.num : null}
           enabled={previewEnabled} disabledReason={processing ? 'The original video opens when processing finishes.' : !sourceReady ? 'The original video is missing or changed.' : 'Original video unavailable.'}
-          onReady={previewID => setReceipt(previewID ? { windowID: selected.id, previewID } : null)} onDisplayedFrame={displayed} />}
+          onReady={previewID => setReceipt(previewID ? { windowID: selected.id, previewID } : null)} onDisplayedFrame={displayed} tracks={tracks} />}
       </div>
       <aside aria-label="Window review" className="flex w-96 shrink-0 flex-col border-l bg-white">
         <div className="flex items-center justify-between border-b px-3 py-1.5">
@@ -121,6 +138,14 @@ export function WindowDialog({ windows, initialID, onClose }: { windows: Summary
               {warningFlags(selected).map(flag => <li key={flag} className="flex gap-1"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />{flagText[flag] ?? flag.replaceAll('_', ' ')}</li>)}
             </ul>}
           </Card>
+          {trackingID && <Card title="Tracks (unverified)">
+            {tracksError ? <p role="alert" className="text-xs text-red-700">{tracksError}</p>
+              : tracks.length === 0 ? <p className="text-xs text-muted-foreground">No tracks in this window. This does not mean no bats: review the window as usual.</p>
+              : <ol aria-label="Tracks in this window" className="space-y-1 text-xs">{tracks.map(track => <li key={track.id}>
+                T{track.track_index + 1}: {clock(ptsSeconds(track.first_pts, windowStart, selected.time_base))} to {clock(ptsSeconds(track.last_pts, windowStart, selected.time_base))} into the window · {track.point_count} points
+              </li>)}</ol>}
+            <p className="mt-1 text-[11px] text-muted-foreground">A track follows a moving object; it is not an animal and never counts bats.</p>
+          </Card>}
           <Card>
             {processing ? <p className="text-xs text-muted-foreground">Review opens when processing finishes.</p>
               : <ReviewPanel ref={review} key={`review:${selected.id}`} window={selected} previewID={receipt?.windowID === selected.id ? receipt.previewID : null}

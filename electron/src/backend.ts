@@ -8,8 +8,9 @@ import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia, SummaryRequest, SummaryRun, SummaryDetail, ReviewChange, WindowReview, ReviewHistory } from './contracts';
-import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality } from './contracts';
+import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, TrackingRun, TrackRecord } from './contracts';
 
+export const isPTS = (value: unknown): value is string => typeof value === 'string' && /^-?\d{1,19}$/.test(value);
 export const isModality = (value: unknown): value is Modality => value === 'active_ir' || value === 'rendered_thermal';
 
 const unavailable = (message = 'Backend unavailable. Reopen the app after checking Python and the installed backend dependencies.') =>
@@ -181,7 +182,7 @@ function mediaFailure(code: unknown) {
 type ApiRoute = '/api/exports' | `/api/exports/${string}` | `/api/exports/${string}/cancel` | '/api/qa/upgrade' | `/api/summary-windows/${string}/qa` | `/api/summary-windows/${string}/qa-actions` | `/api/summary-windows/${string}/qa-history?after_revision=${number}` | '/api/reviews/upgrade' | `/api/summary-windows/${string}/review` | `/api/summary-windows/${string}/review-actions` | `/api/summary-windows/${string}/review-history?after_revision=${number}` | '/api/health' | '/api/sessions' | '/api/media/upgrade' | '/api/media/import' |
   `/api/sessions/${string}/media` | `/api/media/import/${string}` | `/api/media/import/${string}/cancel` |
   '/api/summaries/upgrade' | '/api/summaries' | `/api/summaries/${string}` | `/api/summaries/${string}/cancel` | `/api/sessions/${string}/summary-runs` |
-  '/api/storage/upgrade' | '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
+  '/api/storage/upgrade' | '/api/tracking' | `/api/tracking/${string}` | `/api/summaries/${string}/tracking` | '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
 
 /** Read only known, redacted startup codes from the Python process. */
 function safeStartupFailure(output: string): string | undefined {
@@ -265,6 +266,18 @@ export class BackendClient {
   }
   upgradeMedia(): Promise<ApiResult<{ schema_version: 2 | 3 | 4 | 5 }>> { return this.call('/api/media/upgrade', 'POST'); }
   upgradeStorage(): Promise<ApiResult<{ schema_version: number }>> { return this.call('/api/storage/upgrade', 'POST'); }
+  startTracking(summaryRunID: string): Promise<ApiResult<TrackingRun>> {
+    return isUUID(summaryRunID) ? this.call('/api/tracking', 'POST', { summary_run_id: summaryRunID }) : Promise.resolve(invalid());
+  }
+  trackingRun(runID: string): Promise<ApiResult<TrackingRun>> { return isUUID(runID) ? this.call(`/api/tracking/${runID}`) : Promise.resolve(invalid()); }
+  listTracking(summaryRunID: string): Promise<ApiResult<TrackingRun[]>> {
+    return isUUID(summaryRunID) ? this.call(`/api/summaries/${summaryRunID}/tracking`) : Promise.resolve(invalid());
+  }
+  cancelTracking(runID: string): Promise<ApiResult<TrackingRun>> { return isUUID(runID) ? this.call(`/api/tracking/${runID}/cancel`, 'POST') : Promise.resolve(invalid()); }
+  getTracks(runID: string, segmentID: string, startPTS: string, endPTS: string | null): Promise<ApiResult<TrackRecord[]>> {
+    if (!isUUID(runID) || !isUUID(segmentID) || !isPTS(startPTS) || (endPTS !== null && !isPTS(endPTS))) return Promise.resolve(invalid());
+    return this.call(`/api/tracking/${runID}/tracks?segment_id=${segmentID}&start_pts=${startPTS}${endPTS === null ? '' : `&end_pts=${endPTS}`}`);
+  }
   saveMedia(sessionID: string, input: SaveMedia): Promise<ApiResult<MediaSession>> {
     return isUUID(sessionID) && isSaveMedia(input) ? this.call(`/api/sessions/${sessionID}/media`, 'PUT', input) : Promise.resolve(invalid('Use only selected segment IDs, continuity evidence and an optional UTC clock anchor.'));
   }
@@ -544,6 +557,13 @@ export class BackendRuntime {
   saveMedia(sessionID: string, input: SaveMedia): Promise<ApiResult<MediaSession>> { return this.ready(client => client.saveMedia(sessionID, input)); }
   importSelectedMedia(sessionID: string, paths: string[], modality: Modality = 'active_ir'): Promise<ApiResult<ImportJob>> { return this.ready(client => client.importSelectedMedia(sessionID, paths, modality)); }
   upgradeStorage(): Promise<ApiResult<{ schema_version: number }>> { return this.ready(client => client.upgradeStorage()); }
+  startTracking(summaryRunID: string): Promise<ApiResult<TrackingRun>> { return this.ready(client => client.startTracking(summaryRunID)); }
+  trackingRun(runID: string): Promise<ApiResult<TrackingRun>> { return this.ready(client => client.trackingRun(runID)); }
+  listTracking(summaryRunID: string): Promise<ApiResult<TrackingRun[]>> { return this.ready(client => client.listTracking(summaryRunID)); }
+  cancelTracking(runID: string): Promise<ApiResult<TrackingRun>> { return this.ready(client => client.cancelTracking(runID)); }
+  getTracks(runID: string, segmentID: string, startPTS: string, endPTS: string | null): Promise<ApiResult<TrackRecord[]>> {
+    return this.ready(client => client.getTracks(runID, segmentID, startPTS, endPTS));
+  }
   importStatus(jobID: string): Promise<ApiResult<ImportJob>> { return this.ready(client => client.importStatus(jobID)); }
   cancelImport(jobID: string): Promise<ApiResult<ImportJob>> { return this.ready(client => client.cancelImport(jobID)); }
   startPreview(input: PreviewRequest): Promise<ApiResult<PreviewJob>> { return this.ready(client => client.startPreview(input)); }

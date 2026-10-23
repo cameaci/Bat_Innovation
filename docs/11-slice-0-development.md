@@ -88,6 +88,7 @@ Exact npm package versions and integrity hashes are recorded in the root `packag
 | [`electron`](https://registry.npmjs.org/electron/44.7.2) | 44.7.2 | MIT | Local development desktop runtime. |
 | [`electron-builder`](https://registry.npmjs.org/electron-builder/26.17.0) | 26.17.0 | MIT | Build-time NSIS packager (2026-10-21, internal beta). Not shipped in the installer. |
 | [`pyinstaller`](https://pypi.org/project/pyinstaller/6.22.3/) | 6.22.3 | GPL-2.0-or-later with bootloader exception | Build-time backend freezer (2026-10-21, internal beta). The exception covers the bootloader copied into the shipped executable; confirm it when the release owner reviews [docs/18](18-windows-beta.md). |
+| [`scipy`](https://pypi.org/project/scipy/1.18.1/) (Python) | 1.18.1 | BSD-3-Clause; wheels bundle OpenBLAS (BSD-3-Clause) and libgfortran (GPL-3.0 with GCC runtime library exception), listed in its own licence files | Connected components and optimal assignment for tracks (E2), audio filtering (E7). Licence files are copied by `scripts/collect_notices.py`. |
 | [`react-router-dom`](https://registry.npmjs.org/react-router-dom/6.30.2) | 6.30.2 | MIT | Page routing (hash router, 2026-10-22 interface). Bundles `react-router` and `@remix-run/router` (MIT). |
 | [`lucide-react`](https://registry.npmjs.org/lucide-react/0.561.0) | 0.561.0 | ISC | Icons, as in Camera_Trap. |
 | [`class-variance-authority`](https://registry.npmjs.org/class-variance-authority/0.7.1) | 0.7.1 | Apache-2.0 | Component style variants, as in Camera_Trap. |

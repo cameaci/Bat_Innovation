@@ -25,6 +25,7 @@ from .summary_jobs import SummaryJobs
 from .reviews import ReviewService, install_routes as install_review_routes
 from .qa import QAService, install_routes as install_qa_routes
 from .export_jobs import ExportJobs
+from .tracking import TrackingJobs, install_routes as install_tracking_routes
 
 
 @dataclass(frozen=True)
@@ -176,11 +177,13 @@ def create_app(settings: Settings) -> FastAPI:
     reviews = ReviewService(db_path, summaries, previews, activity_lock)
     qa = QAService(reviews)
     exports = ExportJobs(db_path, settings.data_dir)
+    tracking = TrackingJobs(db_path, activity_lock)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         yield
         exports.close()
+        tracking.close()
         summaries.close()
         previews.close()
         jobs.close()
@@ -362,4 +365,5 @@ def create_app(settings: Settings) -> FastAPI:
 
     install_review_routes(app, reviews, authenticate)
     install_qa_routes(app, qa, authenticate)
+    install_tracking_routes(app, tracking, authenticate)
     return app

@@ -17,7 +17,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-MODULES = frozenset({"contained_import", "preview_worker", "summary_worker", "export_worker"})
+MODULES = frozenset({"contained_import", "preview_worker", "summary_worker", "export_worker", "track_worker", "audio_worker"})
 # Windows NTSTATUS exit codes that mean a Job Object limit ended the worker.
 JOB_CPU_QUOTA_EXIT, NO_MEMORY_EXIT = 0xC0000044, 0xC0000017
 FROZEN = bool(getattr(sys, "frozen", False))
@@ -109,6 +109,78 @@ def run_contained(module: str, request: dict[str, Any], limits: Any, cancelled: 
         except (winjob.ContainmentError, OSError, ValueError, Rejected, RecursionError):
             raise WorkerFailed from None
     return "ok", body
+
+
+def supervise(module: str, request: dict[str, Any], cancelled: Callable[[], bool], wall_seconds: int,
+              memory_bytes: int, cpu_seconds: int, max_request: int, max_response: int,
+              on_process: Callable[[Any], None] = lambda _process: None) -> tuple[str, Any]:
+    """Run one worker under OS limits. Returns ("ok", body) or ("cancelled" | "limit" | "failed", None).
+
+    Windows uses a Job Object; Linux uses the worker's own rlimits plus this parent's wall-clock deadline.
+    No native error text or path ever leaves this function.
+    """
+    import signal
+    import subprocess
+    import time
+
+    if sys.platform == "win32":
+        from . import winjob
+        try:
+            return run_contained(module, request, winjob.Limits(memory_bytes, cpu_seconds, 1, wall_seconds),
+                                 cancelled, max_request, max_response)
+        except WorkerFailed:
+            return "failed", None
+    environment = {key: value for key, value in os.environ.items() if key != "BAT_API_TOKEN"}
+    environment.update(OPENBLAS_NUM_THREADS="1", OMP_NUM_THREADS="1")
+    incoming: bytes | None = json.dumps(request).encode("utf-8")
+    if len(incoming) > max_request:
+        return "failed", None
+    process = subprocess.Popen(command(module), cwd=working_directory(), stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=environment)
+    on_process(process)
+    try:
+        deadline = time.monotonic() + wall_seconds
+        while True:
+            if cancelled():
+                return "cancelled", None
+            if time.monotonic() >= deadline:
+                return "limit", None
+            try:
+                output, _ = process.communicate(input=incoming, timeout=0.05)
+                break
+            except subprocess.TimeoutExpired:
+                incoming = None
+        if cancelled():
+            return "cancelled", None
+        if process.returncode:
+            limited = process.returncode in (-signal.SIGKILL, -signal.SIGXCPU, -signal.SIGXFSZ)
+            return ("limit" if limited else "failed"), None
+        if len(output) > max_response:
+            return "limit", None
+        try:
+            return "ok", json.loads(output, parse_constant=no_constants, object_pairs_hook=unique_object)
+        except (ValueError, Rejected, RecursionError):
+            return "failed", None
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.communicate()
+        on_process(None)
+
+
+def linux_limits(parent_pid: int, memory_bytes: int, cpu_seconds: int, file_bytes: int) -> bool:
+    """Worker side on Linux: die with the parent and apply hard limits before native libraries load."""
+    import ctypes
+    import resource
+
+    if ctypes.CDLL(None, use_errno=True).prctl(1, 9, 0, 0, 0) != 0 or os.getppid() != parent_pid:
+        return False
+    for kind, amount in ((resource.RLIMIT_AS, memory_bytes), (resource.RLIMIT_CPU, cpu_seconds),
+                         (resource.RLIMIT_FSIZE, file_bytes), (resource.RLIMIT_CORE, 0)):
+        _, hard = resource.getrlimit(kind)
+        bound = amount if hard == resource.RLIM_INFINITY else min(amount, hard)
+        resource.setrlimit(kind, (bound, bound))
+    return True
 
 
 def require_limits(error: Exception) -> None:

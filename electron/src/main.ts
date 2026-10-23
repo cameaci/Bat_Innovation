@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import { existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
+import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
 import { ExportSaver } from './export_saver';
 import type { NewSession } from './contracts';
 
@@ -191,6 +191,12 @@ async function open(): Promise<void> {
     return result.ok && result.value.bytes.byteLength > MAX_SUMMARY_BYTES ? invalid('Summary image exceeds its byte limit.') : result;
   });
   handle('bat:upgrade-storage', 0, () => backend.upgradeStorage());
+  handle('bat:start-tracking', 1, ([id]) => isUUID(id) ? backend.startTracking(id) : invalid('Select a valid summary run ID.'));
+  handle('bat:tracking-run', 1, ([id]) => isUUID(id) ? backend.trackingRun(id) : invalid('Select a valid tracking run ID.'));
+  handle('bat:list-tracking', 1, ([id]) => isUUID(id) ? backend.listTracking(id) : invalid('Select a valid summary run ID.'));
+  handle('bat:cancel-tracking', 1, ([id]) => isUUID(id) ? backend.cancelTracking(id) : invalid('Select a valid tracking run ID.'));
+  handle('bat:get-tracks', 4, ([run, segment, start, end]) => isUUID(run) && isUUID(segment) && isPTS(start) && (end === null || isPTS(end))
+    ? backend.getTracks(run, segment, start, end) : invalid('Use a tracking run, segment and integer source PTS range.'));
   handle('bat:choose-media', 2, async ([id, modality]) => {
     if (!isUUID(id)) return invalid('Select a valid session ID.');
     if (!isModality(modality)) return invalid('Choose active IR or rendered thermal.');

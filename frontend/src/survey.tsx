@@ -1,11 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { ApiResult, BatAPI, Modality, ImportJob, MediaSession, RecordingSession, SaveMedia, SummaryDetail, SummaryRun } from '../../electron/src/contracts';
+import type { ApiResult, BatAPI, Modality, ImportJob, MediaSession, RecordingSession, SaveMedia, SummaryDetail, SummaryRun, TrackingRun } from '../../electron/src/contracts';
 import { getAPI } from './api';
 
 const unavailable = 'The local backend is unavailable. Retry, or close and reopen the app.';
 export const activeRun = (run: SummaryRun | null | undefined) => run?.state === 'queued' || run?.state === 'running';
-export const CURRENT_SCHEMA = 6;
+export const CURRENT_SCHEMA = 7;
+export const activeTracking = (run: TrackingRun | null | undefined) => run?.state === 'queued' || run?.state === 'running';
 export const THERMAL_LABEL = 'Rendered thermal - no radiometric temperature analysis';
 
 export interface Survey {
@@ -36,6 +37,10 @@ export interface Survey {
   /** Any backend processing reservation (import, summary run, export) is held. */
   busy: boolean;
   setExportBusy: (busy: boolean) => void;
+  /** Latest tracking run of the selected summary run, with per-window track counts. */
+  tracking: TrackingRun | null;
+  startTracking: () => Promise<void>;
+  cancelTracking: () => Promise<void>;
 }
 
 const SurveyContext = createContext<Survey | null>(null);
@@ -60,7 +65,9 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
   const [drafts, setDrafts] = useState<Record<string, boolean>>({});
   const [exportBusy, setExportBusy] = useState(false);
   const dirty = Object.values(drafts).some(Boolean);
-  const busy = importJob?.state === 'running' || activeRun(run) || exportBusy;
+  const [tracking, setTracking] = useState<TrackingRun | null>(null);
+  const [trackingRefresh, setTrackingRefresh] = useState(0);
+  const busy = importJob?.state === 'running' || activeRun(run) || exportBusy || activeTracking(tracking);
 
   const request = useCallback(async <T,>(action: (api: BatAPI) => Promise<ApiResult<T>>): Promise<T | undefined> => {
     try {
@@ -193,6 +200,46 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
     return () => { current = false; clearTimeout(timer); document.removeEventListener('visibilitychange', visible); };
   }, [runID, session.id, refresh]);
 
+  // The latest tracking run of the selected summary run; polled each second while it runs.
+  useEffect(() => {
+    if (!runID || (media?.schema_version ?? 0) < 7) { setTracking(null); return; }
+    let current = true;
+    let timer: ReturnType<typeof setTimeout>;
+    async function poll(id?: string) {
+      try {
+        const api = getAPI();
+        let result: ApiResult<TrackingRun> | undefined;
+        if (!id) {
+          const listed = await api?.listTracking(runID);
+          if (!current) return;
+          if (!listed?.ok) { setError(listed?.error.message ?? unavailable); return; }
+          if (listed.value.length === 0) { setTracking(null); return; }
+          id = listed.value[0]!.id;
+        }
+        result = await api?.trackingRun(id);
+        if (!current) return;
+        if (!result?.ok) { setError(result?.error.message ?? unavailable); return; }
+        setTracking(result.value);
+        if (activeTracking(result.value)) timer = setTimeout(() => void poll(id), 1000);
+      } catch { if (current) setError(unavailable); }
+    }
+    void poll();
+    return () => { current = false; clearTimeout(timer); };
+  }, [runID, trackingRefresh, media?.schema_version]);
+
+  async function startTracking() {
+    if (!runID) return;
+    setError(''); setNotice('');
+    const value = await request(api => api.startTracking(runID));
+    if (value) { setTracking(value); setTrackingRefresh(current => current + 1); }
+  }
+
+  async function cancelTracking() {
+    if (!tracking || !activeTracking(tracking)) return;
+    const value = await request(api => api.cancelTracking(tracking.id));
+    if (value) setTrackingRefresh(current => current + 1);
+  }
+
   async function startRun(windowSeconds: number) {
     setError(''); setNotice('');
     const value = await request(api => api.startSummaries({ session_id: session.id, window_seconds: windowSeconds }));
@@ -211,7 +258,7 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
     refreshMedia, upgradeStorage, importJob, chooseVideos, cancelImport, saveTimeline,
     runs, runID, selectRun: id => { setRunID(id); setRefresh(current => current + 1); }, run, verified,
     startRun, cancelRun, cancelling, reloadRun: () => setRefresh(current => current + 1),
-    setDraft, dirty, busy, setExportBusy,
+    setDraft, dirty, busy, setExportBusy, tracking, startTracking, cancelTracking,
   };
   return <SurveyContext.Provider value={value}>{children}</SurveyContext.Provider>;
 }

@@ -64,6 +64,29 @@ export interface MediaSegment {
 
 export type Modality = 'active_ir' | 'rendered_thermal';
 
+/** A derived tracking run over one summary run (feature expansion E2). Tracks are review aids, not animals. */
+export interface TrackingRun {
+  id: string;
+  summary_run_id: string;
+  session_id: string;
+  state: 'queued' | 'running' | 'complete' | 'failed' | 'cancelled' | 'interrupted';
+  algorithm_version: string;
+  parameter_hash: string;
+  parameters: Record<string, unknown>;
+  stats: Record<string, { frames: number; candidates: number; framewide_frames: number; candidate_limit_frames: number; tracks: number }>;
+  error: string | null;
+  started_at_utc: string;
+  finished_at_utc: string | null;
+  track_counts: Record<string, number>;
+  /** Present on a single-run read: tracks overlapping each summary window ID. */
+  window_counts?: Record<string, number>;
+}
+/** points: [source_pts, x, y, area] in original source pixels. */
+export interface TrackRecord {
+  id: string; segment_id: string; track_index: number; first_pts: string; last_pts: string; point_count: number;
+  bbox: [number, number, number, number]; points: [string, number, number, number][];
+}
+
 export interface ClockAnchorInput { segment_id: string; utc: string; provenance: string }
 export interface ClockAnchor extends ClockAnchorInput { source_pts: string; time_base: Rational; source_time: Rational }
 export interface MediaSession {
@@ -353,6 +376,11 @@ export interface BatAPI {
   upgradeMedia(): Promise<ApiResult<{ schema_version: 2 | 3 | 4 | 5 }>>;
   chooseMedia(sessionID: string, modality: Modality): Promise<ApiResult<ImportJob | null>>;
   upgradeStorage(): Promise<ApiResult<{ schema_version: number }>>;
+  startTracking(summaryRunID: string): Promise<ApiResult<TrackingRun>>;
+  trackingRun(runID: string): Promise<ApiResult<TrackingRun>>;
+  listTracking(summaryRunID: string): Promise<ApiResult<TrackingRun[]>>;
+  cancelTracking(runID: string): Promise<ApiResult<TrackingRun>>;
+  getTracks(runID: string, segmentID: string, startPTS: string, endPTS: string | null): Promise<ApiResult<TrackRecord[]>>;
   importStatus(jobID: string): Promise<ApiResult<ImportJob>>;
   cancelImport(jobID: string): Promise<ApiResult<ImportJob>>;
   saveMedia(sessionID: string, input: SaveMedia): Promise<ApiResult<MediaSession>>;

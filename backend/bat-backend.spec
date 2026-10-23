@@ -19,7 +19,7 @@ for package in ("av",):
     binaries += package_binaries
     hiddenimports += package_hidden
 # Summary runs record the numpy, Pillow and PyAV versions as processing evidence (backend/app/windows.py).
-for distribution in ("numpy", "Pillow", "av"):
+for distribution in ("numpy", "Pillow", "av", "scipy"):
     datas += copy_metadata(distribution)
 # Loaded by name: workers are re-entered with --worker, and uvicorn/pydantic pick implementations at run time.
 hiddenimports += collect_submodules("backend.app") + collect_submodules("uvicorn") + collect_submodules("pydantic")

@@ -78,7 +78,7 @@ export function ReviewPage() {
         </CardContent></Card>
         {matching.length === 0 ? <p className="text-sm text-muted-foreground">No windows match this filter.</p>
           : <ul aria-label={filter === 'all' ? 'All planned windows' : 'Filtered planned windows'} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-            {shown.map(window => <li key={window.id}><WindowCard window={window} name={names.get(window.segment_id) ?? 'video'} verified={survey.verified} onOpen={() => setOpen(window.id)} /></li>)}
+            {shown.map(window => <li key={window.id}><WindowCard window={window} name={names.get(window.segment_id) ?? 'video'} verified={survey.verified} tracks={survey.tracking?.summary_run_id === window.run_id ? survey.tracking.window_counts?.[window.id] ?? 0 : 0} onOpen={() => setOpen(window.id)} /></li>)}
           </ul>}
         {pages > 1 && <nav aria-label="Gallery pages" className="flex items-center justify-center gap-2 text-sm">
           <Button variant="outline" size="sm" disabled={current === 0} onClick={() => setPage(current - 1)}><ChevronLeft />Previous page</Button>
@@ -91,7 +91,7 @@ export function ReviewPage() {
   </>;
 }
 
-function WindowCard({ window, name, verified, onOpen }: { window: SummaryWindow; name: string; verified: boolean; onOpen: () => void }) {
+function WindowCard({ window, name, verified, tracks, onOpen }: { window: SummaryWindow; name: string; verified: boolean; tracks: number; onOpen: () => void }) {
   const decision = window.review?.effective_decision ?? 'unreviewed';
   const flags = warningFlags(window);
   const label = `Window ${span(window.interval.elapsed_start, window.interval.elapsed_end)} of ${name}`;
@@ -108,6 +108,7 @@ function WindowCard({ window, name, verified, onOpen }: { window: SummaryWindow;
       <div className="flex flex-wrap gap-1 px-1 pb-1">
         <Badge variant={decision === 'unreviewed' ? 'outline' : decision === 'reviewed_with_observations' ? 'info' : 'success'}>{decisionText[decision]}{(window.review?.observation_count ?? 0) > 0 ? ` (${window.review?.observation_count})` : ''}</Badge>
         {window.status !== 'complete' && <Badge variant="danger" title={window.error?.message}>{window.status}{window.error ? `: ${window.error.code.replaceAll('_', ' ')}` : ''}</Badge>}
+        {tracks > 0 && <Badge variant="info">{tracks} track{tracks === 1 ? '' : 's'} (unverified)</Badge>}
         {isThermal(window) && <Badge variant="info" title={THERMAL_LABEL}>Rendered thermal</Badge>}
         {window.source_state && window.source_state !== 'ready' && <Badge variant="danger">{window.source_state.replace('_source', '')} source</Badge>}
         {window.review?.needs_reverification && <Badge variant="warning">Re-check</Badge>}

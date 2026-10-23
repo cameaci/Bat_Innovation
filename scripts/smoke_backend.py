@@ -1,4 +1,4 @@
-"""End-to-end smoke test of a backend executable with synthetic media: import, preview, summaries, QA upgrade, export.
+"""End-to-end smoke test of a backend executable with synthetic media: import, preview, summaries, tracking, export.
 
 Usage: python scripts/smoke_backend.py <backend command> [args...]
 For a frozen build pass the executable (for example backend/dist/bat-backend/bat-backend.exe). Everything is generated
@@ -95,7 +95,7 @@ def main(command: list[str]) -> None:
         make_video(video)
         before = video.read_bytes()
         session = api.call("POST", "/api/sessions", {"display_name": "Smoke", "camera_ref": "Synthetic"})["id"]
-        for route in ("/api/media/upgrade", "/api/summaries/upgrade", "/api/reviews/upgrade", "/api/qa/upgrade"):
+        for route in ("/api/media/upgrade", "/api/summaries/upgrade", "/api/reviews/upgrade", "/api/qa/upgrade", "/api/storage/upgrade"):
             api.call("POST", route, {})
         step("schema upgrades")
 
@@ -125,6 +125,12 @@ def main(command: list[str]) -> None:
         if not image.startswith(b"\x89PNG"):
             raise SystemExit("FAIL summary image is not PNG")
         step(f"summaries ({len(windows)} of {len(windows)} windows complete)")
+
+        tracking = api.call("POST", "/api/tracking", {"summary_run_id": run["id"]})
+        tracked = api.wait(f"/api/tracking/{tracking['id']}", {"complete", "failed", "cancelled", "interrupted"}, 300)
+        if tracked["state"] != "complete" or sum(tracked["track_counts"].values()) < 1:
+            raise SystemExit(f"FAIL tracking: {json.dumps(tracked)[:600]}")
+        step(f"tracking ({sum(tracked['track_counts'].values())} track(s) from the moving square)")
 
         export = api.call("POST", "/api/exports", {"run_id": run["id"]})
         ready = api.wait(f"/api/exports/{export['id']}", {"ready", "failed", "cancelled"})

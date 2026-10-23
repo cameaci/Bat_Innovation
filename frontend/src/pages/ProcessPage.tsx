@@ -13,6 +13,7 @@ import { Input, Label, Select } from '../components/ui/input';
 import { Progress } from '../components/ui/progress';
 import { SummaryImage } from '../components/SummaryImage';
 import { WindowDialog } from '../components/WindowDialog';
+import { TracksCard } from '../components/process/TracksCard';
 
 // Stated on every import; they belong with the source details, not among the warnings.
 const ROUTINE_NOTES = new Set(['Original recording speed is unverified.', 'No original-clock anchor is inferred from media metadata.']);
@@ -35,6 +36,7 @@ export function ProcessPage() {
       <div className="grid gap-6 xl:grid-cols-2">
         <VideosCard disabled={!ready} />
         <SummariesCard disabled={!ready} onOpen={setOpen} />
+        <TracksCard disabled={!ready} />
       </div>
     </PageBody>
     {open && survey.run && <WindowDialog windows={survey.run.windows} initialID={open} onClose={() => setOpen(null)} />}

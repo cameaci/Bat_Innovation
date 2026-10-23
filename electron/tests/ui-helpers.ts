@@ -7,7 +7,7 @@ import type { BatAPI, MediaSession, SummaryDetail, WindowQA, WindowReview, QAHis
 import { cleanup, type RunningShell } from './shell-helpers';
 
 /** Run one synthetic fixture generator (never real media) and return its name -> path map. */
-export function fixtures<T extends string>(script: 'media_fixtures' | 'summary_fixtures' | 'preview_fixtures' | 'gallery_fixtures', directory: string): Record<T, string> {
+export function fixtures<T extends string>(script: 'media_fixtures' | 'summary_fixtures' | 'preview_fixtures' | 'gallery_fixtures' | 'tracking_fixtures', directory: string): Record<T, string> {
   const result = spawnSync(process.env.BAT_PYTHON ?? 'python', ['-m', `backend.tests.${script}`, directory],
     { cwd: resolve('.'), encoding: 'utf8', timeout: 45_000 });
   expect(result.status, result.stderr || `${script} failed`).toBe(0);

@@ -1,6 +1,6 @@
 # Feature expansion plan: tracks, gates, counts, thermal and audio
 
-Status: **E1 implemented (Linux-verified); E2-E7 in progress; E0 and E8 need the owner.** Project-owner decision 2026-10-22. Reviewed 2026-10-22.
+Status: **E1-E2 implemented (Linux-verified); E3-E7 in progress; E0 and E8 need the owner.** Project-owner decision 2026-10-22. Reviewed 2026-10-22.
 
 This plan adds a second layer to the existing reviewer: tracks, counting gates, trajectories, heatmaps, an activity timeline, highlight review, rendered thermal video and synchronised full-spectrum audio. It follows the owner's research summary of three reference demos and UK survey practice (BCT 4th-edition guidelines, CIEEM reporting guidance), recorded in the [research log](../docs/07-research-log.md). Read [AGENTS.md](../AGENTS.md), [design.md](design.md) and [plan.md](plan.md) first.
 
@@ -163,13 +163,13 @@ Every new dependency is pinned, listed in [docs/11](../docs/11-slice-0-developme
 
 ## 7. Feature expansion tracker
 
-Separate from the fixed 44/70 tracker in [plan.md](plan.md); the two are never added together. Baseline 2026-10-22: **0/27**; now **3/27**. Change the denominator only with owner approval.
+Separate from the fixed 44/70 tracker in [plan.md](plan.md); the two are never added together. Baseline 2026-10-22: **0/27**; now **7/27**. Change the denominator only with owner approval.
 
 | Milestone | Checked / total |
 | --- | ---: |
 | E0 Foundation hardening | 0 / 3 |
 | E1 Rendered thermal | 3 / 3 |
-| E2 Tracks | 0 / 4 |
+| E2 Tracks | 4 / 4 |
 | E3 Gates and counts | 0 / 4 |
 | E4 Export v2 | 0 / 2 |
 | E5 Highlight review | 0 / 3 |
@@ -183,10 +183,10 @@ Separate from the fixed 44/70 tracker in [plan.md](plan.md); the two are never a
 - [x] E1: v6 modality storage with explicit upgrade and version-tuple checks.
 - [x] E1: rendered thermal label and flags in summaries and the review UI (the export column arrives with E4).
 - [x] E1: thermal palette fixtures and radiometric refusal tested.
-- [ ] E2: dependency spike recorded and selection made.
-- [ ] E2: contained per-segment tracking run with persisted tracks.
-- [ ] E2: frame-accurate trajectory overlay and track list.
-- [ ] E2: ground-truth fixtures pass, including dropout, crossing and noise cases.
+- [x] E2: dependency spike recorded and selection made.
+- [x] E2: contained tracking run (one worker per run, segments committed atomically) with persisted tracks.
+- [x] E2: frame-accurate trajectory overlay and track list.
+- [x] E2: ground-truth fixtures pass, including dropout, crossing and noise cases.
 - [ ] E3: gate editor with line, rectangle and polygon and direction labels.
 - [ ] E3: hysteresis crossings recomputed on edit, invalidated on scene change.
 - [ ] E3: algorithm, reviewer and QA count layers with audit.

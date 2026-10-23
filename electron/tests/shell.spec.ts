@@ -25,7 +25,7 @@ test('real backend readiness, SQLite session persistence and narrow renderer bri
     }))).toEqual({
       nodeProcess: 'undefined',
       nodeRequire: 'undefined',
-      bridge: ['cancelExport', 'cancelImport', 'cancelPreview', 'cancelSummaries', 'chooseMedia', 'createSession', 'exportStatus', 'getMedia', 'getWindowQA', 'getWindowReview', 'health', 'importStatus', 'listSessions', 'listSummaryRuns', 'previewContent', 'previewStatus', 'qaHistory', 'reviewHistory', 'saveExportBundle', 'saveMedia', 'saveQA', 'saveReview', 'setDraftDirty', 'startExport', 'startPreview', 'startSummaries', 'summaryImage', 'summaryRun', 'upgradeMedia', 'upgradeQA', 'upgradeReviews', 'upgradeStorage', 'upgradeSummaries'],
+      bridge: ['cancelExport', 'cancelImport', 'cancelPreview', 'cancelSummaries', 'cancelTracking', 'chooseMedia', 'createSession', 'exportStatus', 'getMedia', 'getTracks', 'getWindowQA', 'getWindowReview', 'health', 'importStatus', 'listSessions', 'listSummaryRuns', 'listTracking', 'previewContent', 'previewStatus', 'qaHistory', 'reviewHistory', 'saveExportBundle', 'saveMedia', 'saveQA', 'saveReview', 'setDraftDirty', 'startExport', 'startPreview', 'startSummaries', 'startTracking', 'summaryImage', 'summaryRun', 'trackingRun', 'upgradeMedia', 'upgradeQA', 'upgradeReviews', 'upgradeStorage', 'upgradeSummaries'],
       bridgeFrozen: true,
     });
     expect(await page.evaluate(() => new Promise<string>((resolve) => {
