@@ -13,7 +13,11 @@ const SPEEDS = [0.25, 0.5, 1, 1.5, 2] as const;
 export type ClipSeconds = 2 | 6 | 12;
 
 /** Keyboard-reachable player controls for the window dialog. */
-export interface SourcePreviewHandle { togglePlay: () => void; step: (direction: 1 | -1) => void; toggleLoop: () => void; setSpeed: (index: number) => void }
+export interface SourcePreviewHandle {
+  togglePlay: () => void; step: (direction: 1 | -1) => void; toggleLoop: () => void; setSpeed: (index: number) => void;
+  /** Play from the current position at normal speed (for listening alongside); returns the clip time in seconds. */
+  playAtNormalSpeed: () => number | null;
+}
 
 /**
  * Two-second derived WebM preview of the original, started at `initialPTS` when `enabled`. Displayed frames are
@@ -33,7 +37,9 @@ export const SourcePreview = forwardRef<SourcePreviewHandle, {
   overlay?: (displayedPTS: string | null) => ReactNode;
   /** Initial clip length; 6 and 12 s are highlight blocks. */
   initialSeconds?: ClipSeconds;
-}>(function SourcePreview({ segment, initialPTS, minPTS, maxPTS, enabled, disabledReason, onReady, onDisplayedFrame, overlay, initialSeconds = 2 }, handle) {
+  /** The loaded clip: first original source PTS and its duration in milliseconds. */
+  onClip?: (clip: { startPTS: string; durationMs: number } | null) => void;
+}>(function SourcePreview({ segment, initialPTS, minPTS, maxPTS, enabled, disabledReason, onReady, onDisplayedFrame, overlay, initialSeconds = 2, onClip }, handle) {
   const [clipSeconds, setClipSeconds] = useState<ClipSeconds>(initialSeconds);
   const [speed, setSpeedIndex] = useState(2);
   const [looping, setLooping] = useState(false);
@@ -297,6 +303,9 @@ export const SourcePreview = forwardRef<SourcePreviewHandle, {
   const offset = (pts: string) => clock(ptsSeconds(pts, minPTS, timeBase));
 
   useEffect(() => { if (video.current) video.current.playbackRate = SPEEDS[speed]!; }, [speed, url]);
+  const clipCallback = useRef(onClip);
+  clipCallback.current = onClip;
+  useEffect(() => { clipCallback.current?.(loaded && manifest ? { startPTS: manifest.actual_pts, durationMs: manifest.preview_duration_ms } : null); }, [loaded, manifest?.actual_pts]);
   useEffect(() => { if (video.current) video.current.loop = looping; }, [looping, url]);
   /** Seek to the middle of the neighbouring manifest frame; the frame callback then confirms its exact source PTS. */
   function step(direction: 1 | -1) {
@@ -312,6 +321,12 @@ export const SourcePreview = forwardRef<SourcePreviewHandle, {
   useImperativeHandle(handle, () => ({
     togglePlay: () => { const player = video.current; if (player) { if (player.paused) void player.play().catch(() => undefined); else player.pause(); } },
     step, toggleLoop: () => setLooping(value => !value), setSpeed: index => { if (SPEEDS[index] !== undefined) setSpeedIndex(index); },
+    playAtNormalSpeed: () => {
+      const player = video.current;
+      if (!player || !loaded) return null;
+      setSpeedIndex(2); player.playbackRate = 1; void player.play().catch(() => undefined);
+      return player.currentTime;
+    },
   }));
 
   return <section aria-label="Original video" className="flex shrink-0 flex-col gap-2">

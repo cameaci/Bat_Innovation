@@ -8,8 +8,20 @@ import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia, SummaryRequest, SummaryRun, SummaryDetail, ReviewChange, WindowReview, ReviewHistory } from './contracts';
-import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, TrackingRun, TrackRecord, Gate, GateChange, GateCounts, CountReviewInput, CountQAInput, Candidate, CandidateDecisionInput, Heatmap, HeatmapMode } from './contracts';
+import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, TrackingRun, TrackRecord, Gate, GateChange, GateCounts, CountReviewInput, CountQAInput, Candidate, CandidateDecisionInput, Heatmap, HeatmapMode, AudioSource, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, AudioDerived } from './contracts';
 
+export const isAudioMode = (value: unknown): value is AudioSourceMode =>
+  ['full_spectrum', 'heterodyne', 'frequency_division', 'time_expansion', 'unknown'].includes(String(value));
+export function isAudioAnchor(input: unknown): input is AudioAnchorInput {
+  return object(input) && exactKeys(input, ['actor', 'expected_revision', 'segment_id', 'video_pts', 'audio_sample', 'note']) && text(input.actor, 120) &&
+    isReviewCursor(input.expected_revision) && isUUID(input.segment_id) && isPTS(input.video_pts) &&
+    typeof input.audio_sample === 'number' && Number.isSafeInteger(input.audio_sample) && input.audio_sample >= 0 && text(input.note, 2000, false);
+}
+export function isAudioDerive(input: unknown): input is AudioDeriveInput {
+  return object(input) && exactKeys(input, ['segment_id', 'start_pts', 'seconds', 'kind', 'tune_hz']) && isUUID(input.segment_id) && isPTS(input.start_pts) &&
+    count(input.seconds, 12) && (input.seconds as number) >= 1 && (input.kind === 'spectrogram' || input.kind === 'heterodyne') &&
+    (input.tune_hz === null || (typeof input.tune_hz === 'number' && input.tune_hz >= 10000 && input.tune_hz <= 150000));
+}
 export const isHeatmapMode = (value: unknown): value is HeatmapMode => value === 'first' || value === 'all' || value === 'confirmed';
 
 const within = (input: Record<string, unknown>, keys: string[]) => Object.keys(input).every(key => keys.includes(key));
@@ -157,6 +169,19 @@ const mediaErrors: Record<string, string> = {
   count_same_actor: 'QA must be done by a different person than the count reviewer.',
   gate_missing: 'The gate does not exist.',
   gate_conflict: 'The gate changed or was retired. Reload it before editing.',
+  audio_upgrade_required: 'Upgrade storage before adding audio.',
+  audio_busy: 'Another media operation is running. Wait for it before working with audio.',
+  audio_failed: 'The audio operation failed. The original recording was not changed.',
+  audio_limit: 'The audio operation exceeded a time, memory or size limit.',
+  audio_limits_unavailable: 'Hard process limits are unavailable on this platform. Only Linux and Windows are supported.',
+  unsupported_audio: 'Only uncompressed PCM WAV recordings with one audio stream are supported.',
+  outside_audio: 'The audio recording does not cover this part of the video.',
+  not_retunable: 'This recording is not full-spectrum (or its sample rate is too low for this tuning), so it cannot be retuned.',
+  audio_not_synchronised: 'Set a sync anchor for this video before showing its audio.',
+  audio_invalid: 'Check the audio settings: the anchor must lie inside both recordings and the channel must exist.',
+  audio_missing: 'The audio recording does not exist.',
+  audio_duplicate: 'This audio recording is already added.',
+  audio_conflict: 'The sync anchor changed. Reload before saving.',
   candidate_upgrade_required: 'Upgrade storage before reviewing candidates.',
   candidate_invalid: 'Enter your name and choose bat, not a bat or uncertain.',
   candidate_missing: 'The candidate track does not exist.',
@@ -238,7 +263,7 @@ function mediaFailure(code: unknown) {
 type ApiRoute = '/api/exports' | `/api/exports/${string}` | `/api/exports/${string}/cancel` | '/api/qa/upgrade' | `/api/summary-windows/${string}/qa` | `/api/summary-windows/${string}/qa-actions` | `/api/summary-windows/${string}/qa-history?after_revision=${number}` | '/api/reviews/upgrade' | `/api/summary-windows/${string}/review` | `/api/summary-windows/${string}/review-actions` | `/api/summary-windows/${string}/review-history?after_revision=${number}` | '/api/health' | '/api/sessions' | '/api/media/upgrade' | '/api/media/import' |
   `/api/sessions/${string}/media` | `/api/media/import/${string}` | `/api/media/import/${string}/cancel` |
   '/api/summaries/upgrade' | '/api/summaries' | `/api/summaries/${string}` | `/api/summaries/${string}/cancel` | `/api/sessions/${string}/summary-runs` |
-  '/api/storage/upgrade' | `/api/sessions/${string}/gates` | `/api/sessions/${string}/gates/${string}` | '/api/tracking' | `/api/tracking/${string}` | `/api/summaries/${string}/tracking` | '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
+  '/api/storage/upgrade' | `/api/sessions/${string}/audio` | `/api/audio/${string}` | `/api/sessions/${string}/gates` | `/api/sessions/${string}/gates/${string}` | '/api/tracking' | `/api/tracking/${string}` | `/api/summaries/${string}/tracking` | '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
 
 /** Read only known, redacted startup codes from the Python process. */
 function safeStartupFailure(output: string): string | undefined {
@@ -349,6 +374,21 @@ export class BackendClient {
     return isUUID(runID) && isUUID(gateID) && isCountQAInput(input) ? this.call(`/api/tracking/${runID}/gates/${gateID}/qa`, 'POST', input) : Promise.resolve(invalid());
   }
   listCandidates(runID: string): Promise<ApiResult<Candidate[]>> { return isUUID(runID) ? this.call(`/api/tracking/${runID}/candidates`) : Promise.resolve(invalid()); }
+  listAudio(sessionID: string): Promise<ApiResult<AudioSource[]>> { return isUUID(sessionID) ? this.call(`/api/sessions/${sessionID}/audio`) : Promise.resolve(invalid()); }
+  // Called only by the main process after a native selection. Never exposed in BatAPI.
+  addSelectedAudio(sessionID: string, paths: string[], sourceMode: AudioSourceMode, channel: number): Promise<ApiResult<AudioSource[]>> {
+    return isUUID(sessionID) && isAudioMode(sourceMode) && count(channel, 7) && paths.length > 0 && paths.every(path => typeof path === 'string' && isAbsolute(path))
+      ? this.call(`/api/sessions/${sessionID}/audio`, 'POST', { paths, source_mode: sourceMode, channel }) : Promise.resolve(invalid());
+  }
+  setAudioAnchor(audioID: string, input: AudioAnchorInput): Promise<ApiResult<AudioSource>> {
+    return isUUID(audioID) && isAudioAnchor(input) ? this.call(`/api/audio/${audioID}/anchor`, 'POST', input) : Promise.resolve(invalid());
+  }
+  deriveAudio(audioID: string, input: AudioDeriveInput): Promise<ApiResult<AudioDerived>> {
+    return isUUID(audioID) && isAudioDerive(input) ? this.call(`/api/audio/${audioID}/derive`, 'POST', input) : Promise.resolve(invalid());
+  }
+  audioContent(derivedID: string, kind: 'spectrogram' | 'heterodyne'): Promise<ApiResult<{ bytes: Uint8Array }>> {
+    return isUUID(derivedID) ? this.binary(`/api/audio/derived/${derivedID}/content`, kind === 'spectrogram' ? 'image/png' : 'audio/wav', 8 * 1024 * 1024) : Promise.resolve(invalid());
+  }
   getHeatmap(runID: string, segmentID: string, mode: HeatmapMode): Promise<ApiResult<Heatmap>> {
     return isUUID(runID) && isUUID(segmentID) && isHeatmapMode(mode) ? this.call(`/api/tracking/${runID}/heatmap?segment_id=${segmentID}&mode=${mode}`) : Promise.resolve(invalid());
   }
@@ -481,7 +521,7 @@ export class BackendClient {
     if (!isUUID(jobID)) return Promise.resolve(invalid());
     return this.binary(`/api/media/preview/${jobID}/content`, 'video/webm', MAX_PREVIEW_BYTES);
   }
-  private binary(path: string, mime: 'video/webm' | 'image/png', maxBytes: number): Promise<ApiResult<{ bytes: Uint8Array }>> {
+  private binary(path: string, mime: 'video/webm' | 'image/png' | 'audio/wav', maxBytes: number): Promise<ApiResult<{ bytes: Uint8Array }>> {
     if (this.readingPreview) return Promise.resolve({ ok: false, error: mediaFailure('preview_busy') });
     this.readingPreview = true;
     return new Promise<ApiResult<{ bytes: Uint8Array }>>(resolve => {
@@ -648,6 +688,11 @@ export class BackendRuntime {
   saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>> { return this.ready(client => client.saveCountQA(runID, gateID, input)); }
   listCandidates(runID: string): Promise<ApiResult<Candidate[]>> { return this.ready(client => client.listCandidates(runID)); }
   getHeatmap(runID: string, segmentID: string, mode: HeatmapMode): Promise<ApiResult<Heatmap>> { return this.ready(client => client.getHeatmap(runID, segmentID, mode)); }
+  listAudio(sessionID: string): Promise<ApiResult<AudioSource[]>> { return this.ready(client => client.listAudio(sessionID)); }
+  addSelectedAudio(sessionID: string, paths: string[], sourceMode: AudioSourceMode, channel: number): Promise<ApiResult<AudioSource[]>> { return this.ready(client => client.addSelectedAudio(sessionID, paths, sourceMode, channel)); }
+  setAudioAnchor(audioID: string, input: AudioAnchorInput): Promise<ApiResult<AudioSource>> { return this.ready(client => client.setAudioAnchor(audioID, input)); }
+  deriveAudio(audioID: string, input: AudioDeriveInput): Promise<ApiResult<AudioDerived>> { return this.ready(client => client.deriveAudio(audioID, input)); }
+  audioContent(derivedID: string, kind: 'spectrogram' | 'heterodyne'): Promise<ApiResult<{ bytes: Uint8Array }>> { return this.ready(client => client.audioContent(derivedID, kind)); }
   decideCandidate(runID: string, trackID: string, input: CandidateDecisionInput): Promise<ApiResult<Candidate>> { return this.ready(client => client.decideCandidate(runID, trackID, input)); }
   importStatus(jobID: string): Promise<ApiResult<ImportJob>> { return this.ready(client => client.importStatus(jobID)); }
   cancelImport(jobID: string): Promise<ApiResult<ImportJob>> { return this.ready(client => client.cancelImport(jobID)); }

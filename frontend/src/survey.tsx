@@ -1,11 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { ApiResult, BatAPI, Modality, ImportJob, MediaSession, RecordingSession, SaveMedia, SummaryDetail, SummaryRun, TrackingRun, Gate, GateChange } from '../../electron/src/contracts';
+import type { ApiResult, BatAPI, Modality, ImportJob, MediaSession, RecordingSession, SaveMedia, SummaryDetail, SummaryRun, TrackingRun, Gate, GateChange, AudioSource } from '../../electron/src/contracts';
 import { getAPI } from './api';
 
 const unavailable = 'The local backend is unavailable. Retry, or close and reopen the app.';
 export const activeRun = (run: SummaryRun | null | undefined) => run?.state === 'queued' || run?.state === 'running';
-export const CURRENT_SCHEMA = 9;
+export const CURRENT_SCHEMA = 10;
 export const activeTracking = (run: TrackingRun | null | undefined) => run?.state === 'queued' || run?.state === 'running';
 export const THERMAL_LABEL = 'Rendered thermal - no radiometric temperature analysis';
 
@@ -44,6 +44,9 @@ export interface Survey {
   /** Counting gates drawn on this survey's scene (all revisions' current state, including retired). */
   gates: Gate[];
   saveGate: (gateID: string | null, change: GateChange) => Promise<Gate | undefined>;
+  /** Full-spectrum or other WAV recordings of this survey, with their sync anchors. */
+  audio: AudioSource[];
+  reloadAudio: () => Promise<void>;
 }
 
 const SurveyContext = createContext<Survey | null>(null);
@@ -71,6 +74,7 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
   const [tracking, setTracking] = useState<TrackingRun | null>(null);
   const [trackingRefresh, setTrackingRefresh] = useState(0);
   const [gates, setGates] = useState<Gate[]>([]);
+  const [audio, setAudio] = useState<AudioSource[]>([]);
   const busy = importJob?.state === 'running' || activeRun(run) || exportBusy || activeTracking(tracking);
 
   const request = useCallback(async <T,>(action: (api: BatAPI) => Promise<ApiResult<T>>): Promise<T | undefined> => {
@@ -236,6 +240,13 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
     void request(api => api.listGates(session.id)).then(value => { if (value) setGates(value); });
   }, [request, session.id, media?.schema_version]);
 
+  const reloadAudio = useCallback(async () => {
+    if ((media?.schema_version ?? 0) < 10) { setAudio([]); return; }
+    const value = await request(api => api.listAudio(session.id));
+    if (value) setAudio(value);
+  }, [request, session.id, media?.schema_version]);
+  useEffect(() => { void reloadAudio(); }, [reloadAudio]);
+
   async function saveGate(gateID: string | null, change: GateChange) {
     setError(''); setNotice('');
     const value = await request(api => api.saveGate(session.id, gateID, change));
@@ -277,7 +288,7 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
     refreshMedia, upgradeStorage, importJob, chooseVideos, cancelImport, saveTimeline,
     runs, runID, selectRun: id => { setRunID(id); setRefresh(current => current + 1); }, run, verified,
     startRun, cancelRun, cancelling, reloadRun: () => setRefresh(current => current + 1),
-    setDraft, dirty, busy, setExportBusy, tracking, startTracking, cancelTracking, gates, saveGate,
+    setDraft, dirty, busy, setExportBusy, tracking, startTracking, cancelTracking, gates, saveGate, audio, reloadAudio,
   };
   return <SurveyContext.Provider value={value}>{children}</SurveyContext.Provider>;
 }

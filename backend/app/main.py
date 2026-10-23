@@ -27,6 +27,7 @@ from .qa import QAService, install_routes as install_qa_routes
 from .export_jobs import ExportJobs
 from .tracking import TrackingJobs, install_routes as install_tracking_routes
 from .counts import install_routes as install_count_routes
+from .audio import AudioService, install_routes as install_audio_routes
 
 
 @dataclass(frozen=True)
@@ -180,6 +181,7 @@ def create_app(settings: Settings) -> FastAPI:
     qa = QAService(reviews)
     exports = ExportJobs(db_path, settings.data_dir)
     tracking = TrackingJobs(db_path, activity_lock)
+    audio = AudioService(db_path, settings.data_dir, activity_lock)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -369,4 +371,5 @@ def create_app(settings: Settings) -> FastAPI:
     install_qa_routes(app, qa, authenticate)
     install_tracking_routes(app, tracking, authenticate, previews)
     install_count_routes(app, db_path, authenticate)
+    install_audio_routes(app, audio, authenticate)
     return app

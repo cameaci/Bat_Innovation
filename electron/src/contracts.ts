@@ -110,6 +110,20 @@ export interface Candidate {
   track_id: string; segment_id: string; track_index: number; first_pts: string; last_pts: string; point_count: number; window_id: string | null;
   revision: number; decision: { decision: 'bat' | 'not_bat' | 'uncertain'; actor: string; note: string; utc: string } | null;
 }
+export type AudioSourceMode = 'full_spectrum' | 'heterodyne' | 'frequency_division' | 'time_expansion' | 'unknown';
+export interface AudioSource {
+  id: string; session_id: string; sha256: string; source_mode: AudioSourceMode; channel: number; retunable: boolean;
+  metadata: { sample_rate: number; channels: number; frames: number; codec: string; filename: string };
+  anchor: { revision: number; actor: string; segment_id: string; video_pts: string; audio_sample: number; note: string; utc: string } | null;
+}
+export interface AudioAnchorInput { actor: string; expected_revision: number; segment_id: string; video_pts: string; audio_sample: number; note: string }
+export interface AudioDeriveInput { segment_id: string; start_pts: string; seconds: number; kind: 'spectrogram' | 'heterodyne'; tune_hz: number | null }
+export interface AudioDerived {
+  id: string; kind: 'spectrogram' | 'heterodyne'; audio_id: string; segment_id: string; mime: string; bytes: number; sha256: string;
+  sample_rate: number; start_sample: number; end_sample: number; requested_start_sample: number; requested_end_sample: number;
+  start_offset_seconds: number; covered_seconds: number; anchor_revision: number; drift_corrected: false;
+  frequency_max_hz?: number; tune_hz?: number;
+}
 export type HeatmapMode = 'first' | 'all' | 'confirmed';
 export interface Heatmap { segment_id: string; mode: HeatmapMode; width: number; height: number; columns: number; rows: number; cells: number[]; points: number; tracks: number }
 export interface CandidateDecisionInput { actor: string; expected_revision: number; decision: 'bat' | 'not_bat' | 'uncertain'; note: string; preview_id: string }
@@ -424,6 +438,11 @@ export interface BatAPI {
   saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>>;
   listCandidates(runID: string): Promise<ApiResult<Candidate[]>>;
   getHeatmap(runID: string, segmentID: string, mode: HeatmapMode): Promise<ApiResult<Heatmap>>;
+  listAudio(sessionID: string): Promise<ApiResult<AudioSource[]>>;
+  chooseAudio(sessionID: string, sourceMode: AudioSourceMode, channel: number): Promise<ApiResult<AudioSource[] | null>>;
+  setAudioAnchor(audioID: string, input: AudioAnchorInput): Promise<ApiResult<AudioSource>>;
+  deriveAudio(audioID: string, input: AudioDeriveInput): Promise<ApiResult<AudioDerived>>;
+  audioContent(derivedID: string, kind: 'spectrogram' | 'heterodyne'): Promise<ApiResult<{ bytes: Uint8Array }>>;
   decideCandidate(runID: string, trackID: string, input: CandidateDecisionInput): Promise<ApiResult<Candidate>>;
   importStatus(jobID: string): Promise<ApiResult<ImportJob>>;
   cancelImport(jobID: string): Promise<ApiResult<ImportJob>>;

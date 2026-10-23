@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import { existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, isGateChange, isCountReviewInput, isCountQAInput, isCandidateDecision, isHeatmapMode, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
+import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, isGateChange, isCountReviewInput, isCountQAInput, isCandidateDecision, isHeatmapMode, isAudioMode, isAudioAnchor, isAudioDerive, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
 import { ExportSaver } from './export_saver';
 import type { NewSession } from './contracts';
 
@@ -197,6 +197,19 @@ async function open(): Promise<void> {
   handle('bat:get-counts', 2, ([run, gate]) => isUUID(run) && isUUID(gate) ? backend.getCounts(run, gate) : invalid());
   handle('bat:save-count-review', 3, ([run, gate, input]) => isUUID(run) && isUUID(gate) && isCountReviewInput(input) ? backend.saveCountReview(run, gate, input) : invalid('Use a valid count review action.'));
   handle('bat:save-count-qa', 3, ([run, gate, input]) => isUUID(run) && isUUID(gate) && isCountQAInput(input) ? backend.saveCountQA(run, gate, input) : invalid('Use a valid count QA action.'));
+  handle('bat:list-audio', 1, ([id]) => isUUID(id) ? backend.listAudio(id) : invalid());
+  handle('bat:set-audio-anchor', 2, ([id, input]) => isUUID(id) && isAudioAnchor(input) ? backend.setAudioAnchor(id, input) : invalid('Use a video frame and an audio sample inside both recordings.'));
+  handle('bat:derive-audio', 2, ([id, input]) => isUUID(id) && isAudioDerive(input) ? backend.deriveAudio(id, input) : invalid('Use a 1 to 12 s span and a 10 to 150 kHz tuning.'));
+  handle('bat:audio-content', 2, async ([id, kind]) => isUUID(id) && (kind === 'spectrogram' || kind === 'heterodyne') ? backend.audioContent(id, kind) : invalid());
+  handle('bat:choose-audio', 3, async ([id, mode, channel]) => {
+    if (!isUUID(id) || !isAudioMode(mode) || typeof channel !== 'number' || !Number.isInteger(channel) || channel < 0 || channel > 7) return invalid('Choose a survey, a source mode and a channel.');
+    const owner = window;
+    if (!owner || owner.isDestroyed()) return invalid('The application window is closed.');
+    const selected = await dialog.showOpenDialog(owner, { properties: ['openFile', 'multiSelections'], filters: [{ name: 'Full-spectrum WAV', extensions: ['wav'] }] }).catch(() => null);
+    if (!selected) return { ok: false, error: { code: 'picker_failed', message: 'The native file picker could not open. Check desktop permissions and reopen the app.' } };
+    if (selected.canceled || selected.filePaths.length === 0) return { ok: true, value: null };
+    return backend.addSelectedAudio(id, selected.filePaths, mode, channel);
+  });
   handle('bat:get-heatmap', 3, ([run, segment, mode]) => isUUID(run) && isUUID(segment) && isHeatmapMode(mode) ? backend.getHeatmap(run, segment, mode) : invalid());
   handle('bat:list-candidates', 1, ([id]) => isUUID(id) ? backend.listCandidates(id) : invalid());
   handle('bat:decide-candidate', 3, ([run, track, input]) => isUUID(run) && isUUID(track) && isCandidateDecision(input) ? backend.decideCandidate(run, track, input) : invalid('Use a valid candidate decision.'));

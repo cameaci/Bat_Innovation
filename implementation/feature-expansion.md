@@ -1,6 +1,6 @@
 # Feature expansion plan: tracks, gates, counts, thermal and audio
 
-Status: **E1-E6 implemented (Linux-verified); E7 in progress; E0 and E8 need the owner.** Project-owner decision 2026-10-22. Reviewed 2026-10-22.
+Status: **E1-E7 implemented (Linux-verified, not yet built or run on Windows); E0 and E8 need the owner.** Project-owner decision 2026-10-22. Reviewed 2026-10-22.
 
 This plan adds a second layer to the existing reviewer: tracks, counting gates, trajectories, heatmaps, an activity timeline, highlight review, rendered thermal video and synchronised full-spectrum audio. It follows the owner's research summary of three reference demos and UK survey practice (BCT 4th-edition guidelines, CIEEM reporting guidance), recorded in the [research log](../docs/07-research-log.md). Read [AGENTS.md](../AGENTS.md), [design.md](design.md) and [plan.md](plan.md) first.
 
@@ -163,7 +163,7 @@ Every new dependency is pinned, listed in [docs/11](../docs/11-slice-0-developme
 
 ## 7. Feature expansion tracker
 
-Separate from the fixed 44/70 tracker in [plan.md](plan.md); the two are never added together. Baseline 2026-10-22: **0/27**; now **18/27**. Change the denominator only with owner approval.
+Separate from the fixed 44/70 tracker in [plan.md](plan.md); the two are never added together. Baseline 2026-10-22: **0/27**; now **22/27**. Change the denominator only with owner approval.
 
 | Milestone | Checked / total |
 | --- | ---: |
@@ -174,7 +174,7 @@ Separate from the fixed 44/70 tracker in [plan.md](plan.md); the two are never a
 | E4 Export v2 | 2 / 2 |
 | E5 Highlight review | 3 / 3 |
 | E6 Timeline and heatmaps | 2 / 2 |
-| E7 Audio | 0 / 4 |
+| E7 Audio | 4 / 4 |
 | E8 Validation | 0 / 2 |
 
 - [ ] E0: interface built and docs/18 checklist run on native Windows.
@@ -198,10 +198,10 @@ Separate from the fixed 44/70 tracker in [plan.md](plan.md); the two are never a
 - [x] E5: event queue with append-only candidate review and receipts.
 - [x] E6: activity timeline with visible gaps, opening the exact window (crossings are listed on the Counts page, not on the timeline).
 - [x] E6: three heatmap modes with "not individuals" labelling.
-- [ ] E7: WAV import with source mode and integrity checks.
-- [ ] E7: manual sync anchor with drift warning.
-- [ ] E7: spectrogram strip synced to the displayed frame.
-- [ ] E7: retunable heterodyne for full-spectrum sources only.
+- [x] E7: WAV import with source mode and integrity checks.
+- [x] E7: manual sync anchor with drift warning.
+- [x] E7: spectrogram strip synced to the displayed frame.
+- [x] E7: retunable heterodyne for full-spectrum sources only.
 - [ ] E8: reference set and metrics approved by the ecological owner.
 - [ ] E8: user study reported per scenario.
 

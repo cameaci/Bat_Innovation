@@ -382,7 +382,11 @@ def export_rows(database: Path, data_dir: Path, run_id: str, directory: Path, as
                     raise ExportFailure("export_stale")
         files = {"observations": observations.close(), "audit": audit.close()}
         tracking = expansion_rows(database, directory, run_id, as_of, check, files)
-        return {"schema_version": SCHEMA, "tracking": tracking, "provisional_label": LABEL, "as_of_utc": as_of, "run_id": run_id,
+        from . import audio_store
+        audio = [{"audio_id": item["id"], "filename": item["metadata"]["filename"], "sha256": item["sha256"], "sample_rate": item["metadata"]["sample_rate"],
+                  "source_mode": item["source_mode"], "channel": item["channel"], "anchor": item["anchor"], "drift_corrected": False}
+                 for item in audio_store.list_sources(database, run["session_id"])]
+        return {"schema_version": SCHEMA, "tracking": tracking, "audio_sync": audio, "provisional_label": LABEL, "as_of_utc": as_of, "run_id": run_id,
                 "counts": counts, "manifest_complete": counts["missing"] == 0, "processing_complete": run["state"] == "complete" and counts["processing"]["complete"] == counts["planned"],
                 "source_continuity": [{"segment_id": s["id"], "continuity_before": s["continuity"]} for s in sources], "files": files,
                 "columns": {"observations": OBS_COLUMNS, "audit": AUDIT_COLUMNS, "tracks": TRACK_COLUMNS, "counts": COUNT_COLUMNS}, "numeric_columns": sorted(NUMERIC),

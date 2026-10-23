@@ -17,7 +17,7 @@ class ImportErrorResponse(Exception):
         self.code, self.message, self.status = code, message, status
 
 
-def selected_sources(paths: list[str], data_dir: Path) -> list[Path]:
+def selected_sources(paths: list[str], data_dir: Path, suffixes: tuple[str, ...] = (".mts", ".mp4")) -> list[Path]:
     """Trusted main-process input still receives strict local-file validation."""
     forbidden = (Path(__file__).resolve().parents[2], data_dir.resolve())
     sources: list[Path] = []
@@ -31,8 +31,8 @@ def selected_sources(paths: list[str], data_dir: Path) -> list[Path]:
                 raise ImportErrorResponse("invalid_sources", "Choose regular local video files.")
         except (OSError, ValueError):
             raise ImportErrorResponse("missing_source", "A selected source is missing or unreadable. Choose it again.") from None
-        if source.suffix.lower() not in (".mts", ".mp4"):
-            raise ImportErrorResponse("invalid_sources", "Only original .MTS and .MP4 files are supported.")
+        if source.suffix.lower() not in suffixes:
+            raise ImportErrorResponse("invalid_sources", "Only original .MTS and .MP4 files are supported." if ".mp4" in suffixes else "Only original .WAV files are supported.")
         if any(source.is_relative_to(root) for root in forbidden):
             raise ImportErrorResponse("invalid_sources", "Original videos must remain outside the repository and application data directory.")
         if source in sources:

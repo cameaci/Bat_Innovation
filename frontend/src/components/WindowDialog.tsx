@@ -18,6 +18,7 @@ import type { ReviewPanelHandle } from './ReviewPanel';
 import { QAPanel } from './QAPanel';
 import { SceneOverlay } from './SceneOverlay';
 import { addPoint, GatePanel } from './GatePanel';
+import { AudioStrip } from './AudioStrip';
 import type { GateDraft } from './GatePanel';
 
 const REVIEWER_KEY = 'bat:reviewer';
@@ -42,6 +43,7 @@ export function WindowDialog({ windows, initialID, onClose }: { windows: Summary
   const [tracks, setTracks] = useState<TrackRecord[]>([]);
   const [tracksError, setTracksError] = useState('');
   const [gateDraft, setGateDraft] = useState<GateDraft | null>(null);
+  const [clip, setClip] = useState<{ startPTS: string; durationMs: number } | null>(null);
   const review = useRef<ReviewPanelHandle>(null);
   const player = useRef<SourcePreviewHandle>(null);
   const snapshot = useRef<SummaryWindow | null>(null);
@@ -116,12 +118,13 @@ export function WindowDialog({ windows, initialID, onClose }: { windows: Summary
           <SummaryImage window={selected} enabled={survey.verified} lazy={false} priority={1} alt={`Reference and motion evidence for ${title}`} className="max-h-[42vh] w-full" />
           <p className="text-xs text-slate-400">Left: first frame. Right: where things moved. Cyan = early, yellow = middle, magenta = late third of the window. Colours do not identify animals.</p>
         </section>
-        {segment && selected.preview_pts !== null && <SourcePreview ref={player} key={selected.id} segment={segment} initialPTS={selected.preview_pts}
+        {segment && selected.preview_pts !== null && <SourcePreview ref={player} key={selected.id} segment={segment} onClip={setClip} initialPTS={selected.preview_pts}
           minPTS={selected.stats.first_pts ?? selected.preview_pts} maxPTS={selected.interval.end_pts?.den === '1' ? selected.interval.end_pts.num : null}
           enabled={previewEnabled} disabledReason={processing ? 'The original video opens when processing finishes.' : !sourceReady ? 'The original video is missing or changed.' : 'Original video unavailable.'}
           onReady={previewID => setReceipt(previewID ? { windowID: selected.id, previewID } : null)} onDisplayedFrame={displayed}
           overlay={pts => <SceneOverlay tracks={tracks} gates={survey.gates} displayedPTS={pts} width={segment.metadata.width} height={segment.metadata.height}
             timeBase={segment.metadata.time_base} drawing={gateDraft ? { ...gateDraft, onPoint: point => setGateDraft(addPoint(gateDraft, point)) } : null} />} />}
+        {segment && survey.audio.length > 0 && <AudioStrip segment={segment} actor={reviewer} clip={clip} displayedPTS={frame?.sourcePTS ?? null} player={player} />}
         {segment && (survey.media?.schema_version ?? 0) >= 8 && <GatePanel segment={segment} actor={reviewer} draft={gateDraft} setDraft={setGateDraft} />}
       </div>
       <aside aria-label="Window review" className="flex w-96 shrink-0 flex-col border-l bg-white">
