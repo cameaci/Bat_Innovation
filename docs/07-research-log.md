@@ -1,5 +1,11 @@
 # 07 - Research log
 
+## 2026-10-26 - Phase 2 closing check (W7)
+
+**Verified on Linux:** backend 433 tests passed (45 skipped), Node 58 tests, Playwright 27 end-to-end tests passed (1 skipped), including Watch, calibration, counting and reel. The frozen PyInstaller backend (296 MB) passed the extended smoke test: import, preview, summaries, tracking, a tracking test run that stores nothing, the playback copy with its frame map, export and an unchanged original. Export schema v3 was introduced with W4.
+
+**Not verified:** native Windows build and installer for any Phase 2 change; real camera originals (tracking quality, camera-move classification, playback-copy size and encode time); reviewer workload and count accuracy against adjudicated footage (E8); LinkedIn sources (not accessible).
+
 ## 2026-10-26 - Phase 2 W6: event reel, smart speed and watched-window receipts
 
 **Problem:** too many human checks: every track was a candidate on the Events page, every crossing needed Confirm, and every window needed its own lossless preview before a decision.

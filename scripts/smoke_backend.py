@@ -1,4 +1,5 @@
-"""End-to-end smoke test of a backend executable with synthetic media: import, preview, summaries, tracking, export.
+"""End-to-end smoke test of a backend executable with synthetic media: import, preview, summaries, tracking, a tracking
+test run, the playback copy and export.
 
 Usage: python scripts/smoke_backend.py <backend command> [args...]
 For a frozen build pass the executable (for example backend/dist/bat-backend/bat-backend.exe). Everything is generated
@@ -128,9 +129,29 @@ def main(command: list[str]) -> None:
 
         tracking = api.call("POST", "/api/tracking", {"summary_run_id": run["id"]})
         tracked = api.wait(f"/api/tracking/{tracking['id']}", {"complete", "failed", "cancelled", "interrupted"}, 300)
-        if tracked["state"] != "complete" or sum(tracked["track_counts"].values()) < 1:  # a slow square can give two edge tracks
+        if tracked["state"] != "complete" or sum(tracked["track_counts"].values()) < 1:
             raise SystemExit(f"FAIL tracking: {json.dumps(tracked)[:600]}")
         step(f"tracking ({sum(tracked['track_counts'].values())} track(s) from the moving square)")
+
+        test = api.call("POST", "/api/tracking-tests", {"segment_id": segment["id"], "start_pts": int(first_pts),
+                                                         "end_pts": int(segment["metadata"]["last_pts"])})
+        tested = api.wait(f"/api/tracking-tests/{test['id']}", {"complete", "failed"})
+        if tested["state"] != "complete":
+            raise SystemExit(f"FAIL tracking test: {json.dumps(tested)[:600]}")
+        step(f"tracking test run ({tested['result']['stats']['tracks']} track(s), nothing stored)")
+
+        api.call("POST", "/api/proxy", {"session_id": session})
+        deadline = time.monotonic() + 300
+        while (status := api.call("GET", f"/api/proxy?session_id={session}"))["active"]:
+            if time.monotonic() > deadline:
+                raise SystemExit("FAIL playback copy timed out")
+            time.sleep(0.5)
+        copy = status["proxies"][0]
+        frames = api.call("GET", f"/api/proxy/{copy['id']}/frames")
+        content = api.call("GET", f"/api/proxy/{copy['id']}/video", raw=True)
+        if copy["state"] != "ready" or len(frames["source_pts"]) != copy["frame_count"] or not content.startswith(b"\x1a\x45\xdf\xa3"):
+            raise SystemExit(f"FAIL playback copy: {json.dumps(copy)[:600]}")
+        step(f"playback copy ({copy['frame_count']} frames mapped, {len(content)} bytes WebM)")
 
         export = api.call("POST", "/api/exports", {"run_id": run["id"]})
         ready = api.wait(f"/api/exports/{export['id']}", {"ready", "failed", "cancelled"})
