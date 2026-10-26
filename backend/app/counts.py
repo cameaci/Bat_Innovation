@@ -45,7 +45,7 @@ class GateChange(Strict):
 class ReviewAction(Strict):
     actor: str = Field(min_length=1, max_length=120)
     expected_revision: int = Field(ge=0)
-    action: Literal["confirm", "reject", "clear", "add_missed"]
+    action: Literal["confirm", "reject", "clear", "add_missed", "accept"]
     key: UUID | None = None
     flipped: bool = False
     count: int = Field(default=1, ge=0, le=10000)
@@ -56,11 +56,19 @@ class ReviewAction(Strict):
 
     @model_validator(mode="after")
     def shape(self) -> ReviewAction:
-        if (self.action == "add_missed") != (self.key is None):
-            raise ValueError("A missed crossing has no key; other actions name one crossing")
+        if (self.action in ("add_missed", "accept")) != (self.key is None):
+            raise ValueError("A missed crossing or an acceptance has no key; other actions name one crossing")
         if self.action == "add_missed" and (self.direction is None or self.segment_id is None or self.pts is None):
             raise ValueError("A missed crossing needs its direction, segment and source PTS")
         return self
+
+
+class Reconfirm(Strict):
+    actor: str = Field(min_length=1, max_length=120)
+    anchor_kind: Literal["camera_moved", "segment_start"]
+    anchor_id: UUID
+    points: list[tuple[float, float]] | None = Field(default=None, min_length=2, max_length=32)
+    note: str = Field(default="", max_length=2000)
 
 
 class QAAction(Strict):
@@ -101,6 +109,14 @@ def install_routes(app: FastAPI, db_path: Path, authenticate) -> None:
     def review(run_id: UUID, gate_id: UUID, action: ReviewAction) -> dict:
         value = action.model_dump(mode="json", exclude={"actor", "expected_revision"})
         result = count_store.record(db_path, str(run_id), str(gate_id), action.actor, action.expected_revision, "review", value)
+        result["revision"] = count_store.latest_revision(db_path, str(run_id), str(gate_id))
+        return result
+
+    @app.post("/api/tracking/{run_id}/gates/{gate_id}/reconfirm", dependencies=[Depends(authenticate)])
+    def reconfirm(run_id: UUID, gate_id: UUID, action: Reconfirm) -> dict:
+        points = [list(point) for point in action.points] if action.points is not None else None
+        result = count_store.reconfirm(db_path, str(run_id), str(gate_id), action.actor, action.anchor_kind, str(action.anchor_id),
+                                       points, action.note)
         result["revision"] = count_store.latest_revision(db_path, str(run_id), str(gate_id))
         return result
 

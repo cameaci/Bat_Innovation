@@ -15,7 +15,7 @@ import sqlite3
 from threading import Lock
 
 LABEL = "PROVISIONAL — NOT ECOLOGICALLY FINALISED"
-SCHEMA = "bat-provisional-csv-v2"
+SCHEMA = "bat-provisional-csv-v3"
 MAX_CSV_BYTES = 8 * 1024 * 1024
 MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024
 MAX_MANIFEST_BYTES = 64 * 1024
@@ -41,17 +41,17 @@ AUDIT_COLUMNS = COMMON + ["source_state", "evidence_revision", "evidence_fingerp
 # Feature expansion (E2/E3): derived tracks and gate counts of the latest complete tracking run of this summary run.
 TRACKING = ["schema_version", "provisional_label", "as_of_utc", "run_id", "tracking_run_id", "tracking_algorithm_version", "tracking_parameter_sha256"]
 TRACK_COLUMNS = TRACKING + ["track_id", "segment_id", "source_sha256", "track_index", "first_pts", "last_pts", "point_count", "bbox_json",
-                            "points_sha256", "canonical_json"]
+                            "points_sha256", "quality", "metrics_json", "canonical_json"]
 COUNT_COLUMNS = TRACKING + ["gate_id", "gate_name", "gate_revision", "gate_kind", "gate_points_json", "gate_frame_w", "gate_frame_h",
     "label_a", "label_b", "entry_direction", "hysteresis_px", "gate_algorithm_version", "row_kind", "layer", "crossing_key", "track_id",
-    "segment_id", "source_pts", "direction", "scene_changed", "review_action", "flipped", "count", "reviewer", "rationale",
-    "qa_decision", "qa_actor", "qa_stale", "entered", "exited", "net", "canonical_json"]
+    "segment_id", "source_pts", "direction", "track_quality", "review_action", "flipped", "count", "reviewer", "rationale",
+    "span_reason", "reviewer_state", "qa_decision", "qa_actor", "qa_stale", "entered", "exited", "net", "canonical_json"]
 NUMERIC = {"evidence_revision", "segment_order", "window_index", "time_base_num", "time_base_den", "first_review_revision", "qa_revision",
     "first_review_needs_reverification", "qa_needs_reverification", "has_disagreement", "has_clarification",
     "observation_revision", "start_pts", "end_pts_exclusive", "count", "uncertain", "image_bytes", "frame_count", "motion_pixels",
     "timestamp_gap_count", "observation_count", "first_history_through_revision", "qa_history_through_revision",
     "track_index", "first_pts", "last_pts", "point_count", "gate_revision", "gate_frame_w", "gate_frame_h", "source_pts",
-    "scene_changed", "flipped", "qa_stale", "entered", "exited", "net"} | {
+    "flipped", "qa_stale", "entered", "exited", "net"} | {
     f"{field}_{part}" for field in ("window_start_pts", "window_end_pts", "source_start_seconds", "source_end_seconds",
                                      "elapsed_start_seconds", "elapsed_end_seconds") for part in ("num", "den")}
 
@@ -187,7 +187,7 @@ def clock(anchor: dict | None, source: dict, start: dict, end: dict | None) -> d
 
 def expansion_rows(database: Path, directory: Path, run_id: str, as_of: str, check, files: dict) -> dict | None:
     """Tracks and three-layer gate counts; header-only files when no complete tracking run exists."""
-    from . import count_store, store
+    from . import count_store, store, tracking_store
 
     tracks_file = CSVFile(directory / FILES["tracks"], TRACK_COLUMNS, check)
     counts_file = None
@@ -208,7 +208,9 @@ def expansion_rows(database: Path, directory: Path, run_id: str, as_of: str, che
                     check()
                     tracks_file.row({**base, "track_id": row["id"], "segment_id": row["segment_id"], "source_sha256": row["sha256"],
                                      "track_index": row["track_index"], "first_pts": row["first_pts"], "last_pts": row["last_pts"],
-                                     "point_count": row["point_count"], "bbox_json": row["bbox_json"], "points_sha256": row["points_sha256"]})
+                                     "point_count": row["point_count"], "bbox_json": row["bbox_json"], "points_sha256": row["points_sha256"],
+                                     "quality": row["quality"] if "quality" in row.keys() else "unrated",
+                                     "metrics_json": row["metrics_json"] if "metrics_json" in row.keys() else "{}"})
                 gates = count_store.list_gates(database, run["session_id"])
                 for gate in gates:
                     if gate["state"] != "active":
@@ -222,20 +224,28 @@ def expansion_rows(database: Path, directory: Path, run_id: str, as_of: str, che
                         review = crossing["review"] or {}
                         counts_file.row({**head, "row_kind": "crossing", "crossing_key": crossing["key"], "track_id": crossing["track_id"],
                                          "segment_id": crossing["segment_id"], "source_pts": crossing["pts"], "direction": crossing["direction"],
-                                         "scene_changed": crossing["scene_changed"], "review_action": review.get("action"),
+                                         "track_quality": crossing["quality"], "review_action": review.get("action"),
                                          "flipped": review.get("flipped"), "count": review.get("count"), "reviewer": review.get("actor"),
                                          "rationale": review.get("rationale")})
                     for added in result["missed"]:
                         counts_file.row({**head, "row_kind": "added", "layer": "reviewer", "crossing_key": added["key"], "segment_id": added["segment_id"],
                                          "source_pts": added["pts"], "direction": added["direction"], "review_action": "add_missed",
                                          "count": added["count"], "reviewer": added["actor"], "rationale": added["rationale"]})
+                    for span in result["invalid_spans"]:
+                        # A camera move or new video without a reconfirmed gate: nothing is counted from here on.
+                        counts_file.row({**head, "row_kind": "invalid_span", "segment_id": span["segment_id"], "source_pts": span["from_pts"],
+                                         "span_reason": span["reason"]})
                     qa = result["layers"]["qa"]
                     for layer, totals in (("algorithm", result["layers"]["algorithm"]), ("reviewer", result["layers"]["reviewer"]),
                                           ("qa", qa["counts"] if qa else None)):
                         counts_file.row({**head, "row_kind": "total", "layer": layer, "qa_decision": qa["decision"] if qa else None,
+                                         "reviewer_state": result["layers"]["reviewer"]["state"] if layer == "reviewer" else None,
                                          "qa_actor": qa["actor"] if qa else None, "qa_stale": qa["stale"] if qa else None,
                                          **({key: totals[key] for key in ("entered", "exited", "net")} if totals else {})})
+                settings = json.loads(run["parameters_json"]).get("settings")
+                scene_events = tracking_store.events(database, run["id"]) if store.schema_version(database) >= store.TRACKS_V2_SCHEMA_VERSION else []
                 info = {"tracking_run_id": run["id"], "algorithm_version": run["algorithm_version"], "parameter_sha256": run["parameter_hash"],
+                        "settings": settings, "scene_events": [{key: event[key] for key in ("segment_id", "kind", "start_pts", "end_pts")} for event in scene_events],
                         "tracks": len(rows), "gates": sum(1 for gate in gates if gate["state"] == "active"),
                         "note": "Tracks and crossings are review candidates, not animals. Layers: algorithm (unverified), reviewer, qa (null until approved)."}
         files["tracks"], files["counts"] = tracks_file.close(), counts_file.close()

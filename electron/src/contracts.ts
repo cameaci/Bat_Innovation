@@ -141,14 +141,22 @@ export interface GateValue {
 export interface Gate extends GateValue { id: string; session_id: string; revision: number; state: 'active' | 'retired' }
 export interface GateChange { actor: string; expected_revision: number; value: GateValue | null }
 export interface CountTotals { entered: number; exited: number; net: number }
-export interface CountReview { action: 'confirm' | 'reject' | 'clear' | 'add_missed'; key: string | null; flipped: boolean; count: number; rationale: string; actor: string; revision: number; utc: string; direction?: GateDirection | null; segment_id?: string | null; pts?: string | null }
-export interface Crossing { key: string; track_id: string; segment_id: string; pts: string; direction: GateDirection; window_id: string | null; scene_changed: boolean; review: CountReview | null }
+export interface CountReview { action: 'confirm' | 'reject' | 'clear' | 'add_missed' | 'accept'; key: string | null; flipped: boolean; count: number; rationale: string; actor: string; revision: number; utc: string; direction?: GateDirection | null; segment_id?: string | null; pts?: string | null }
+/** A derived crossing inside a valid gate span; only coherent tracks feed the algorithm proposal. */
+export interface Crossing { key: string; track_id: string; track_index: number; segment_id: string; pts: string; direction: GateDirection; window_id: string | null; quality: 'coherent' | 'uncertain'; review: CountReview | null }
+/** A camera move or a new video not marked contiguous: counting is paused until one reconfirmation. */
+export interface InvalidSpan { segment_id: string; anchor_kind: 'camera_moved' | 'segment_start'; anchor_id: string; reason: 'camera_moved' | 'new_video'; from_pts: string | null; resume_pts: string | null }
+export interface ValidSpan { from_pts: number | null; to_pts: number | null; points: [number, number][] }
+export interface ReconfirmInput { actor: string; anchor_kind: InvalidSpan['anchor_kind']; anchor_id: string; points: [number, number][] | null; note: string }
 export interface GateCounts {
   gate: Gate; tracking_run_id: string; algorithm_version: string; revision: number; review_revision: number; reviewers: string[];
   crossings: Crossing[]; missed: CountReview[]; skipped_segments: string[];
+  invalid_spans: InvalidSpan[];
+  valid_spans: Record<string, ValidSpan[]>;
   layers: {
-    algorithm: CountTotals & { excluded_scene_changed: number };
-    reviewer: CountTotals & { reviewed: number; crossings: number; added: number };
+    algorithm: CountTotals & { coherent: number; uncertain: number; noise_crossings: number; invalid_spans: number };
+    reviewer: CountTotals & { state: 'ready' | 'unresolved' | 'accepted'; unresolved: number; rejected: number; reviewed: number; crossings: number; added: number;
+      accepted: { actor: string; utc: string; current: boolean } | null };
     qa: { decision: 'approve' | 'reject'; actor: string; note: string; utc: string; review_revision: number; stale: boolean; counts: CountTotals | null } | null;
   };
 }
@@ -430,7 +438,7 @@ export interface QAHistory {
 export type ExportKind = 'observations' | 'audit' | 'tracks' | 'counts' | 'manifest';
 export interface ExportFile { name: string; bytes: number; sha256: string; rows?: number }
 export interface ExportManifest {
-  schema_version: 'bat-provisional-csv-v2';
+  schema_version: 'bat-provisional-csv-v3';
   /** Latest complete tracking run included in tracks and counts CSVs, or null. */
   tracking?: { tracking_run_id: string; algorithm_version: string; parameter_sha256: string; tracks: number; gates: number; note: string } | null;
   provisional_label: string;
@@ -499,6 +507,7 @@ export interface BatAPI {
   getCounts(runID: string, gateID: string): Promise<ApiResult<GateCounts>>;
   saveCountReview(runID: string, gateID: string, input: CountReviewInput): Promise<ApiResult<GateCounts>>;
   saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>>;
+  reconfirmGate(runID: string, gateID: string, input: ReconfirmInput): Promise<ApiResult<GateCounts>>;
   listCandidates(runID: string): Promise<ApiResult<Candidate[]>>;
   getHeatmap(runID: string, segmentID: string, mode: HeatmapMode): Promise<ApiResult<Heatmap>>;
   listAudio(sessionID: string): Promise<ApiResult<AudioSource[]>>;

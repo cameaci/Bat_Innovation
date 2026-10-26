@@ -1,4 +1,4 @@
-"""Gates, crossings and three-layer counts (feature expansion E3)."""
+"""Gates, crossings, validity spans and three-layer counts (feature expansion E3, Phase 2 W4)."""
 
 from __future__ import annotations
 
@@ -78,7 +78,7 @@ def gate_value(**changes) -> dict:
             "label_a": "Right of line", "label_b": "Left of line", "entry_direction": "B_to_A", "hysteresis_px": 3, **changes}
 
 
-def test_three_count_layers_with_audit_and_independent_qa(tmp_path: Path) -> None:
+def test_three_count_layers_with_proposal_acceptance_and_independent_qa(tmp_path: Path) -> None:
     with TestClient(create_app(Settings(tmp_path / "app-data", TOKEN))) as client:
         session_id, run_id, summary = tracked(client, tmp_path, scenario("two_dots"))
         created = client.post(f"/api/sessions/{session_id}/gates", headers=HEADERS,
@@ -88,23 +88,29 @@ def test_three_count_layers_with_audit_and_independent_qa(tmp_path: Path) -> Non
         url = f"/api/tracking/{run_id}/gates/{gate['id']}"
         counted = client.get(f"{url}/counts", headers=HEADERS).json()
         # Dot A moves left to right (B -> A, entering); dot B moves right to left (exiting).
-        assert counted["layers"]["algorithm"] == {"entered": 1, "exited": 1, "net": 0, "excluded_scene_changed": 0}
-        assert counted["layers"]["reviewer"]["reviewed"] == 0 and counted["layers"]["qa"] is None
+        assert counted["layers"]["algorithm"] == {"entered": 1, "exited": 1, "net": 0, "coherent": 2, "uncertain": 0,
+                                                  "noise_crossings": 0, "invalid_spans": 0}
+        reviewer = counted["layers"]["reviewer"]
+        assert (reviewer["state"], reviewer["entered"], reviewer["exited"], reviewer["unresolved"]) == ("ready", 1, 1, 0)
+        assert counted["layers"]["qa"] is None and counted["invalid_spans"] == []
         first, second = counted["crossings"]
         post = lambda kind, body: client.post(f"{url}/{kind}", headers=HEADERS, json=body)
+        early_qa = post("qa", {"actor": "QA Two", "expected_revision": 0, "review_revision": 0, "decision": "approve"})
+        assert early_qa.status_code == 409 and early_qa.json()["detail"]["code"] == "count_unresolved"
         missing_reason = post("review", {"actor": "Reviewer One", "expected_revision": 0, "action": "reject", "key": first["key"]})
         assert missing_reason.status_code == 422
-        result = post("review", {"actor": "Reviewer One", "expected_revision": 0, "action": "confirm", "key": first["key"]}).json()
-        result = post("review", {"actor": "Reviewer One", "expected_revision": result["revision"], "action": "confirm", "key": second["key"],
+        result = post("review", {"actor": "Reviewer One", "expected_revision": 0, "action": "confirm", "key": second["key"],
                                  "count": 2, "rationale": "Two bats overlap in this crossing"}).json()
         stale = post("review", {"actor": "Reviewer One", "expected_revision": 0, "action": "clear", "key": second["key"]})
         assert stale.status_code == 409 and stale.json()["detail"]["code"] == "count_conflict"
         result = post("review", {"actor": "Reviewer One", "expected_revision": result["revision"], "action": "add_missed",
                                  "direction": "B_to_A", "segment_id": first["segment_id"], "pts": first["pts"], "count": 1,
                                  "rationale": "Faint bat missed by tracking"}).json()
+        result = post("review", {"actor": "Reviewer One", "expected_revision": result["revision"], "action": "accept"}).json()
         reviewer = result["layers"]["reviewer"]
-        entered, exited = (1, 2) if first["direction"] == "B_to_A" else (2, 1)
-        assert (reviewer["entered"], reviewer["exited"]) == (entered + 1, exited) and reviewer["added"] == 1
+        weights = ((first["direction"], 1), (second["direction"], 2), ("B_to_A", 1))  # entering is B_to_A
+        assert reviewer["state"] == "accepted" and reviewer["accepted"]["actor"] == "Reviewer One" and reviewer["added"] == 1
+        assert (reviewer["entered"], reviewer["exited"]) == (sum(n for d, n in weights if d == "B_to_A"), sum(n for d, n in weights if d == "A_to_B"))
         assert result["layers"]["algorithm"]["entered"] == 1, "The algorithm layer never changes"
         same = post("qa", {"actor": " reviewer  one ", "expected_revision": result["revision"], "review_revision": result["review_revision"], "decision": "approve"})
         assert same.status_code == 409 and same.json()["detail"]["code"] == "count_same_actor"
@@ -112,6 +118,7 @@ def test_three_count_layers_with_audit_and_independent_qa(tmp_path: Path) -> Non
         assert approved["layers"]["qa"]["counts"] == {"entered": reviewer["entered"], "exited": reviewer["exited"], "net": reviewer["net"]}
         changed = post("review", {"actor": "Reviewer One", "expected_revision": approved["revision"], "action": "clear", "key": second["key"]}).json()
         assert changed["layers"]["qa"]["stale"] is True and changed["layers"]["qa"]["counts"] is None
+        assert changed["layers"]["reviewer"]["state"] == "ready", "A later change needs a new acceptance"
         assert [event["layer"] for event in client.get(f"{url}/history", headers=HEADERS).json()] == ["review"] * 3 + ["qa", "review"]
         # Editing the gate makes earlier reviews history only.
         edited = client.put(f"/api/sessions/{session_id}/gates/{gate['id']}", headers=HEADERS,
@@ -128,16 +135,78 @@ def test_three_count_layers_with_audit_and_independent_qa(tmp_path: Path) -> Non
                 connection.execute("DELETE FROM count_event")
 
 
-def test_scene_change_excludes_crossings_from_the_algorithm_count(tmp_path: Path) -> None:
-    dots = path((4, 40), (6, 0), 20)
-    frames = [frame([dots[i]], background=200 if i == 3 else 40) for i in range(20)]
+def moved_camera_frames() -> list:
+    """A textured scene; one target crosses x=64 before the camera shifts by 6 px at frame 50, another after."""
+    from backend.tests.test_tracking import H, W, textured
+
+    scene = textured()
+    first, second = path((4, 20), (3, 0), 41), path((4, 70), (3, 0), 41)
+    images = []
+    for index in range(110):
+        offset = 0 if index < 50 else 6
+        image = scene[offset:offset + H, offset:offset + W].copy()
+        for dots, start in ((first, 0), (second, 62)):
+            if start <= index < start + len(dots):
+                x, y = dots[index - start]
+                image[y:y + 3, x:x + 3] = 240
+        images.append(image)
+    return images
+
+
+def test_a_camera_move_pauses_the_gate_with_one_action_until_reconfirmed(tmp_path: Path) -> None:
+    with TestClient(create_app(Settings(tmp_path / "app-data", TOKEN))) as client:
+        session_id, run_id, _summary = tracked(client, tmp_path, moved_camera_frames())
+        events = client.get(f"/api/tracking/{run_id}/events", headers=HEADERS).json()
+        assert [event["kind"] for event in events] == ["camera_moved"]
+        gate = client.post(f"/api/sessions/{session_id}/gates", headers=HEADERS,
+                           json={"actor": "Reviewer One", "expected_revision": 0, "value": gate_value()}).json()
+        url = f"/api/tracking/{run_id}/gates/{gate['id']}"
+        counted = client.get(f"{url}/counts", headers=HEADERS).json()
+        # Acceptance rule: one scene change is at most one user action, never a burst of crossings to review.
+        assert len(counted["invalid_spans"]) == 1 and counted["invalid_spans"][0]["reason"] == "camera_moved"
+        assert len(counted["crossings"]) == 1 and int(counted["crossings"][0]["pts"]) < int(events[0]["start_pts"])
+        assert counted["layers"]["reviewer"]["state"] == "unresolved"
+        refused = client.post(f"{url}/review", headers=HEADERS, json={"actor": "Reviewer One", "expected_revision": 0, "action": "accept"})
+        assert refused.status_code == 409 and refused.json()["detail"]["code"] == "count_unresolved"
+        span = counted["invalid_spans"][0]
+        bogus = client.post(f"{url}/reconfirm", headers=HEADERS, json={"actor": "Reviewer One", "anchor_kind": "camera_moved",
+                                                                         "anchor_id": gate["id"]})
+        assert bogus.status_code == 409
+        resumed = client.post(f"{url}/reconfirm", headers=HEADERS, json={"actor": "Reviewer One", "anchor_kind": span["anchor_kind"],
+                                                                           "anchor_id": span["anchor_id"], "note": "Roost gap still under the line"}).json()
+        assert resumed["invalid_spans"] == [] and len(resumed["crossings"]) == 2
+        redrawn = client.post(f"{url}/reconfirm", headers=HEADERS, json={"actor": "Reviewer One", "anchor_kind": span["anchor_kind"],
+                                                                           "anchor_id": span["anchor_id"], "points": [[100, 0], [100, 96]]}).json()
+        after = [item for item in redrawn["crossings"] if int(item["pts"]) > int(events[0]["start_pts"])]
+        assert len(after) == 1 and after[0]["key"] != [item for item in resumed["crossings"] if int(item["pts"]) > int(events[0]["start_pts"])][0]["key"]
+        tiny = client.post(f"{url}/reconfirm", headers=HEADERS, json={"actor": "Reviewer One", "anchor_kind": span["anchor_kind"],
+                                                                        "anchor_id": span["anchor_id"], "points": [[64, 0], [64, 4]]})
+        assert tiny.status_code == 422
+        accepted = client.post(f"{url}/review", headers=HEADERS, json={"actor": "Reviewer One", "expected_revision": 0, "action": "accept"})
+        assert accepted.status_code == 200 and accepted.json()["layers"]["reviewer"]["state"] == "accepted"
+        with sqlite3.connect(tmp_path / "app-data" / "bat_innovation.sqlite3") as connection:
+            with pytest.raises(sqlite3.IntegrityError):
+                connection.execute("DELETE FROM gate_reconfirm")
+
+
+def test_uncertain_crossings_wait_for_a_reviewer_decision(tmp_path: Path) -> None:
+    dots = path((4, 40), (3, 0), 40)
+    # Seen in only half of its frames: a gappy, uncertain track.
+    frames = [frame([dots[i]] if i % 2 == 0 or i > 36 else []) for i in range(40)]
     with TestClient(create_app(Settings(tmp_path / "app-data", TOKEN))) as client:
         session_id, run_id, _summary = tracked(client, tmp_path, frames)
         gate = client.post(f"/api/sessions/{session_id}/gates", headers=HEADERS,
                            json={"actor": "Reviewer One", "expected_revision": 0, "value": gate_value()}).json()
-        counted = client.get(f"/api/tracking/{run_id}/gates/{gate['id']}/counts", headers=HEADERS).json()
-        assert counted["crossings"] and all(item["scene_changed"] for item in counted["crossings"])
-        assert counted["layers"]["algorithm"]["entered"] == 0 and counted["layers"]["algorithm"]["excluded_scene_changed"] == len(counted["crossings"])
+        url = f"/api/tracking/{run_id}/gates/{gate['id']}"
+        counted = client.get(f"{url}/counts", headers=HEADERS).json()
+        (crossing,) = counted["crossings"]
+        assert crossing["quality"] == "uncertain"
+        assert counted["layers"]["algorithm"]["entered"] == 0 and counted["layers"]["algorithm"]["uncertain"] == 1
+        assert counted["layers"]["reviewer"]["unresolved"] == 1 and counted["layers"]["reviewer"]["state"] == "unresolved"
+        # Deciding an uncertain crossing needs no reason; it is exactly what the reviewer is asked to do.
+        decided = client.post(f"{url}/review", headers=HEADERS, json={"actor": "Reviewer One", "expected_revision": 0, "action": "confirm",
+                                                                       "key": crossing["key"]}).json()
+        assert decided["layers"]["reviewer"]["state"] == "ready" and decided["layers"]["reviewer"]["entered"] == 1
 
 
 def test_gates_require_storage_upgrade_and_valid_geometry(tmp_path: Path) -> None:
@@ -163,7 +232,7 @@ def wait_export(client: TestClient, run_id: str) -> dict:
     return wait(client, f"/api/exports/{job['id']}", ("working",))
 
 
-def test_export_v2_includes_tracks_and_all_three_count_layers(tmp_path: Path) -> None:
+def test_export_v3_includes_tracks_quality_and_all_three_count_layers(tmp_path: Path) -> None:
     import csv
     import io
 
@@ -177,7 +246,8 @@ def test_export_v2_includes_tracks_and_all_three_count_layers(tmp_path: Path) ->
         first = client.get(f"{url}/counts", headers=HEADERS).json()["crossings"][0]
         client.post(f"{url}/review", headers=HEADERS, json={"actor": "Reviewer One", "expected_revision": 0, "action": "confirm", "key": first["key"]})
         job = wait_export(client, summary["id"])
-        assert job["manifest"]["schema_version"] == "bat-provisional-csv-v2"
+        assert job["manifest"]["schema_version"] == "bat-provisional-csv-v3"
+        assert job["manifest"]["tracking"]["settings"]["target_px"] == 12 and job["manifest"]["tracking"]["scene_events"] == []
         assert job["manifest"]["tracking"]["tracking_run_id"] == run_id and job["manifest"]["tracking"]["tracks"] == 2
 
         def rows(kind: str, columns: list[str]) -> list[dict]:
@@ -187,13 +257,14 @@ def test_export_v2_includes_tracks_and_all_three_count_layers(tmp_path: Path) ->
             return [{k: v if k in csv_export.NUMERIC else csv_export.decode_text(v) for k, v in row.items()} for row in reader]
 
         tracks = rows("tracks", csv_export.TRACK_COLUMNS)
-        assert len(tracks) == 2 and all(row["tracking_run_id"] == run_id for row in tracks)
+        assert len(tracks) == 2 and all(row["tracking_run_id"] == run_id and row["quality"] == "coherent" for row in tracks)
         counted = rows("counts", csv_export.COUNT_COLUMNS)
         totals = {row["layer"]: row for row in counted if row["row_kind"] == "total"}
         assert (totals["algorithm"]["entered"], totals["algorithm"]["exited"]) == ("1", "1")
         assert totals["reviewer"]["entered"] != "" and totals["qa"]["entered"] == "" and totals["qa"]["qa_decision"] == ""
         crossings = [row for row in counted if row["row_kind"] == "crossing"]
         assert len(crossings) == 2 and sorted(row["review_action"] for row in crossings) == ["", "confirm"]
+        assert {row["track_quality"] for row in crossings} == {"coherent"} and totals["reviewer"]["reviewer_state"] == "ready"
         audit = rows("audit", csv_export.AUDIT_COLUMNS)
         assert {row["modality"] for row in audit} == {"active_ir"}
 

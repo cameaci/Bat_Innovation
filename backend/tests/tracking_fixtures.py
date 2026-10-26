@@ -17,6 +17,10 @@ def generate_tracking_media(directory: Path) -> dict[str, Path]:
         path = directory / f"tracking-{name.replace('_', '-')}.mp4"
         encode_frames(path, scenario(name), [index * 40 for index in range(20)])
         result[name] = path
+    from backend.tests.test_counts import moved_camera_frames
+    moved = moved_camera_frames()
+    result["moved_camera"] = directory / "tracking-moved-camera.mp4"
+    encode_frames(result["moved_camera"], moved, [index * 40 for index in range(len(moved))])
     from backend.tests.test_audio import tone
     result["tone_wav"] = tone(directory / "detector-45khz.wav")
     return result

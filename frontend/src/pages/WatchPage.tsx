@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw, ScanSearch, SkipBack, SkipForward } from 'lucide-react';
-import type { MediaSegment, PlaybackFrames, TrackingSettings, TrackingTest } from '../../../electron/src/contracts';
+import type { GateCounts, InvalidSpan, MediaSegment, PlaybackFrames, TrackingSettings, TrackingTest } from '../../../electron/src/contracts';
 import { getAPI } from '../api';
 import { activeRun, activeTracking, useSurvey } from '../survey';
 import { clock } from '../lib/time';
@@ -18,6 +18,10 @@ import { drawDetections, drawSetup } from '../components/watch/SetupLayer';
 import { SetupPanel, type DrawKind } from '../components/watch/SetupPanel';
 import { floorIndex, toTrackData } from '../components/watch/tracks';
 import { settingsOf } from '../lib/trackingSettings';
+import { savedReviewer } from '../lib/reviewer';
+import { drawCounts, soFar } from '../components/watch/CountLayer';
+import { CountsPanel } from '../components/watch/CountsPanel';
+import { addPoint, type GateDraft } from '../components/GatePanel';
 
 const SPEEDS = [0.25, 0.5, 1, 2, 4, 8];
 
@@ -41,7 +45,16 @@ export function WatchPage() {
   const [live, setLive] = useState(0);
   const player = useRef<PlayerHandle>(null);
   const tenths = useRef(-1);
-  const [panel, setPanel] = useState<'tracks' | 'setup'>('tracks');
+  const [panel, setPanel] = useState<'tracks' | 'setup' | 'counts'>('tracks');
+  const [actor, setActor] = useState(savedReviewer);
+  const [gateID, setGateID] = useState<string | null>(null);
+  const [counts, setCounts] = useState<GateCounts | null>(null);
+  const [gateDraft, setGateDraft] = useState<GateDraft | null>(null);
+  const [redraw, setRedraw] = useState<InvalidSpan | null>(null);
+  const [startAt, setStartAt] = useState<number | null>(null);
+  const order = useMemo(() => new Map(segments.map((item, index) => [item.id, index])), [segments]);
+  const activeGates = survey.gates.filter(gate => gate.state === 'active');
+  const chosenGate = activeGates.find(gate => gate.id === gateID) ?? activeGates[0] ?? null;
   const [settings, setSettings] = useState<TrackingSettings>(() => settingsOf(survey.tracking));
   const [drawing, setDrawing] = useState<DrawKind>(null);
   const [draft, setDraft] = useState<[number, number][]>([]);
@@ -67,6 +80,16 @@ export function WatchPage() {
   }, [copy?.id]);
 
   const trackingRun = survey.tracking?.state === 'complete' ? survey.tracking.id : null;
+  useEffect(() => {
+    setCounts(null);
+    if (!trackingRun || !chosenGate) return;
+    let active = true;
+    void getAPI()?.getCounts(trackingRun, chosenGate.id).then(result => {
+      if (!active) return;
+      if (result.ok) setCounts(result.value); else setFrameError(result.error.message);
+    });
+    return () => { active = false; };
+  }, [trackingRun, chosenGate?.id, chosenGate?.revision]);
   const chunk = displayed ? Math.floor(displayed.ms / CHUNK_MS) : 0;
   const { tracks, error: trackError } = useTracks(trackingRun, frames, chunk);
   const rate = segment ? ticksPerSecond(segment) : 1;
@@ -77,11 +100,21 @@ export function WatchPage() {
       drawSetup(context, view, { area: settings.detection_area, exclusions: settings.exclusions, draft, draftKind: drawing,
         reference: reference ?? [segment.metadata.width / 2, segment.metadata.height / 2], targetPx: settings.target_px });
     }
+    if (counts && segment && (panel === 'counts' || panel === 'tracks')) drawCounts(context, view, counts, order, segment.id, frame.pts, rate);
+    if (gateDraft && gateDraft.points.length > 0) {
+      context.strokeStyle = '#fde047';
+      context.lineWidth = 2 * view.dpr;
+      context.setLineDash([6 * view.dpr, 4 * view.dpr]);
+      context.beginPath();
+      gateDraft.points.forEach(([x, y], index) => { const px = view.dx + x * view.scale, py = view.dy + y * view.scale; if (index === 0) context.moveTo(px, py); else context.lineTo(px, py); });
+      context.stroke();
+      context.setLineDash([]);
+    }
     if (testTracks && test?.result) {
       drawDetections(context, view, test.result, frame.pts);
       setLive(drawBats(context, view, testTracks, frame.pts, rate));
     } else setLive(drawBats(context, view, tracks, frame.pts, rate));
-  }, [tracks, rate, panel, settings, draft, drawing, reference, testTracks, test, segment]);
+  }, [tracks, rate, panel, settings, draft, drawing, reference, testTracks, test, segment, counts, order, gateDraft]);
   useEffect(() => { player.current?.redraw(); }, [draw]);
 
   const onFrame = useCallback((frame: DisplayedFrame | null) => {
@@ -118,10 +151,20 @@ export function WatchPage() {
     finally { setTesting(false); }
   }
 
+  /** Show a moment of the survey from one second before it, opening another video when needed. */
+  function goTo(segmentID: string, pts: string) {
+    const index = segments.findIndex(item => item.id === segmentID);
+    if (index < 0) return;
+    const target = Math.max(Number(segments[index]!.metadata.first_pts), Number(pts) - ticksPerSecond(segments[index]!));
+    if (index === position) { player.current?.pause(); player.current?.seekPTS(target); }
+    else { setAutoPlay(false); setStartAt(target); setPosition(index); }
+  }
+
   function clearTest() { setTest(null); setTestRange(null); }
 
   function pick(point: [number, number]) {
-    if (drawing) setDraft(previous => previous.length < 32 ? [...previous, point] : previous);
+    if (gateDraft) setGateDraft(addPoint(gateDraft, point));
+    else if (drawing) setDraft(previous => previous.length < 32 ? [...previous, point] : previous);
     else setReference(point);
   }
 
@@ -208,7 +251,7 @@ export function WatchPage() {
           <div className="aspect-video max-h-[70vh] w-full">
             <Player key={frames.id} ref={player} frames={frames} sourceWidth={segment.metadata.width} sourceHeight={segment.metadata.height}
               draw={draw} onFrame={onFrame} onPlaying={setPlaying} onEnded={next} autoPlay={autoPlay}
-              onPick={panel === 'setup' ? pick : undefined} />
+              startPTS={startAt} onPick={panel === 'setup' || gateDraft ? pick : undefined} />
           </div>
           <div className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm">
             <Button size="sm" variant="ghost" className="text-slate-100" aria-label="Previous video" disabled={position === 0} onClick={() => { setAutoPlay(false); setPosition(position - 1); }}><SkipBack /></Button>
@@ -230,7 +273,7 @@ export function WatchPage() {
         </section>
         <aside className="space-y-3">
           <div className="flex gap-1" role="tablist" aria-label="Side panel">
-            {([['tracks', 'Tracks'], ['setup', 'Setup']] as const).map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={panel === key}
+            {([['tracks', 'Tracks'], ['setup', 'Setup'], ['counts', 'Counts']] as const).map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={panel === key}
               onClick={() => { setPanel(key); if (key === 'tracks') { setDrawing(null); setDraft([]); } }}
               className={cn('rounded-md px-3 py-1 text-sm', panel === key ? 'bg-slate-100 text-slate-900' : 'text-slate-300 hover:bg-slate-800')}>{label}</button>)}
           </div>
@@ -240,6 +283,10 @@ export function WatchPage() {
             onApply={() => { clearTest(); void survey.startTracking(settings); }}
             canTest={Boolean(displayed && frames)} canApply={Boolean(survey.run) && !activeRun(survey.run) && !activeTracking(survey.tracking) && !survey.busy}
             applyReason={activeTracking(survey.tracking) ? 'Tracking is running.' : 'Wait for motion summaries and other processing to finish.'} />}
+          {panel === 'counts' && segment && <CountsPanel counts={counts} setCounts={setCounts} gateID={chosenGate?.id ?? null} setGateID={setGateID}
+            actor={actor} setActor={setActor} segment={segment} segments={segments}
+            live={counts && displayed ? soFar(counts, order, segment.id, displayed.pts) : null}
+            gateDraft={gateDraft} setGateDraft={draft => { setGateDraft(draft); if (draft) player.current?.pause(); }} redraw={redraw} setRedraw={setRedraw} onGo={goTo} />}
           {activeTracking(survey.tracking) && <p role="status" className="rounded-lg border border-slate-800 bg-slate-900 p-3 text-sm">Tracking the whole survey with these settings...</p>}
           <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
             <p className="text-xs uppercase tracking-wide text-slate-400">Tracked now</p>

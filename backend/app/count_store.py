@@ -1,8 +1,13 @@
-"""Gates, crossings and three-layer counts (schema v8, feature expansion E3).
+"""Gates, crossings and three-layer counts (schema v8, feature expansion E3; validity spans v13, Phase 2 W4).
 
 Gates are human-drawn, revisioned and audited. Crossings are derived on demand from stored tracks and one gate
 revision, with deterministic keys, so they are never a competing source of truth. Reviewer and QA actions are
 append-only. The algorithm, reviewer and QA layers are reported separately and never merged.
+
+A gate is valid only while the camera is known not to have moved: a classified camera move, or a following video
+not marked contiguous, ends the valid span and asks for one reconfirmation (same or redrawn geometry) instead of
+producing crossings against a gate that may no longer sit on the roost. Only coherent tracks feed the algorithm
+proposal; crossings of uncertain tracks wait for a reviewer decision; noise tracks never cross a gate.
 """
 
 from __future__ import annotations
@@ -16,7 +21,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 from . import gates, store, summary_store, tracks
 from .imports import ImportErrorResponse
 
-REVIEW_ACTIONS = {"confirm", "reject", "add_missed", "clear"}
+REVIEW_ACTIONS = {"confirm", "reject", "add_missed", "clear", "accept"}
 
 
 class CountError(ImportErrorResponse):
@@ -74,6 +79,37 @@ def upgrade(db_path: Path) -> None:
                 connection.execute(f"""CREATE TRIGGER {table}_no_{operation.lower()} BEFORE {operation} ON {table}
                     BEGIN SELECT RAISE(ABORT, 'append-only'); END""")
         connection.execute(f"PRAGMA user_version={store.COUNT_SCHEMA_VERSION}")
+
+
+def upgrade_spans(db_path: Path) -> None:
+    """Explicit v12 -> v13 transition: append-only gate reconfirmations after a camera move or a new video."""
+    if not db_path.is_file():
+        raise store.DatabaseSchemaError("Gate span upgrade requires an existing version 12 database")
+    with closing(store.connect(db_path)) as connection, connection:
+        connection.execute("BEGIN IMMEDIATE")
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
+        if version >= store.GATE_SPAN_SCHEMA_VERSION:
+            return
+        if version != store.TRACKS_V2_SCHEMA_VERSION:
+            raise store.DatabaseSchemaError("Gate span upgrade requires database schema version 12")
+        connection.execute("SELECT id FROM tracking_event LIMIT 1")
+        connection.execute("""CREATE TABLE gate_reconfirm (
+            gate_id TEXT NOT NULL REFERENCES gate(id),
+            tracking_run_id TEXT NOT NULL REFERENCES tracking_run(id),
+            revision INTEGER NOT NULL CHECK(revision > 0),
+            gate_revision INTEGER NOT NULL,
+            anchor_kind TEXT NOT NULL CHECK(anchor_kind IN ('camera_moved', 'segment_start')),
+            anchor_id TEXT NOT NULL,
+            points_json TEXT,
+            actor TEXT NOT NULL,
+            note TEXT NOT NULL,
+            utc TEXT NOT NULL,
+            PRIMARY KEY(gate_id, tracking_run_id, revision)
+        )""")
+        for operation in ("UPDATE", "DELETE"):
+            connection.execute(f"""CREATE TRIGGER gate_reconfirm_no_{operation.lower()} BEFORE {operation} ON gate_reconfirm
+                BEGIN SELECT RAISE(ABORT, 'append-only'); END""")
+        connection.execute(f"PRAGMA user_version={store.GATE_SPAN_SCHEMA_VERSION}")
 
 
 def require_schema(db_path: Path) -> None:
@@ -156,37 +192,94 @@ def _key(run_id: str, gate: dict, track_id: str, pts: int) -> str:
     return str(uuid5(NAMESPACE_URL, f"bat-crossing:{run_id}:{gate['id']}:{gate['revision']}:{track_id}:{pts}"))
 
 
-def derived_crossings(db_path: Path, run_id: str, gate: dict) -> list[dict]:
-    """Crossings of every stored track of a tracking run with one gate revision (derived, reproducible)."""
+def _reconfirmations(connection, run_id: str, gate: dict) -> dict[tuple[str, str], dict]:
+    """Latest reconfirmation per anchor for the current gate revision; earlier revisions are history only."""
+    if store.schema_version_of(connection) < store.GATE_SPAN_SCHEMA_VERSION:
+        return {}
+    rows = connection.execute("""SELECT * FROM gate_reconfirm WHERE gate_id=? AND tracking_run_id=? AND gate_revision=?
+        ORDER BY revision""", (gate["id"], run_id, gate["revision"])).fetchall()
+    return {(row["anchor_kind"], row["anchor_id"]): {"points": json.loads(row["points_json"]) if row["points_json"] else None,
+                                                    "actor": row["actor"], "utc": row["utc"], "revision": row["revision"]}
+            for row in rows}
+
+
+def spans(db_path: Path, run_id: str, gate: dict) -> tuple[dict[str, list[dict]], list[dict]]:
+    """Valid intervals per segment, each with its gate geometry, and the invalid spans that each need one action."""
     with closing(store.connect(db_path)) as connection:
         run = connection.execute("SELECT summary_run_id FROM tracking_run WHERE id=?", (run_id,)).fetchone()
-        rows = connection.execute("SELECT id, segment_id, points, points_sha256 FROM track WHERE run_id=? ORDER BY segment_id, track_index",
-                                  (run_id,)).fetchall()
-    if run is None:
-        raise CountError("tracking_missing", "The tracking run does not exist.", 404)
+        if run is None:
+            raise CountError("tracking_missing", "The tracking run does not exist.", 404)
+        confirmed = _reconfirmations(connection, run_id, gate)
+        moves: list = []
+        if store.schema_version_of(connection) >= store.TRACKS_V2_SCHEMA_VERSION:
+            moves = connection.execute("""SELECT id, segment_id, start_pts, end_pts FROM tracking_event
+                WHERE run_id=? AND kind='camera_moved' ORDER BY CAST(start_pts AS INTEGER)""", (run_id,)).fetchall()
     summary = summary_store.private_run(db_path, run["summary_run_id"])
+    valid: dict[str, list[dict]] = {}
+    invalid: list[dict] = []
+    current: list | None = gate["points"]
+    for position, source in enumerate(summary["sources"]):
+        segment = store.segment_by_id(db_path, source["id"])
+        intervals: list[dict] = []
+        start: int | None = None
+        if position > 0 and (segment is None or segment["continuity"] != "known_contiguous"):
+            # A new video not marked contiguous may come from a moved or re-aimed camera.
+            current = _resume(confirmed, ("segment_start", source["id"]), gate, invalid, source["id"], None, "new_video")
+        for move in [item for item in moves if item["segment_id"] == source["id"]]:
+            if current is not None:
+                intervals.append({"from_pts": start, "to_pts": int(move["start_pts"]), "points": current})
+            current = _resume(confirmed, ("camera_moved", move["id"]), gate, invalid, source["id"], move, "camera_moved")
+            start = int(move["end_pts"])
+        if current is not None:
+            intervals.append({"from_pts": start, "to_pts": None, "points": current})
+        valid[source["id"]] = intervals
+    return valid, invalid
+
+
+def _resume(confirmed: dict, anchor: tuple[str, str], gate: dict, invalid: list[dict], segment_id: str, move, reason: str):
+    item = confirmed.get(anchor)
+    if item is None:
+        invalid.append({"segment_id": segment_id, "anchor_kind": anchor[0], "anchor_id": anchor[1], "reason": reason,
+                        "from_pts": move["start_pts"] if move is not None else None,
+                        "resume_pts": move["end_pts"] if move is not None else None})
+        return None
+    return item["points"] or gate["points"]
+
+
+def derived_crossings(db_path: Path, run_id: str, gate: dict) -> tuple[list[dict], list[dict], dict]:
+    """Crossings of the run's tracks with one gate revision inside its valid spans (derived, reproducible)."""
+    valid, invalid = spans(db_path, run_id, gate)
+    with closing(store.connect(db_path)) as connection:
+        quality = "quality" if store.schema_version_of(connection) >= store.TRACKS_V2_SCHEMA_VERSION else "'unrated' AS quality"
+        rows = connection.execute(f"""SELECT id, segment_id, track_index, points, points_sha256, {quality} FROM track WHERE run_id=?
+            ORDER BY segment_id, track_index""", (run_id,)).fetchall()
+    summary = tracks_summary_run(db_path, run_id)
     sizes = {source["id"]: (json.loads(source["metadata_json"])["width"], json.loads(source["metadata_json"])["height"])
              for source in summary["sources"]}
     by_segment: dict[str, list[dict]] = {}
     for window in summary["windows"]:
         by_segment.setdefault(window["segment_id"], []).append(window)
     result = []
+    skipped_noise = 0
     for row in rows:
         if tracks.digest(row["points"]) != row["points_sha256"]:
             raise CountError("tracking_integrity", "Stored track points failed their integrity check.")
         if sizes[row["segment_id"]] != (gate["frame_w"], gate["frame_h"]):
-            continue  # Reported as a skipped segment below; never projected onto another frame size.
+            continue  # Reported as a skipped segment; never projected onto another frame size.
         points = [(int(p["pts"]), float(p["x"]), float(p["y"])) for p in tracks.unpack(row["points"])]
-        for pts, direction in gates.crossings(points, gate):
-            windows = by_segment[row["segment_id"]]
-            window = next((item for item in windows if _contains(item["interval"], pts)), None)
-            # A frame-wide change at or before the crossing may mean the camera moved since the gate was drawn.
-            scene_changed = any("framewide_change" in item["flags"] for item in windows
-                                if window is not None and item["index"] <= window["index"])
-            result.append({"key": _key(run_id, gate, row["id"], pts), "track_id": row["id"], "segment_id": row["segment_id"],
-                           "pts": str(pts), "direction": direction, "window_id": window["id"] if window else None,
-                           "scene_changed": scene_changed})
-    return result
+        for interval in valid.get(row["segment_id"], []):
+            inside = [point for point in points if (interval["from_pts"] is None or point[0] >= interval["from_pts"])
+                      and (interval["to_pts"] is None or point[0] < interval["to_pts"])]
+            for pts, direction in gates.crossings(inside, {**gate, "points": interval["points"]}):
+                if row["quality"] == "noise":
+                    skipped_noise += 1
+                    continue
+                window = next((item for item in by_segment[row["segment_id"]] if _contains(item["interval"], pts)), None)
+                result.append({"key": _key(run_id, gate, row["id"], pts), "track_id": row["id"], "track_index": row["track_index"],
+                               "segment_id": row["segment_id"], "pts": str(pts), "direction": direction,
+                               "window_id": window["id"] if window else None,
+                               "quality": "coherent" if row["quality"] == "coherent" else "uncertain"})
+    return result, invalid, {"noise_crossings": skipped_noise, "valid_spans": valid}
 
 
 def skipped_segments(db_path: Path, run_id: str, gate: dict) -> list[str]:
@@ -229,36 +322,49 @@ def _totals(items: list[tuple[str, int]], entry: str) -> dict:
 def counts(db_path: Path, run_id: str, gate_id: str) -> dict:
     require_schema(db_path)
     gate = get_gate(db_path, gate_id)
-    crossings = derived_crossings(db_path, run_id, gate)
+    crossings, invalid, extra = derived_crossings(db_path, run_id, gate)
     with closing(store.connect(db_path)) as connection:
         events = _events(connection, run_id, gate_id)
     entry = gate["entry_direction"]
     reviews: dict[str, dict] = {}
     missed: dict[str, dict] = {}
     review_revision = 0
+    accepted: dict | None = None
     for event in events:
         if event["layer"] != "review":
             continue
         review_revision = event["revision"]
         if event["gate_revision"] != gate["revision"]:
             continue  # Reviews of an earlier gate revision are history only.
-        target = missed if event["action"] == "add_missed" else reviews
-        if event["action"] == "clear":
+        if event["action"] == "accept":
+            accepted = event
+        elif event["action"] == "clear":
             reviews.pop(event["key"], None)
             missed.pop(event["key"], None)
         else:
-            target[event["key"]] = event
+            (missed if event["action"] == "add_missed" else reviews)[event["key"]] = event
     for crossing in crossings:
         crossing["review"] = reviews.get(crossing["key"])
-    algorithm = [(item["direction"], 1) for item in crossings if not item["scene_changed"]]
+    algorithm = [(item["direction"], 1) for item in crossings if item["quality"] == "coherent"]
+    # The reviewer layer starts from the algorithm proposal: coherent crossings count unless rejected, uncertain
+    # ones only once a reviewer says they are bats.
     reviewed: list[tuple[str, int]] = []
+    unresolved = rejected = 0
     for crossing in crossings:
         review = crossing["review"]
-        if review is None or review["action"] == "reject":
+        if review is None:
+            if crossing["quality"] == "coherent":
+                reviewed.append((crossing["direction"], 1))
+            else:
+                unresolved += 1
             continue
-        direction = _flip(crossing["direction"]) if review["flipped"] else crossing["direction"]
-        reviewed.append((direction, review["count"]))
+        if review["action"] == "reject":
+            rejected += 1
+            continue
+        reviewed.append((_flip(crossing["direction"]) if review["flipped"] else crossing["direction"], review["count"]))
     reviewed += [(item["direction"], item["count"]) for item in missed.values()]
+    current_accept = accepted is not None and accepted["revision"] == review_revision
+    state = "accepted" if current_accept else "unresolved" if unresolved or invalid else "ready"
     reviewers = {" ".join(event["actor"].lower().split()) for event in events if event["layer"] == "review"}
     qa = next((event for event in reversed(events) if event["layer"] == "qa"), None)
     qa_state = None
@@ -269,12 +375,48 @@ def counts(db_path: Path, run_id: str, gate_id: str) -> dict:
                     "counts": _totals(reviewed, entry) if current and qa["decision"] == "approve" else None}
     return {"gate": gate, "tracking_run_id": run_id, "algorithm_version": gates.ALGORITHM_VERSION,
             "crossings": crossings, "missed": list(missed.values()), "skipped_segments": skipped_segments(db_path, run_id, gate),
+            "invalid_spans": invalid, "valid_spans": extra["valid_spans"],
             "review_revision": review_revision, "reviewers": sorted(reviewers),
-            "layers": {"algorithm": {**_totals(algorithm, entry),
-                                     "excluded_scene_changed": sum(1 for item in crossings if item["scene_changed"])},
-                       "reviewer": {**_totals(reviewed, entry), "reviewed": sum(1 for item in crossings if item["review"]),
-                                    "crossings": len(crossings), "added": len(missed)},
+            "layers": {"algorithm": {**_totals(algorithm, entry), "coherent": len(algorithm),
+                                     "uncertain": sum(1 for item in crossings if item["quality"] != "coherent"),
+                                     "noise_crossings": extra["noise_crossings"], "invalid_spans": len(invalid)},
+                       "reviewer": {**_totals(reviewed, entry), "state": state, "unresolved": unresolved, "rejected": rejected,
+                                    "reviewed": sum(1 for item in crossings if item["review"]), "crossings": len(crossings),
+                                    "added": len(missed),
+                                    "accepted": {"actor": accepted["actor"], "utc": accepted["utc"], "current": current_accept}
+                                    if accepted else None},
                        "qa": qa_state}}
+
+
+def reconfirm(db_path: Path, run_id: str, gate_id: str, actor: str, anchor_kind: str, anchor_id: str,
+              points: list | None, note: str) -> dict:
+    """Resume counting after a camera move or a new video, with the same or a redrawn geometry (append-only)."""
+    require_schema(db_path)
+    if store.schema_version(db_path) < store.GATE_SPAN_SCHEMA_VERSION:
+        raise CountError("count_upgrade_required", "Upgrade storage before reconfirming gates.")
+    actor = _actor(actor)
+    gate = get_gate(db_path, gate_id)
+    if gate["state"] != "active":
+        raise CountError("gate_conflict", "The gate was retired.")
+    _valid, invalid = spans(db_path, run_id, gate)
+    anchors = {(item["anchor_kind"], item["anchor_id"]) for item in invalid}
+    with closing(store.connect(db_path)) as connection:
+        anchors |= set(_reconfirmations(connection, run_id, gate))
+    if (anchor_kind, anchor_id) not in anchors:
+        raise CountError("count_conflict", "This scene change is not part of the current gate and tracking run. Reload the counts.")
+    if points is not None:
+        try:
+            gates.validate({**gate, "points": points})
+        except ValueError as error:
+            raise CountError("gate_invalid", str(error), 422) from None
+    with closing(store.connect(db_path)) as connection, connection:
+        connection.execute("BEGIN IMMEDIATE")
+        latest = connection.execute("SELECT COALESCE(MAX(revision), 0) FROM gate_reconfirm WHERE gate_id=? AND tracking_run_id=?",
+                                    (gate_id, run_id)).fetchone()[0]
+        connection.execute("INSERT INTO gate_reconfirm VALUES (?,?,?,?,?,?,?,?,?,?)",
+                           (gate_id, run_id, latest + 1, gate["revision"], anchor_kind, anchor_id,
+                            json.dumps(points) if points is not None else None, actor, note.strip(), _now()))
+    return counts(db_path, run_id, gate_id)
 
 
 def record(db_path: Path, run_id: str, gate_id: str, actor: str, expected_revision: int, layer: str, value: dict) -> dict:
@@ -287,16 +429,24 @@ def record(db_path: Path, run_id: str, gate_id: str, actor: str, expected_revisi
         raise CountError("gate_conflict", "The gate was retired.")
     if layer == "review":
         action = value["action"]
-        changed = action in {"reject", "add_missed"} or (action == "confirm" and (value["flipped"] or value["count"] != 1))
+        crossing = next((item for item in current["crossings"] if item["key"] == value.get("key")), None)
+        # Overriding the algorithm's proposal needs a reason; deciding an uncertain crossing is the reviewer's task.
+        proposed = crossing is not None and crossing["quality"] == "coherent"
+        changed = action == "add_missed" or (proposed and (action == "reject" or (action == "confirm" and (value["flipped"] or value["count"] != 1))))
         if changed and not value["rationale"].strip():
-            raise CountError("count_invalid", "Give a reason when rejecting, flipping, changing a count or adding a missed crossing.", 422)
+            raise CountError("count_invalid", "Give a reason when rejecting or changing a proposed crossing or adding a missed one.", 422)
+        if action == "accept":
+            reviewer = current["layers"]["reviewer"]
+            if reviewer["unresolved"] or current["invalid_spans"]:
+                raise CountError("count_unresolved", "Decide every uncertain crossing and reconfirm the gate after each camera move first.")
+            value["snapshot"] = {key: reviewer[key] for key in ("entered", "exited", "net")}
         if action == "add_missed":
             if value.get("direction") not in gates.DIRECTIONS["line" if gate["kind"] == "line" else "area"]:
                 raise CountError("count_invalid", "Choose the direction of the missed crossing.", 422)
             if value["segment_id"] not in {source["id"] for source in tracks_summary_run(db_path, run_id)["sources"]}:
                 raise CountError("count_invalid", "The missed crossing must be in a video of this run.", 422)
             value["key"] = str(uuid4())
-        elif value.get("key") not in {item["key"] for item in current["crossings"]} | {item["key"] for item in current["missed"]}:
+        elif action != "accept" and value.get("key") not in {item["key"] for item in current["crossings"]} | {item["key"] for item in current["missed"]}:
             raise CountError("count_conflict", "This crossing is not part of the current gate revision. Reload the counts.")
         value["gate_revision"] = gate["revision"]
     else:
@@ -304,6 +454,8 @@ def record(db_path: Path, run_id: str, gate_id: str, actor: str, expected_revisi
             raise CountError("count_same_actor", "QA must be done by a different person than the count reviewer.")
         if value.get("review_revision") != current["review_revision"]:
             raise CountError("count_conflict", "The reviewed counts changed. Reload before QA.")
+        if current["layers"]["reviewer"]["state"] != "accepted":
+            raise CountError("count_unresolved", "The reviewer has not accepted these counts yet.")
         if value["decision"] == "reject" and not value["note"].strip():
             raise CountError("count_invalid", "Give a reason for rejecting the reviewed counts.", 422)
         value["gate_revision"] = gate["revision"]

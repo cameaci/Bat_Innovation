@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import { existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, isGateChange, isCountReviewInput, isCountQAInput, isCandidateDecision, isHeatmapMode, isAudioMode, isAudioAnchor, isAudioDerive, isTrackingSettings, isTrackingTestInput, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
+import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, isGateChange, isCountReviewInput, isCountQAInput, isCandidateDecision, isHeatmapMode, isAudioMode, isAudioAnchor, isAudioDerive, isTrackingSettings, isTrackingTestInput, isReconfirmInput, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
 import { ExportSaver } from './export_saver';
 import type { NewSession } from './contracts';
 
@@ -206,6 +206,7 @@ async function open(): Promise<void> {
   handle('bat:list-gates', 1, ([id]) => isUUID(id) ? backend.listGates(id) : invalid('Select a valid survey ID.'));
   handle('bat:save-gate', 3, ([session, gate, change]) => isUUID(session) && (gate === null || isUUID(gate)) && isGateChange(change)
     ? backend.saveGate(session, gate, change) : invalid('Use a valid gate: name, kind, 2 to 32 points, labels, direction and hysteresis.'));
+  handle('bat:reconfirm-gate', 3, ([run, gate, input]) => isUUID(run) && isUUID(gate) && isReconfirmInput(input) ? backend.reconfirmGate(run, gate, input) : invalid('Check the gate reconfirmation.'));
   handle('bat:get-counts', 2, ([run, gate]) => isUUID(run) && isUUID(gate) ? backend.getCounts(run, gate) : invalid());
   handle('bat:save-count-review', 3, ([run, gate, input]) => isUUID(run) && isUUID(gate) && isCountReviewInput(input) ? backend.saveCountReview(run, gate, input) : invalid('Use a valid count review action.'));
   handle('bat:save-count-qa', 3, ([run, gate, input]) => isUUID(run) && isUUID(gate) && isCountQAInput(input) ? backend.saveCountQA(run, gate, input) : invalid('Use a valid count QA action.'));

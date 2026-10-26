@@ -1,5 +1,13 @@
 # 07 - Research log
 
+## 2026-10-26 - Phase 2 W4: gate validity spans, quality-aware counts and one-action acceptance
+
+**Problem:** the owner saw 164 crossings to review after one frame-wide change: E3 kept deriving crossings after a scene change and only marked them, against its own design ("the span ends at the change, reconfirm").
+
+**Implementation (schema v13):** a gate is valid from its creation until the tracker's first classified camera move, and from the start of each later video not marked contiguous; each such point is one paused span with one action, "Reconfirm gate" (same geometry) or "Redraw" (a geometry for the moved scene), stored append-only per tracking run and gate revision. No crossings are derived in a paused span. Crossings inherit track quality: coherent ones form the algorithm proposal and count in the reviewer layer unless rejected (with a reason); uncertain ones wait for Bat, Not a bat or Opposite (no reason needed, that is the question asked); noise tracks never produce crossings. "Accept count" is one audited reviewer action, refused while anything is unresolved; QA by a different person requires an accepted count. Provisional export schema v3 adds track quality and metrics, crossing quality, paused spans, the reviewer state and the tracking settings and scene events in the manifest. The Counts page is folded into the Watch Counts tab: live IN/OUT/NET at the playhead on the video and beside it, a flash for each crossing, paused gates in grey.
+
+**Verified:** backend tests show a camera move gives exactly one paused span and no crossings after it until reconfirmed, a redrawn geometry is used after the move, uncertain crossings stay out of the algorithm layer, acceptance and QA ordering, and append-only storage; an end-to-end test draws a gate on Watch, sees one paused span, the live tally, reconfirms, accepts and passes QA by a second person. **Not verified:** how often real footage produces false camera-move classifications; whether real split files are usually contiguous.
+
 ## 2026-10-26 - Phase 2 W3: tracking setup and a 10 s test on the footage
 
 **Question:** how does a reviewer choose tracking settings that suit their footage before processing a whole survey (the ThruTracker test-clip principle)?

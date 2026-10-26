@@ -8,7 +8,7 @@ import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia, SummaryRequest, SummaryRun, SummaryDetail, ReviewChange, WindowReview, ReviewHistory } from './contracts';
-import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, PlaybackFrames, PlaybackStatus, SceneEvent, TrackingRun, TrackingSettings, TrackingTest, TrackingTestInput, TrackRecord, Gate, GateChange, GateCounts, CountReviewInput, CountQAInput, Candidate, CandidateDecisionInput, Heatmap, HeatmapMode, AudioSource, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, AudioDerived } from './contracts';
+import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, ReconfirmInput, PlaybackFrames, PlaybackStatus, SceneEvent, TrackingRun, TrackingSettings, TrackingTest, TrackingTestInput, TrackRecord, Gate, GateChange, GateCounts, CountReviewInput, CountQAInput, Candidate, CandidateDecisionInput, Heatmap, HeatmapMode, AudioSource, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, AudioDerived } from './contracts';
 
 export const isAudioMode = (value: unknown): value is AudioSourceMode =>
   ['full_spectrum', 'heterodyne', 'frequency_division', 'time_expansion', 'unknown'].includes(String(value));
@@ -52,9 +52,15 @@ export function isGateChange(input: unknown): input is GateChange {
     Array.isArray(value.points) && value.points.length >= 2 && value.points.length <= 32 &&
     value.points.every(point => Array.isArray(point) && point.length === 2 && point.every(item => typeof item === 'number' && Number.isFinite(item)));
 }
+export function isReconfirmInput(input: unknown): input is ReconfirmInput {
+  return object(input) && exactKeys(input, ['actor', 'anchor_kind', 'anchor_id', 'points', 'note']) && text(input.actor, 120) &&
+    ['camera_moved', 'segment_start'].includes(String(input.anchor_kind)) && isUUID(input.anchor_id) && text(input.note, 2000, false) &&
+    (input.points === null || (Array.isArray(input.points) && input.points.length >= 2 && input.points.length <= 32 &&
+      input.points.every(point => Array.isArray(point) && point.length === 2 && point.every(item => typeof item === 'number' && Number.isFinite(item)))));
+}
 export function isCountReviewInput(input: unknown): input is CountReviewInput {
   return object(input) && within(input, ['actor', 'expected_revision', 'action', 'key', 'flipped', 'count', 'direction', 'segment_id', 'pts', 'rationale']) &&
-    text(input.actor, 120) && isReviewCursor(input.expected_revision) && ['confirm', 'reject', 'clear', 'add_missed'].includes(String(input.action)) &&
+    text(input.actor, 120) && isReviewCursor(input.expected_revision) && ['confirm', 'reject', 'clear', 'add_missed', 'accept'].includes(String(input.action)) &&
     (input.key === null || isUUID(input.key)) && typeof input.flipped === 'boolean' && count(input.count, 10000) &&
     (input.direction === null || ['A_to_B', 'B_to_A', 'out_to_in', 'in_to_out'].includes(String(input.direction))) &&
     (input.segment_id === null || isUUID(input.segment_id)) && (input.pts === null || isPTS(input.pts)) && text(input.rationale, 2000, false);
@@ -168,6 +174,7 @@ export function isSaveMedia(input: unknown): input is SaveMedia {
 const mediaErrors: Record<string, string> = {
   tracking_settings: 'The tracking settings leave no area to search. Check the detection area and exclusion zones.',
   tracking_test_missing: 'The test run does not exist or has been replaced by a newer one.',
+  count_unresolved: 'Decide every uncertain crossing and reconfirm the gate after each camera move first.',
   proxy_busy: 'Playback copies of another survey are being prepared. Wait for them to finish.',
   proxy_missing: 'The playback copy does not exist or is not ready.',
   proxy_upgrade_required: 'Upgrade storage before preparing playback copies.',
@@ -427,6 +434,9 @@ export class BackendClient {
   }
   saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>> {
     return isUUID(runID) && isUUID(gateID) && isCountQAInput(input) ? this.call(`/api/tracking/${runID}/gates/${gateID}/qa`, 'POST', input) : Promise.resolve(invalid());
+  }
+  reconfirmGate(runID: string, gateID: string, input: ReconfirmInput): Promise<ApiResult<GateCounts>> {
+    return isUUID(runID) && isUUID(gateID) && isReconfirmInput(input) ? this.call(`/api/tracking/${runID}/gates/${gateID}/reconfirm`, 'POST', input) : Promise.resolve(invalid());
   }
   listCandidates(runID: string): Promise<ApiResult<Candidate[]>> { return isUUID(runID) ? this.call(`/api/tracking/${runID}/candidates`) : Promise.resolve(invalid()); }
   listAudio(sessionID: string): Promise<ApiResult<AudioSource[]>> { return isUUID(sessionID) ? this.call(`/api/sessions/${sessionID}/audio`) : Promise.resolve(invalid()); }
@@ -749,6 +759,7 @@ export class BackendRuntime {
   listGates(sessionID: string): Promise<ApiResult<Gate[]>> { return this.ready(client => client.listGates(sessionID)); }
   saveGate(sessionID: string, gateID: string | null, change: GateChange): Promise<ApiResult<Gate>> { return this.ready(client => client.saveGate(sessionID, gateID, change)); }
   getCounts(runID: string, gateID: string): Promise<ApiResult<GateCounts>> { return this.ready(client => client.getCounts(runID, gateID)); }
+  reconfirmGate(runID: string, gateID: string, input: ReconfirmInput): Promise<ApiResult<GateCounts>> { return this.ready(client => client.reconfirmGate(runID, gateID, input)); }
   saveCountReview(runID: string, gateID: string, input: CountReviewInput): Promise<ApiResult<GateCounts>> { return this.ready(client => client.saveCountReview(runID, gateID, input)); }
   saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>> { return this.ready(client => client.saveCountQA(runID, gateID, input)); }
   listCandidates(runID: string): Promise<ApiResult<Candidate[]>> { return this.ready(client => client.listCandidates(runID)); }

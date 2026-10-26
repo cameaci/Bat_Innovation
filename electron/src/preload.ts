@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { Modality, TrackingSettings, TrackingTestInput, CandidateDecisionInput, HeatmapMode, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, GateChange, CountReviewInput, CountQAInput, BatAPI, NewSession, PreviewRequest, SaveMedia, SummaryRequest, ReviewChange, QAChange } from './contracts';
+import type { Modality, ReconfirmInput, TrackingSettings, TrackingTestInput, CandidateDecisionInput, HeatmapMode, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, GateChange, CountReviewInput, CountQAInput, BatAPI, NewSession, PreviewRequest, SaveMedia, SummaryRequest, ReviewChange, QAChange } from './contracts';
 
 const api: BatAPI = {
   startExport: (...args: [string]) => ipcRenderer.invoke('bat:start-export', ...args),
@@ -49,6 +49,7 @@ const api: BatAPI = {
   getCounts: (...args: [string, string]) => ipcRenderer.invoke('bat:get-counts', ...args),
   saveCountReview: (...args: [string, string, CountReviewInput]) => ipcRenderer.invoke('bat:save-count-review', ...args),
   saveCountQA: (...args: [string, string, CountQAInput]) => ipcRenderer.invoke('bat:save-count-qa', ...args),
+  reconfirmGate: (...args: [string, string, ReconfirmInput]) => ipcRenderer.invoke('bat:reconfirm-gate', ...args),
   trackingRun: (...args: [string]) => ipcRenderer.invoke('bat:tracking-run', ...args),
   listTracking: (...args: [string]) => ipcRenderer.invoke('bat:list-tracking', ...args),
   cancelTracking: (...args: [string]) => ipcRenderer.invoke('bat:cancel-tracking', ...args),
