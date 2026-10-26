@@ -1,5 +1,13 @@
 # 07 - Research log
 
+## 2026-10-26 - Phase 2 W2: tracks-v2 individual tracking
+
+**Question:** can the tracker follow each bat as one object, without new dependencies, and tell a camera move from a lighting change?
+
+**Method (after BatCount and ThruTracker principles, NumPy and SciPy only):** block-mean pooling to a grid on which the target is about three cells wide; a centred temporal median background of nine samples a quarter second apart (processed with about one second of lookahead); foreground by polarity and sensitivity inside the detection area and outside exclusion zones; a closing of about a quarter target to join wings and body; size limits of 0.25 to 4 target diameters; a constant-velocity Kalman filter with Mahalanobis plus log-size cost, gated at chi-square 13.8 and assigned optimally; three hits to confirm; tracklet joining across losses up to 1 s along the predicted path; quality classes coherent, uncertain and noise. A disturbance (a quarter of the searched area changing) is a tracker gap; once the scene settles, its brightness-normalised residual against the scene before decides camera moved (tracks end, a new epoch starts) or lighting change; a disturbance gone after at most two frames is a glitch. Schema v12 stores quality, metrics and scene events. A calibration test run over at most 12 s of one segment returns detections and tracks without storing anything.
+
+**Verified (synthetic):** two targets keep their IDs; flapping wings and body give one track; a 15-frame loss is joined; the slow uniform square that split under tracks-v1 is one track; crossing paths keep their direction; sensor noise and a one-pixel insect give no tracks; polarity, exclusion zones and the detection area restrict detection; a one-frame flash is a glitch; a brightness step is a lighting change with the track continuing; a 6 px scene shift is a camera move with tracks ended; 30 dense targets stay within limits. About 37 frames per second for 1080p in this container excluding decoding. **Not verified:** real camera originals, real wing-beat appearance, accuracy against adjudicated counts (E8). Short static ghosts can appear right after a lighting change near the start of a clip; they are classed as noise and hidden. All settings are starting values, not validated thresholds.
+
 ## 2026-10-26 - Phase 2 W1: playback copies and the Watch page
 
 **Question:** how can reviewers watch a whole survey continuously, with tracks drawn on every frame, without loosening source-time traceability?

@@ -6,7 +6,7 @@ from _thread import LockType
 import os
 from pathlib import Path
 from threading import Event, Lock, Thread
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import Body, Depends, FastAPI
 from typing import Literal
@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import candidate_store, store, summary_store, tracking_store, workers
 from .imports import ImportErrorResponse, source_state
-from .track_worker import CPU_SECONDS, ERRORS as WORKER_ERRORS, MAX_REQUEST_BYTES, MEMORY_BYTES
+from .track_worker import CPU_SECONDS, ERRORS as WORKER_ERRORS, MAX_REQUEST_BYTES, MAX_TEST_RESULT_BYTES, MEMORY_BYTES
 
 WALL_SECONDS = 900
 MAX_RESULT_BYTES = 256 * 1024
@@ -28,6 +28,8 @@ MESSAGES = {
     "tracking_limits_unavailable": "Hard process limits are unavailable on this platform. Only Linux and Windows are supported.",
     "tracking_failed": "Tracking failed. Completed segments remain; the run is marked failed.",
     "tracking_integrity": "Stored track points failed their integrity check.",
+    "tracking_settings": "The tracking settings leave no area to search. Check the detection area and exclusion zones.",
+    "tracking_test_missing": "The test run does not exist or has been replaced by a newer one.",
     "track_limit": "Too many tracks overlap this interval to return at once.",
     "missing_source": "The original recording is missing. Restore it before tracking.",
     "unreadable_source": "The original recording cannot be read.",
@@ -54,9 +56,10 @@ class TrackingJobs:
         self._process = None
         self._run_id: str | None = None
         self._closed = False
+        self._test: dict | None = None
         tracking_store.recover(db_path)
 
-    def start(self, summary_run_id: str) -> dict:
+    def start(self, summary_run_id: str, settings: dict | None = None) -> dict:
         if not workers.supported():
             raise TrackingError("tracking_limits_unavailable")
         if not tracking_store.require_schema(self.db_path):
@@ -74,7 +77,7 @@ class TrackingJobs:
                     if state != "ready":
                         raise TrackingError(state)
                 try:
-                    run_id = tracking_store.create_run(self.db_path, summary_run_id)
+                    run_id = tracking_store.create_run(self.db_path, summary_run_id, settings)
                 except ValueError:
                     raise TrackingError("tracking_summary_running") from None
                 self._run_id, self._cancel = run_id, Event()
@@ -113,6 +116,58 @@ class TrackingJobs:
                     self._run_id = None
                     self._activity_lock.release()
 
+    def start_test(self, segment_id: str, start_pts: int, end_pts: int, settings: dict) -> dict:
+        """A short calibration run held in memory only; one at a time, replacing the previous result."""
+        if not workers.supported():
+            raise TrackingError("tracking_limits_unavailable")
+        if not tracking_store.require_schema(self.db_path):
+            raise TrackingError("tracking_upgrade_required")
+        segment = store.segment_by_id(self.db_path, segment_id)
+        if segment is None:
+            raise TrackingError("tracking_missing", 404)
+        state = source_state(segment)
+        if state != "ready":
+            raise TrackingError(state)
+        with self._lock:
+            if self._closed or not self._activity_lock.acquire(blocking=False):
+                raise TrackingError("tracking_busy")
+            test_id = str(uuid4())
+            self._test = {"id": test_id, "state": "running", "error": None, "result": None}
+            payload = {"parent_pid": os.getpid(), "db_path": str(self.db_path), "mode": "test", "segment_id": segment_id,
+                       "start_pts": str(start_pts), "end_pts": str(end_pts), "settings": settings}
+            self._thread = Thread(target=self._run_test, args=(test_id, payload, self._cancel), daemon=True)
+            self._thread.start()
+            return dict(self._test)
+
+    def _run_test(self, test_id: str, payload: dict, cancelled: Event) -> None:
+        code, value = "tracking_failed", None
+        try:
+            status, body = workers.supervise("track_worker", payload, cancelled.is_set, 120, MEMORY_BYTES, 60,
+                                             MAX_REQUEST_BYTES, MAX_TEST_RESULT_BYTES, self._set_process)
+            if status == "ok" and isinstance(body, dict) and set(body) == {"error", "stats"}:
+                code, value = body["error"], body["stats"]
+                if code is not None and code not in WORKER_ERRORS:
+                    code = "tracking_failed"
+            else:
+                code = {"cancelled": "cancelled", "limit": "tracking_limit"}.get(status, "tracking_failed")
+        except Exception:
+            code = "tracking_failed"
+        finally:
+            with self._lock:
+                if self._test is not None and self._test["id"] == test_id:
+                    self._test = {"id": test_id, "state": "complete" if code is None else "failed", "error": code, "result": value}
+                self._activity_lock.release()
+
+    def get_test(self, test_id: str) -> dict:
+        with self._lock:
+            if self._test is None or self._test["id"] != test_id:
+                raise TrackingError("tracking_test_missing", 404)
+            return dict(self._test)
+
+    def events(self, run_id: str) -> list[dict]:
+        self.get(run_id)
+        return tracking_store.events(self.db_path, run_id)
+
     def get(self, run_id: str) -> dict:
         result = tracking_store.get_run(self.db_path, run_id)
         if result is None:
@@ -141,9 +196,42 @@ class TrackingJobs:
             thread.join(timeout=10)
 
 
+Point = tuple[float, float]
+
+
+class TrackingSettings(BaseModel):
+    """Visible tracking settings (tracks-v2). Defaults are starting values, not validated thresholds."""
+    model_config = ConfigDict(extra="forbid")
+    target_px: float = Field(default=12, ge=3, le=80)
+    polarity: Literal["both", "light", "dark"] = "both"
+    sensitivity: float = Field(default=12, ge=4, le=40)
+    activity: Literal["sparse", "normal", "dense"] = "normal"
+    detection_area: list[list[Point]] = Field(default_factory=list, max_length=4)
+    exclusions: list[list[Point]] = Field(default_factory=list, max_length=8)
+    max_gap_s: float = Field(default=0.4, ge=0.04, le=2)
+    min_track_s: float = Field(default=0.2, ge=0, le=5)
+    join_gap_s: float = Field(default=1.0, ge=0, le=5)
+    min_displacement_targets: float = Field(default=2, ge=0, le=20)
+
+    def checked(self) -> dict:
+        for polygon in [*self.detection_area, *self.exclusions]:
+            if not 3 <= len(polygon) <= 32 or any(x < 0 or y < 0 or x > 8192 or y > 8192 for x, y in polygon):
+                raise TrackingError("tracking_settings", 422)
+        return self.model_dump()
+
+
 class NewTracking(BaseModel):
     model_config = ConfigDict(extra="forbid")
     summary_run_id: UUID
+    settings: TrackingSettings = Field(default_factory=TrackingSettings)
+
+
+class TrackingTest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    segment_id: UUID
+    start_pts: int
+    end_pts: int
+    settings: TrackingSettings = Field(default_factory=TrackingSettings)
 
 
 class Empty(BaseModel):
@@ -162,7 +250,19 @@ class CandidateDecision(BaseModel):
 def install_routes(app: FastAPI, jobs: TrackingJobs, authenticate, previews) -> None:
     @app.post("/api/tracking", status_code=202, dependencies=[Depends(authenticate)])
     def start(payload: NewTracking) -> dict:
-        return jobs.start(str(payload.summary_run_id))
+        return jobs.start(str(payload.summary_run_id), payload.settings.checked())
+
+    @app.post("/api/tracking-tests", status_code=202, dependencies=[Depends(authenticate)])
+    def start_test(payload: TrackingTest) -> dict:
+        return jobs.start_test(str(payload.segment_id), payload.start_pts, payload.end_pts, payload.settings.checked())
+
+    @app.get("/api/tracking-tests/{test_id}", dependencies=[Depends(authenticate)])
+    def get_test(test_id: UUID) -> dict:
+        return jobs.get_test(str(test_id))
+
+    @app.get("/api/tracking/{run_id}/events", dependencies=[Depends(authenticate)])
+    def events(run_id: UUID) -> list[dict]:
+        return jobs.events(str(run_id))
 
     @app.get("/api/summaries/{run_id}/tracking", dependencies=[Depends(authenticate)])
     def list_runs(run_id: UUID) -> list[dict]:

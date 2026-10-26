@@ -59,12 +59,41 @@ def upgrade(db_path: Path) -> None:
         connection.execute(f"PRAGMA user_version={store.TRACKING_SCHEMA_VERSION}")
 
 
+def upgrade_v2(db_path: Path) -> None:
+    """Explicit v11 -> v12 transition: per-track quality and metrics, and classified scene events (tracks-v2)."""
+    if not db_path.is_file():
+        raise store.DatabaseSchemaError("Tracks v2 upgrade requires an existing version 11 database")
+    with closing(store.connect(db_path)) as connection, connection:
+        connection.execute("BEGIN IMMEDIATE")
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
+        if version >= store.TRACKS_V2_SCHEMA_VERSION:
+            return
+        if version != store.PROXY_SCHEMA_VERSION:
+            raise store.DatabaseSchemaError("Tracks v2 upgrade requires database schema version 11")
+        connection.execute("SELECT id FROM proxy LIMIT 1")
+        # Tracks of earlier runs keep 'unrated': tracks-v1 had no quality class.
+        connection.execute("""ALTER TABLE track ADD COLUMN quality TEXT NOT NULL DEFAULT 'unrated'
+            CHECK(quality IN ('unrated','coherent','uncertain','noise'))""")
+        connection.execute("ALTER TABLE track ADD COLUMN metrics_json TEXT NOT NULL DEFAULT '{}'")
+        connection.execute("""CREATE TABLE tracking_event (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL REFERENCES tracking_run(id),
+            segment_id TEXT NOT NULL REFERENCES segment(id),
+            kind TEXT NOT NULL CHECK(kind IN ('camera_moved','lighting_change','glitch')),
+            start_pts TEXT NOT NULL,
+            end_pts TEXT NOT NULL,
+            details_json TEXT NOT NULL
+        )""")
+        connection.execute("CREATE INDEX tracking_event_segment ON tracking_event(run_id, segment_id, start_pts)")
+        connection.execute(f"PRAGMA user_version={store.TRACKS_V2_SCHEMA_VERSION}")
+
+
 def require_schema(db_path: Path) -> bool:
-    return store.schema_version(db_path) >= store.TRACKING_SCHEMA_VERSION
+    return store.schema_version(db_path) >= store.TRACKS_V2_SCHEMA_VERSION
 
 
-def create_run(db_path: Path, summary_run_id: str) -> str:
-    values = tracks.parameters()
+def create_run(db_path: Path, summary_run_id: str, settings: dict | None = None) -> str:
+    values = tracks.parameters(settings)
     with closing(store.connect(db_path)) as connection, connection:
         connection.execute("BEGIN IMMEDIATE")
         run = connection.execute("SELECT session_id, state FROM processing_run WHERE id=?", (summary_run_id,)).fetchone()
@@ -90,17 +119,22 @@ def set_state(db_path: Path, run_id: str, state: str, error: str | None = None, 
             connection.execute("UPDATE tracking_run SET state=? WHERE id=?", (state, run_id))
 
 
-def record_segment(db_path: Path, run_id: str, segment_id: str, found: list[tracks.Track]) -> None:
-    """All tracks of one segment commit together, so a partial segment is never presented."""
+def record_segment(db_path: Path, run_id: str, segment_id: str, found: list[tracks.Track],
+                   events: list[tracks.SceneEvent] = ()) -> None:
+    """All tracks and scene events of one segment commit together, so a partial segment is never presented."""
     with closing(store.connect(db_path)) as connection, connection:
         connection.execute("BEGIN IMMEDIATE")
         for index, track in enumerate(found):
             blob = tracks.pack(track.points)
             info = tracks.summary(track)
             connection.execute("""INSERT INTO track (id, run_id, segment_id, track_index, first_pts, last_pts,
-                point_count, bbox_json, points, points_sha256) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                point_count, bbox_json, points, points_sha256, quality, metrics_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (str(uuid4()), run_id, segment_id, index, info["first_pts"], info["last_pts"], info["point_count"],
-                 json.dumps(info["bbox"]), blob, tracks.digest(blob)))
+                 json.dumps(info["bbox"]), blob, tracks.digest(blob), track.quality, json.dumps(track.metrics)))
+        for event in events:
+            connection.execute("""INSERT INTO tracking_event (id, run_id, segment_id, kind, start_pts, end_pts, details_json)
+                VALUES (?,?,?,?,?,?,?)""", (str(uuid4()), run_id, segment_id, event.kind, str(event.start_pts),
+                                             str(event.end_pts), json.dumps(event.details)))
 
 
 def recover(db_path: Path) -> None:
@@ -123,7 +157,7 @@ def get_run(db_path: Path, run_id: str) -> dict | None:
         row = connection.execute("SELECT * FROM tracking_run WHERE id=?", (run_id,)).fetchone()
         if row is None:
             return None
-        counts = connection.execute("SELECT segment_id, COUNT(*) FROM track WHERE run_id=? GROUP BY segment_id",
+        counts = connection.execute("SELECT segment_id, COUNT(*) FROM track WHERE run_id=? AND quality != 'noise' GROUP BY segment_id",
                                     (run_id,)).fetchall()
     result = _run(row)
     result["track_counts"] = {segment: count for segment, count in counts}
@@ -135,7 +169,8 @@ def window_counts(db_path: Path, run_id: str, windows: list[dict]) -> dict[str, 
     import numpy as np
 
     with closing(store.connect(db_path)) as connection:
-        rows = connection.execute("SELECT segment_id, first_pts, last_pts FROM track WHERE run_id=?", (run_id,)).fetchall()
+        rows = connection.execute("SELECT segment_id, first_pts, last_pts FROM track WHERE run_id=? AND quality != 'noise'",
+                                  (run_id,)).fetchall()
     spans: dict[str, tuple] = {}
     for segment in {row[0] for row in rows}:
         chosen = [row for row in rows if row[0] == segment]
@@ -174,6 +209,7 @@ def tracks_between(db_path: Path, run_id: str, segment_id: str, start_pts: int, 
             raise ValueError("track_integrity")
         points = tracks.unpack(row["points"])
         result.append({"id": row["id"], "segment_id": segment_id, "track_index": row["track_index"],
+                       "quality": row["quality"], "metrics": json.loads(row["metrics_json"]),
                        "first_pts": row["first_pts"], "last_pts": row["last_pts"], "point_count": row["point_count"],
                        "bbox": json.loads(row["bbox_json"]),
                        "points": [[str(int(p["pts"])), round(float(p["x"]), 2), round(float(p["y"]), 2), int(p["area"])]
@@ -192,8 +228,8 @@ def heatmap(db_path: Path, run_id: str, segment_id: str, mode: str, confirmed: s
 
     with closing(store.connect(db_path)) as connection:
         segment = connection.execute("SELECT metadata_json FROM segment WHERE id=?", (segment_id,)).fetchone()
-        rows = connection.execute("SELECT id, points, points_sha256 FROM track WHERE run_id=? AND segment_id=?",
-                                  (run_id, segment_id)).fetchall()
+        rows = connection.execute("""SELECT id, points, points_sha256 FROM track WHERE run_id=? AND segment_id=?
+            AND quality != 'noise'""", (run_id, segment_id)).fetchall()
     if segment is None:
         raise LookupError("segment")
     metadata = json.loads(segment["metadata_json"])
@@ -216,3 +252,12 @@ def heatmap(db_path: Path, run_id: str, segment_id: str, mode: str, confirmed: s
         included += 1
     return {"segment_id": segment_id, "mode": mode, "width": width, "height": height, "columns": columns, "rows": rows_count,
             "cells": grid.flatten().tolist(), "points": int(grid.sum()), "tracks": included}
+
+
+def events(db_path: Path, run_id: str) -> list[dict]:
+    """Classified scene disturbances of a run, in segment and time order."""
+    with closing(store.connect(db_path)) as connection:
+        rows = connection.execute("""SELECT tracking_event.* FROM tracking_event JOIN segment ON segment.id = tracking_event.segment_id
+            WHERE run_id=? ORDER BY segment.position, CAST(start_pts AS INTEGER)""", (run_id,)).fetchall()
+    return [{"id": row["id"], "segment_id": row["segment_id"], "kind": row["kind"], "start_pts": row["start_pts"],
+             "end_pts": row["end_pts"], "details": json.loads(row["details_json"])} for row in rows]

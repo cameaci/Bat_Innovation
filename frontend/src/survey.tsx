@@ -5,7 +5,7 @@ import { getAPI } from './api';
 
 const unavailable = 'The local backend is unavailable. Retry, or close and reopen the app.';
 export const activeRun = (run: SummaryRun | null | undefined) => run?.state === 'queued' || run?.state === 'running';
-export const CURRENT_SCHEMA = 11;
+export const CURRENT_SCHEMA = 12;
 export const activeTracking = (run: TrackingRun | null | undefined) => run?.state === 'queued' || run?.state === 'running';
 export const THERMAL_LABEL = 'Rendered thermal - no radiometric temperature analysis';
 
@@ -129,7 +129,8 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
     ];
     let version = media?.schema_version ?? CURRENT_SCHEMA;
     for (const [from, step] of steps) {
-      if (version !== from) continue;
+      // Storage of any feature-expansion version is brought to the current one by the single storage step.
+      if (version !== from && !(from === 5 && version > 5 && version < CURRENT_SCHEMA)) continue;
       if (await request(step) === undefined) break;
       version = from === 5 ? CURRENT_SCHEMA : from + 1;
     }

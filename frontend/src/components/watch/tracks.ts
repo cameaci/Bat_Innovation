@@ -1,10 +1,10 @@
-import type { TrackRecord } from '../../../../electron/src/contracts';
+import type { TrackQuality, TrackRecord } from '../../../../electron/src/contracts';
 
 /** One track in numeric arrays for per-frame drawing. PTS values must be safe integers (checked on load). */
 export interface TrackData {
   id: string;
   index: number;
-  quality: 'coherent' | 'uncertain' | 'noise' | 'unrated';
+  quality: TrackQuality;
   first: number;
   last: number;
   pts: Float64Array;
@@ -13,7 +13,7 @@ export interface TrackData {
   area: Float32Array;
 }
 
-export function toTrackData(record: TrackRecord & { quality?: TrackData['quality'] }): TrackData {
+export function toTrackData(record: TrackRecord): TrackData {
   const count = record.points.length;
   const data: TrackData = {
     id: record.id, index: record.track_index, quality: record.quality ?? 'unrated',

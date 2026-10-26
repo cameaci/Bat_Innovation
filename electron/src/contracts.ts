@@ -156,9 +156,13 @@ export interface Heatmap { segment_id: string; mode: HeatmapMode; width: number;
 export interface CandidateDecisionInput { actor: string; expected_revision: number; decision: 'bat' | 'not_bat' | 'uncertain'; note: string; preview_id: string }
 
 /** points: [source_pts, x, y, area] in original source pixels. */
+export type TrackQuality = 'coherent' | 'uncertain' | 'noise' | 'unrated';
 export interface TrackRecord {
   id: string; segment_id: string; track_index: number; first_pts: string; last_pts: string; point_count: number;
   bbox: [number, number, number, number]; points: [string, number, number, number][];
+  /** tracks-v2 quality class; 'unrated' for tracks of earlier runs. Rules are parameters, not approved thresholds. */
+  quality: TrackQuality;
+  metrics: Record<string, number>;
 }
 
 export interface ClockAnchorInput { segment_id: string; utc: string; provenance: string }

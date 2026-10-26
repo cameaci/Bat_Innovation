@@ -233,10 +233,10 @@ Owner request 2026-10-24 after testing E1-E7 on real footage: the review experie
 
 Quality and size rules are parameters, not approved thresholds (E8).
 
-Phase 2 tracker (separate from the 22/27 above): **1/7**.
+Phase 2 tracker (separate from the 22/27 above): **2/7**.
 
 - [x] W1: playback copy, `bat-media` scheme and Watch with the Bats view.
-- [ ] W2: tracks-v2 engine with scene events and range test mode.
+- [x] W2: tracks-v2 engine with scene events and range test mode.
 - [ ] W3: calibration drawer with test run.
 - [ ] W4: gate validity spans, quality-aware counts, reconfirm and accept.
 - [ ] W5: flight map, split/single panes and survey timeline.
