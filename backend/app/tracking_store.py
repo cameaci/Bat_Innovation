@@ -261,3 +261,43 @@ def events(db_path: Path, run_id: str) -> list[dict]:
             WHERE run_id=? ORDER BY segment.position, CAST(start_pts AS INTEGER)""", (run_id,)).fetchall()
     return [{"id": row["id"], "segment_id": row["segment_id"], "kind": row["kind"], "start_pts": row["start_pts"],
              "end_pts": row["end_pts"], "details": json.loads(row["details_json"])} for row in rows]
+
+
+FLIGHT_BIN_SECONDS = 10
+
+
+def flight_bins(db_path: Path, run_id: str, segment_id: str) -> dict:
+    """Track points per grid cell in 10 s bins from the segment's first frame, so a map can build up with playback.
+
+    Noise tracks are left out. Cells count track points, not individuals; sparse [cell, count] pairs per bin.
+    """
+    import numpy as np
+    from fractions import Fraction
+
+    with closing(store.connect(db_path)) as connection:
+        segment = connection.execute("SELECT metadata_json FROM segment WHERE id=?", (segment_id,)).fetchone()
+        rows = connection.execute("""SELECT points, points_sha256 FROM track WHERE run_id=? AND segment_id=? AND quality != 'noise'""",
+                                  (run_id, segment_id)).fetchall()
+    if segment is None:
+        raise LookupError("segment")
+    metadata = json.loads(segment["metadata_json"])
+    width, height = int(metadata["width"]), int(metadata["height"])
+    columns = HEATMAP_COLUMNS
+    rows_count = max(1, round(columns * height / width))
+    time_base = Fraction(int(metadata["time_base"]["num"]), int(metadata["time_base"]["den"]))
+    ticks = int(Fraction(FLIGHT_BIN_SECONDS) / time_base)
+    first = int(metadata["first_pts"])
+    bins: dict[int, np.ndarray] = {}
+    for row in rows:
+        if tracks.digest(row["points"]) != row["points_sha256"]:
+            raise ValueError("track_integrity")
+        points = tracks.unpack(row["points"])
+        cells = (np.clip((points["y"] / height * rows_count).astype(int), 0, rows_count - 1) * columns +
+                 np.clip((points["x"] / width * columns).astype(int), 0, columns - 1))
+        for index, cell in zip(((points["pts"].astype(np.int64) - first) // ticks).tolist(), cells.tolist()):
+            grid = bins.setdefault(index, np.zeros(columns * rows_count, dtype=np.int64))
+            grid[cell] += 1
+    return {"segment_id": segment_id, "width": width, "height": height, "columns": columns, "rows": rows_count,
+            "bin_seconds": FLIGHT_BIN_SECONDS, "first_pts": str(first),
+            "bins": [{"index": index, "cells": [[int(cell), int(grid[cell])] for cell in np.flatnonzero(grid)]}
+                     for index, grid in sorted(bins.items())]}

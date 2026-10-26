@@ -323,3 +323,23 @@ def test_tracks_v2_upgrade_from_v11_and_rollback(tmp_path: Path) -> None:
         connection.execute("DROP TABLE tracking_event")
     tracking_store.upgrade_v2(db_path)
     assert store.schema_version(db_path) == store.TRACKS_V2_SCHEMA_VERSION
+
+
+def test_flight_map_bins_build_up_with_time_and_leave_out_noise(tmp_path: Path) -> None:
+    target = [(2 + index // 3, 40) for index in range(300)]  # 12 s at 25 fps: two 10 s bins
+    source = tmp_path / "long.mp4"
+    encode_frames(source, [frame([target[i]]) for i in range(300)], [index * 40 for index in range(300)])
+    with TestClient(create_app(Settings(tmp_path / "app-data", TOKEN))) as client:
+        session_id = session(client)
+        assert import_files(client, session_id, [source])["state"] == "complete"
+        summary = client.post("/api/summaries", headers=HEADERS, json={"session_id": session_id, "window_seconds": 30}).json()
+        summary = wait(client, f"/api/summaries/{summary['id']}", ("queued", "running"))
+        run = client.post("/api/tracking", headers=HEADERS, json={"summary_run_id": summary["id"]}).json()
+        run = wait(client, f"/api/tracking/{run['id']}", ("queued", "running"))
+        segment_id = summary["windows"][0]["segment_id"]
+        bins = client.get(f"/api/tracking/{run['id']}/flight-map", headers=HEADERS, params={"segment_id": segment_id}).json()
+        assert bins["bin_seconds"] == 10 and [item["index"] for item in bins["bins"]] == [0, 1]
+        found = client.get(f"/api/tracking/{run['id']}/tracks", headers=HEADERS, params={"segment_id": segment_id, "start_pts": 0}).json()
+        kept = sum(item["point_count"] for item in found if item["quality"] != "noise")
+        assert sum(count for item in bins["bins"] for _, count in item["cells"]) == kept
+        assert bins["bins"][0]["cells"][0][0] < bins["bins"][1]["cells"][-1][0], "The target moved right across the map"

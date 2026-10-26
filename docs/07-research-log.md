@@ -1,5 +1,13 @@
 # 07 - Research log
 
+## 2026-10-26 - Phase 2 W5: three synchronised views, a flowing flight map and the survey timeline
+
+**Owner request:** individual tracking, a red-yellow-green flight map that moves with the video, and the count, all on one screen.
+
+**Implementation:** the Watch player shows three views of the same displayed frame side by side (one decoder; the other panes repaint the presented frame on their own canvas): Bats (rings, numbers, heading arrows, trails), Flight map and Count (gate, IN/OUT/NET board, crossing flashes). V switches to one large view with view chips. The flight map uses 10 s bins of track points per grid cell from the backend (noise tracks left out), summed up to the playhead plus the live points of the current bin, blurred and coloured green to yellow to red on a log scale, labelled "Track points, not individuals"; "Map: whole video" shows all points. A survey timeline lays all videos end to end in proportion to duration: tracks per window, crossings (in down, out up, undecided amber), crossings per minute, camera moves, reviewed windows, hatched gaps where videos are not marked contiguous, and the playhead; clicking seeks across videos.
+
+**Verified:** backend test for bins that build up over time and exclude noise; end-to-end test for the three views, the single-view switch and the timeline. Checked by eye on a synthetic screenshot. **Not verified:** readability on long real surveys and on small laptop screens; rendering cost with many tracks.
+
 ## 2026-10-26 - Phase 2 W4: gate validity spans, quality-aware counts and one-action acceptance
 
 **Problem:** the owner saw 164 crossings to review after one frame-wide change: E3 kept deriving crossings after a scene change and only marked them, against its own design ("the span ends at the change, reconfirm").

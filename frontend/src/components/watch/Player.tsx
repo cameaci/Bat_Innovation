@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import type { MouseEvent } from 'react';
 import type { PlaybackFrames } from '../../../../electron/src/contracts';
 import { containView, type View } from './BatsLayer';
 import { floorIndex } from './tracks';
@@ -18,6 +19,8 @@ export interface PlayerHandle {
 }
 
 export type Draw = (context: CanvasRenderingContext2D, view: View, frame: DisplayedFrame) => void;
+/** One way of looking at the same frame: Bats, Flight map or Count. */
+export interface PlayerView { key: string; label: string; draw: Draw }
 
 /**
  * Continuous playback of one segment's playback copy. Every presented frame is mapped back to its exact source PTS
@@ -28,7 +31,10 @@ export const Player = forwardRef<PlayerHandle, {
   frames: PlaybackFrames;
   sourceWidth: number;
   sourceHeight: number;
-  draw: Draw;
+  /** The first view sits on the video element; in split layout the others repaint the same frame on their own canvas. */
+  views: PlayerView[];
+  layout: 'split' | 'single';
+  active: string;
   onFrame: (frame: DisplayedFrame | null) => void;
   onPlaying: (playing: boolean) => void;
   onEnded: () => void;
@@ -36,12 +42,14 @@ export const Player = forwardRef<PlayerHandle, {
   autoPlay?: boolean;
   /** When set, clicks on the video report the point in source pixels (drawing areas, placing the size reference). */
   onPick?: (point: [number, number]) => void;
-}>(function Player({ frames, sourceWidth, sourceHeight, draw, onFrame, onPlaying, onEnded, startPTS, autoPlay, onPick }, ref) {
+}>(function Player({ frames, sourceWidth, sourceHeight, views, layout, active, onFrame, onPlaying, onEnded, startPTS, autoPlay, onPick }, ref) {
   const video = useRef<HTMLVideoElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
+  const panes = useRef<(HTMLCanvasElement | null)[]>([]);
   const current = useRef<DisplayedFrame | null>(null);
-  const drawRef = useRef(draw);
-  drawRef.current = draw;
+  const shown = layout === 'split' ? views : views.filter(view => view.key === active).slice(0, 1);
+  const viewsRef = useRef(shown);
+  viewsRef.current = shown;
   const onFrameRef = useRef(onFrame);
   onFrameRef.current = onFrame;
   const [failure, setFailure] = useState('');
@@ -55,15 +63,22 @@ export const Player = forwardRef<PlayerHandle, {
   }, [frames]);
 
   function paint() {
-    const target = canvas.current, player = video.current;
-    if (!target || !player) return;
+    const player = video.current;
+    if (!player) return;
     const dpr = window.devicePixelRatio || 1;
-    const width = Math.round(target.clientWidth * dpr), height = Math.round(target.clientHeight * dpr);
-    if (target.width !== width || target.height !== height) { target.width = width; target.height = height; }
-    const context = target.getContext('2d');
-    if (!context) return;
-    context.clearRect(0, 0, width, height);
-    if (current.current) drawRef.current(context, containView(width, height, sourceWidth, sourceHeight, dpr), current.current);
+    viewsRef.current.forEach((view, index) => {
+      const target = index === 0 ? canvas.current : panes.current[index];
+      if (!target) return;
+      const width = Math.round(target.clientWidth * dpr), height = Math.round(target.clientHeight * dpr);
+      if (target.width !== width || target.height !== height) { target.width = width; target.height = height; }
+      const context = target.getContext('2d');
+      if (!context) return;
+      context.clearRect(0, 0, width, height);
+      const box = containView(width, height, sourceWidth, sourceHeight, dpr);
+      // Other panes repaint the frame the video element is presenting, so all views show the same instant.
+      if (index > 0 && current.current) context.drawImage(player, box.dx, box.dy, sourceWidth * box.scale, sourceHeight * box.scale);
+      if (current.current) view.draw(context, box, current.current);
+    });
   }
 
   function publish(frame: DisplayedFrame | null) {
@@ -155,19 +170,27 @@ export const Player = forwardRef<PlayerHandle, {
     // A copy's frame map is immutable; a different copy remounts this component.
   }, [frames]);
 
-  return <div className="relative h-full w-full overflow-hidden rounded-lg bg-black">
-    <video ref={video} src={`bat-media://proxy/${frames.id}`} preload="auto" muted playsInline aria-label="Playback copy"
-      className="absolute inset-0 h-full w-full object-contain" />
-    <canvas ref={canvas} aria-label={onPick ? 'Video drawing area' : undefined} aria-hidden={onPick ? undefined : true}
-      className={`absolute inset-0 h-full w-full ${onPick ? 'cursor-crosshair' : 'pointer-events-none'}`}
-      onClick={event => {
-        const target = canvas.current;
-        if (!onPick || !target) return;
-        const box = target.getBoundingClientRect();
-        const view = containView(box.width, box.height, sourceWidth, sourceHeight, 1);
-        const x = (event.clientX - box.left - view.dx) / view.scale, y = (event.clientY - box.top - view.dy) / view.scale;
-        if (x >= 0 && y >= 0 && x <= sourceWidth && y <= sourceHeight) onPick([Math.round(x * 10) / 10, Math.round(y * 10) / 10]);
-      }} />
-    {failure && <p role="alert" className="absolute inset-x-4 top-4 rounded-md bg-red-600/90 px-3 py-2 text-sm text-white">{failure}</p>}
+  const pick = (event: MouseEvent<HTMLCanvasElement>) => {
+    const target = canvas.current;
+    if (!onPick || !target) return;
+    const box = target.getBoundingClientRect();
+    const view = containView(box.width, box.height, sourceWidth, sourceHeight, 1);
+    const x = (event.clientX - box.left - view.dx) / view.scale, y = (event.clientY - box.top - view.dy) / view.scale;
+    if (x >= 0 && y >= 0 && x <= sourceWidth && y <= sourceHeight) onPick([Math.round(x * 10) / 10, Math.round(y * 10) / 10]);
+  };
+  const label = (text: string) => <span className="pointer-events-none absolute right-2 top-2 rounded bg-slate-950/70 px-2 py-0.5 text-[11px] font-medium text-slate-200">{text}</span>;
+  return <div className={layout === 'split' ? 'grid h-full w-full gap-2 xl:grid-cols-3' : 'h-full w-full'}>
+    <section aria-label={`${shown[0]?.label ?? 'Video'} view`} className="relative aspect-video w-full overflow-hidden rounded-lg bg-black">
+      <video ref={video} src={`bat-media://proxy/${frames.id}`} preload="auto" muted playsInline aria-label="Playback copy"
+        className="absolute inset-0 h-full w-full object-contain" />
+      <canvas ref={canvas} aria-label={onPick ? 'Video drawing area' : undefined} aria-hidden={onPick ? undefined : true}
+        className={`absolute inset-0 h-full w-full ${onPick ? 'cursor-crosshair' : 'pointer-events-none'}`} onClick={pick} />
+      {layout === 'split' && shown[0] && label(shown[0].label)}
+      {failure && <p role="alert" className="absolute inset-x-4 top-4 rounded-md bg-red-600/90 px-3 py-2 text-sm text-white">{failure}</p>}
+    </section>
+    {layout === 'split' && shown.slice(1).map((view, offset) => <section key={view.key} aria-label={`${view.label} view`} className="relative aspect-video w-full overflow-hidden rounded-lg bg-black">
+      <canvas ref={element => { panes.current[offset + 1] = element; }} aria-hidden className="absolute inset-0 h-full w-full" />
+      {label(view.label)}
+    </section>)}
   </div>;
 });

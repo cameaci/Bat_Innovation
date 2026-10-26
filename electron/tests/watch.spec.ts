@@ -31,6 +31,14 @@ test('Watch plays the prepared copy continuously and rings every tracked target 
     const before = await frameLabel.textContent();
     await shell.page.keyboard.press('.');
     await expect(frameLabel).toHaveText(`frame ${Number(before!.slice(6)) + 1}`);
+    // Three synchronised views of the same frame, side by side by default; V switches to one large view.
+    for (const name of ['Bats view', 'Flight map view', 'Count view']) await expect(shell.page.getByRole('region', { name, exact: true })).toBeVisible();
+    await expect(shell.page.getByRole('img', { name: 'Survey timeline', exact: true })).toBeVisible();
+    await shell.page.keyboard.press('v');
+    await expect(shell.page.getByRole('region', { name: 'Flight map view', exact: true })).toHaveCount(0);
+    await shell.page.getByRole('button', { name: 'Flight map', exact: true }).click();
+    await expect(shell.page.getByRole('region', { name: 'Flight map view', exact: true })).toBeVisible();
+    await shell.page.getByRole('button', { name: 'Bats', exact: true }).click();
     await shell.page.getByRole('button', { name: '4x', exact: true }).click();
     expect(await video.evaluate(element => (element as HTMLVideoElement).playbackRate)).toBe(4);
     // At the end of the first video, playback continues with the next one.

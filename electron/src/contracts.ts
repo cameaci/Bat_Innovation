@@ -116,6 +116,12 @@ export interface TrackingTestResult {
 }
 export interface TrackingTest { id: string; state: 'running' | 'complete' | 'failed'; error: string | null; result: TrackingTestResult | null }
 
+/** Track points per grid cell in 10 s bins (sparse [cell, count]); points, not individuals. */
+export interface FlightMap {
+  segment_id: string; width: number; height: number; columns: number; rows: number; bin_seconds: number; first_pts: string;
+  bins: { index: number; cells: [number, number][] }[];
+}
+
 export interface TrackingRun {
   id: string;
   summary_run_id: string;
@@ -510,6 +516,7 @@ export interface BatAPI {
   reconfirmGate(runID: string, gateID: string, input: ReconfirmInput): Promise<ApiResult<GateCounts>>;
   listCandidates(runID: string): Promise<ApiResult<Candidate[]>>;
   getHeatmap(runID: string, segmentID: string, mode: HeatmapMode): Promise<ApiResult<Heatmap>>;
+  getFlightMap(runID: string, segmentID: string): Promise<ApiResult<FlightMap>>;
   listAudio(sessionID: string): Promise<ApiResult<AudioSource[]>>;
   chooseAudio(sessionID: string, sourceMode: AudioSourceMode, channel: number): Promise<ApiResult<AudioSource[] | null>>;
   setAudioAnchor(audioID: string, input: AudioAnchorInput): Promise<ApiResult<AudioSource>>;

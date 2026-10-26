@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw, ScanSearch, SkipBack, SkipForward } from 'lucide-react';
-import type { GateCounts, InvalidSpan, MediaSegment, PlaybackFrames, TrackingSettings, TrackingTest } from '../../../electron/src/contracts';
+import type { GateCounts, InvalidSpan, SceneEvent, MediaSegment, PlaybackFrames, TrackingSettings, TrackingTest } from '../../../electron/src/contracts';
 import { getAPI } from '../api';
 import { activeRun, activeTracking, useSurvey } from '../survey';
 import { clock } from '../lib/time';
@@ -11,8 +11,9 @@ import { Button } from '../components/ui/button';
 import { Dialog } from '../components/ui/dialog';
 import { Progress } from '../components/ui/progress';
 import { SourcePreview } from '../components/SourcePreview';
-import { Player, type DisplayedFrame, type Draw, type PlayerHandle } from '../components/watch/Player';
-import { drawBats } from '../components/watch/BatsLayer';
+import { Player, type DisplayedFrame, type PlayerHandle, type PlayerView } from '../components/watch/Player';
+import { drawFlightMap, gridAt, indexFlightMap, type FlightIndex } from '../components/watch/FlightMap';
+import { drawBats, type View } from '../components/watch/BatsLayer';
 import { CHUNK_MS, useTracks } from '../components/watch/useTracks';
 import { drawDetections, drawSetup } from '../components/watch/SetupLayer';
 import { SetupPanel, type DrawKind } from '../components/watch/SetupPanel';
@@ -21,6 +22,7 @@ import { settingsOf } from '../lib/trackingSettings';
 import { savedReviewer } from '../lib/reviewer';
 import { drawCounts, soFar } from '../components/watch/CountLayer';
 import { CountsPanel } from '../components/watch/CountsPanel';
+import { SurveyTimeline } from '../components/watch/SurveyTimeline';
 import { addPoint, type GateDraft } from '../components/GatePanel';
 
 const SPEEDS = [0.25, 0.5, 1, 2, 4, 8];
@@ -46,6 +48,8 @@ export function WatchPage() {
   const player = useRef<PlayerHandle>(null);
   const tenths = useRef(-1);
   const [panel, setPanel] = useState<'tracks' | 'setup' | 'counts'>('tracks');
+  const [layout, setLayout] = useState<'split' | 'single'>('split');
+  const [viewKey, setViewKey] = useState<'bats' | 'flight' | 'count'>('bats');
   const [actor, setActor] = useState(savedReviewer);
   const [gateID, setGateID] = useState<string | null>(null);
   const [counts, setCounts] = useState<GateCounts | null>(null);
@@ -95,12 +99,31 @@ export function WatchPage() {
   const rate = segment ? ticksPerSecond(segment) : 1;
 
   const testTracks = useMemo(() => test?.result?.tracks.map(toTrackData) ?? null, [test]);
-  const draw = useCallback<Draw>((context, view, frame) => {
+  const [events, setEvents] = useState<SceneEvent[]>([]);
+  useEffect(() => {
+    setEvents([]);
+    if (!trackingRun) return;
+    void getAPI()?.trackingEvents(trackingRun).then(result => { if (result.ok) setEvents(result.value); });
+  }, [trackingRun]);
+  const [flight, setFlight] = useState<FlightIndex | null>(null);
+  const [flightMode, setFlightMode] = useState<'building' | 'whole'>('building');
+  useEffect(() => {
+    setFlight(null);
+    if (!trackingRun || !segment) return;
+    let active = true;
+    void getAPI()?.getFlightMap(trackingRun, segment.id).then(result => {
+      if (active && result.ok) setFlight(indexFlightMap(result.value, ticksPerSecond(segment)));
+      else if (active && !result.ok) setFrameError(result.error.message);
+    });
+    return () => { active = false; };
+  }, [trackingRun, segment?.id]);
+
+  // Overlays that belong to whichever view takes clicks: setup shapes, the size reference and a gate being drawn.
+  const extras = useCallback((context: CanvasRenderingContext2D, view: View) => {
     if (panel === 'setup' && segment) {
       drawSetup(context, view, { area: settings.detection_area, exclusions: settings.exclusions, draft, draftKind: drawing,
         reference: reference ?? [segment.metadata.width / 2, segment.metadata.height / 2], targetPx: settings.target_px });
     }
-    if (counts && segment && (panel === 'counts' || panel === 'tracks')) drawCounts(context, view, counts, order, segment.id, frame.pts, rate);
     if (gateDraft && gateDraft.points.length > 0) {
       context.strokeStyle = '#fde047';
       context.lineWidth = 2 * view.dpr;
@@ -110,12 +133,27 @@ export function WatchPage() {
       context.stroke();
       context.setLineDash([]);
     }
-    if (testTracks && test?.result) {
-      drawDetections(context, view, test.result, frame.pts);
-      setLive(drawBats(context, view, testTracks, frame.pts, rate));
-    } else setLive(drawBats(context, view, tracks, frame.pts, rate));
-  }, [tracks, rate, panel, settings, draft, drawing, reference, testTracks, test, segment, counts, order, gateDraft]);
-  useEffect(() => { player.current?.redraw(); }, [draw]);
+  }, [panel, segment, settings, draft, drawing, reference, gateDraft]);
+
+  const views = useMemo<PlayerView[]>(() => [
+    { key: 'bats', label: 'Bats', draw: (context, view, frame) => {
+      extras(context, view);
+      if (testTracks && test?.result) {
+        drawDetections(context, view, test.result, frame.pts);
+        setLive(drawBats(context, view, testTracks, frame.pts, rate));
+      } else setLive(drawBats(context, view, tracks, frame.pts, rate));
+    } },
+    { key: 'flight', label: 'Flight map', draw: (context, view, frame) => {
+      if (flight) drawFlightMap(context, view, flight, flightMode === 'whole' ? flight.total : gridAt(flight, tracks, frame.pts));
+      extras(context, view);
+    } },
+    { key: 'count', label: 'Count', draw: (context, view, frame) => {
+      drawBats(context, view, tracks, frame.pts, rate);
+      if (counts && segment) drawCounts(context, view, counts, order, segment.id, frame.pts, rate);
+      extras(context, view);
+    } },
+  ], [extras, testTracks, test, tracks, rate, flight, flightMode, counts, segment, order]);
+  useEffect(() => { player.current?.redraw(); }, [views, layout, viewKey]);
 
   const onFrame = useCallback((frame: DisplayedFrame | null) => {
     // The page re-renders ten times a second at most; the canvas redraws on every displayed frame.
@@ -197,6 +235,7 @@ export function WatchPage() {
         ArrowRight: () => handle.seekMs((displayed?.ms ?? 0) + 5000),
       };
       SPEEDS.forEach((_, index) => { actions[String(index + 1)] = () => setSpeed(index); });
+      actions.v = () => setLayout(current => current === 'split' ? 'single' : 'split');
       const action = actions[event.key];
       if (action) { event.preventDefault(); action(); }
     }
@@ -246,11 +285,11 @@ export function WatchPage() {
           : 'This video has no playback copy yet.'}
         <div className="mt-3"><Button onClick={() => void survey.startPlayback()} disabled={survey.busy}><RotateCcw />Prepare playback copies</Button></div>
       </div>}
-      {segment && frames && <div className="grid gap-4 md:grid-cols-[1fr_17rem]">
-        <section aria-label="Bats view" className="space-y-2">
-          <div className="aspect-video max-h-[70vh] w-full">
+      {segment && frames && <div className={cn('grid gap-4', layout === 'single' && 'md:grid-cols-[1fr_17rem]')}>
+        <section aria-label="Player" className="space-y-2">
+          <div className="w-full">
             <Player key={frames.id} ref={player} frames={frames} sourceWidth={segment.metadata.width} sourceHeight={segment.metadata.height}
-              draw={draw} onFrame={onFrame} onPlaying={setPlaying} onEnded={next} autoPlay={autoPlay}
+              views={views} layout={layout} active={viewKey} onFrame={onFrame} onPlaying={setPlaying} onEnded={next} autoPlay={autoPlay}
               startPTS={startAt} onPick={panel === 'setup' || gateDraft ? pick : undefined} />
           </div>
           <div className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm">
@@ -263,18 +302,31 @@ export function WatchPage() {
               {SPEEDS.map((value, index) => <button key={value} type="button" aria-pressed={index === speed} onClick={() => setSpeed(index)}
                 className={cn('rounded px-2 py-0.5 text-xs tabular-nums', index === speed ? 'bg-slate-100 text-slate-900' : 'text-slate-300 hover:bg-slate-800')}>{value}x</button>)}
             </div>
+            <div className="flex items-center gap-1" role="group" aria-label="Views">
+              <button type="button" aria-pressed={layout === 'split'} onClick={() => setLayout(layout === 'split' ? 'single' : 'split')}
+                className={cn('rounded px-2 py-0.5 text-xs', layout === 'split' ? 'bg-red-600 text-white' : 'text-slate-300 hover:bg-slate-800')}>Side by side (V)</button>
+              {layout === 'single' && ([['bats', 'Bats'], ['flight', 'Flight map'], ['count', 'Count']] as const).map(([key, label]) =>
+                <button key={key} type="button" aria-pressed={viewKey === key} onClick={() => setViewKey(key)}
+                  className={cn('rounded px-2 py-0.5 text-xs', viewKey === key ? 'bg-slate-100 text-slate-900' : 'text-slate-300 hover:bg-slate-800')}>{label}</button>)}
+              <button type="button" aria-pressed={flightMode === 'whole'} title="Flight map: build up with playback or show the whole video"
+                onClick={() => setFlightMode(flightMode === 'whole' ? 'building' : 'whole')}
+                className="rounded px-2 py-0.5 text-xs text-slate-300 hover:bg-slate-800">Map: {flightMode === 'whole' ? 'whole video' : 'so far'}</button>
+            </div>
             <span className="ml-auto font-mono tabular-nums" aria-label="Time in video">{elapsed}</span>
             <span className="font-mono text-xs tabular-nums text-slate-400" aria-label="Frame number">frame {displayed ? displayed.index + 1 : '-'}</span>
             <span className="text-xs text-slate-400">video {position + 1}/{segments.length}</span>
             <Button size="sm" variant="outline" className="border-slate-600 bg-transparent text-slate-100" disabled={!displayed}
               onClick={() => { player.current?.pause(); setVerify(displayed ? String(Math.round(displayed.pts)) : null); }}><ScanSearch />Verify original</Button>
           </div>
-          <p className="text-xs text-slate-500">Space play/pause - , . frame step - arrows 5 s - 1-6 speed. Playback copy: lossy VP9 for viewing; Verify opens the exact original frames.</p>
+          <SurveyTimeline segments={segments} windows={survey.run?.windows ?? []} windowCounts={survey.tracking?.window_counts ?? {}}
+            counts={counts} events={events} current={displayed ? { segmentID: segment.id, pts: displayed.pts } : null} onSeek={goTo} />
+          <p className="text-[11px] text-slate-500">Timeline: red bars tracks per window, cyan in, magenta out, amber undecided, violet crossings per minute, x camera moved, green reviewed windows, hatched gaps between videos not marked contiguous.</p>
+          <p className="text-xs text-slate-500">Space play/pause - , . frame step - arrows 5 s - 1-6 speed - V side by side. Playback copy: lossy VP9 for viewing; Verify opens the exact original frames.</p>
         </section>
-        <aside className="space-y-3">
-          <div className="flex gap-1" role="tablist" aria-label="Side panel">
+        <aside className={cn('space-y-3', layout === 'split' && 'grid gap-3 space-y-0 md:grid-cols-2 xl:grid-cols-3')}>
+          <div className={cn('flex gap-1', layout === 'split' && 'md:col-span-2 xl:col-span-3')} role="tablist" aria-label="Side panel">
             {([['tracks', 'Tracks'], ['setup', 'Setup'], ['counts', 'Counts']] as const).map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={panel === key}
-              onClick={() => { setPanel(key); if (key === 'tracks') { setDrawing(null); setDraft([]); } }}
+              onClick={() => { setPanel(key); setViewKey(key === 'counts' ? 'count' : 'bats'); if (key === 'tracks') { setDrawing(null); setDraft([]); } }}
               className={cn('rounded-md px-3 py-1 text-sm', panel === key ? 'bg-slate-100 text-slate-900' : 'text-slate-300 hover:bg-slate-800')}>{label}</button>)}
           </div>
           {panel === 'setup' && <SetupPanel settings={settings} onChange={setSettings} drawing={drawing} draft={draft}

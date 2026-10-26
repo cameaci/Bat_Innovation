@@ -223,6 +223,7 @@ async function open(): Promise<void> {
     if (selected.canceled || selected.filePaths.length === 0) return { ok: true, value: null };
     return backend.addSelectedAudio(id, selected.filePaths, mode, channel);
   });
+  handle('bat:get-flight-map', 2, ([run, segment]) => isUUID(run) && isUUID(segment) ? backend.getFlightMap(run, segment) : invalid());
   handle('bat:get-heatmap', 3, ([run, segment, mode]) => isUUID(run) && isUUID(segment) && isHeatmapMode(mode) ? backend.getHeatmap(run, segment, mode) : invalid());
   handle('bat:list-candidates', 1, ([id]) => isUUID(id) ? backend.listCandidates(id) : invalid());
   handle('bat:decide-candidate', 3, ([run, track, input]) => isUUID(run) && isUUID(track) && isCandidateDecision(input) ? backend.decideCandidate(run, track, input) : invalid('Use a valid candidate decision.'));

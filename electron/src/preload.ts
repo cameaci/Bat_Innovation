@@ -38,6 +38,7 @@ const api: BatAPI = {
   playbackFrames: (...args: [string]) => ipcRenderer.invoke('bat:playback-frames', ...args),
   listCandidates: (...args: [string]) => ipcRenderer.invoke('bat:list-candidates', ...args),
   getHeatmap: (...args: [string, string, HeatmapMode]) => ipcRenderer.invoke('bat:get-heatmap', ...args),
+  getFlightMap: (...args: [string, string]) => ipcRenderer.invoke('bat:get-flight-map', ...args),
   listAudio: (...args: [string]) => ipcRenderer.invoke('bat:list-audio', ...args),
   chooseAudio: (...args: [string, AudioSourceMode, number]) => ipcRenderer.invoke('bat:choose-audio', ...args),
   setAudioAnchor: (...args: [string, AudioAnchorInput]) => ipcRenderer.invoke('bat:set-audio-anchor', ...args),

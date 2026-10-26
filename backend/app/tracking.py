@@ -299,6 +299,16 @@ def install_routes(app: FastAPI, jobs: TrackingJobs, authenticate, previews) -> 
         return candidate_store.decide(jobs.db_path, str(run_id), str(track_id), payload.actor, payload.expected_revision,
                                       payload.decision, payload.note, {**preview, "id": str(payload.preview_id)})
 
+    @app.get("/api/tracking/{run_id}/flight-map", dependencies=[Depends(authenticate)])
+    def flight_map(run_id: UUID, segment_id: UUID) -> dict:
+        jobs.get(str(run_id))
+        try:
+            return tracking_store.flight_bins(jobs.db_path, str(run_id), str(segment_id))
+        except LookupError:
+            raise TrackingError("tracking_missing", 404) from None
+        except ValueError:
+            raise TrackingError("tracking_integrity") from None
+
     @app.get("/api/tracking/{run_id}/heatmap", dependencies=[Depends(authenticate)])
     def heatmap(run_id: UUID, segment_id: UUID, mode: Literal["first", "all", "confirmed"]) -> dict:
         jobs.get(str(run_id))
