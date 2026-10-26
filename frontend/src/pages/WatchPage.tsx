@@ -473,7 +473,7 @@ export function WatchPage() {
           <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
             <p className="text-xs uppercase tracking-wide text-slate-400">Tracked now</p>
             <p className="text-4xl font-bold tabular-nums text-red-400" aria-label="Tracks at this frame">{trackingRun ? live : '-'}</p>
-            <p className="mt-1 text-xs text-slate-400">{trackingRun ? `${tracks.length} tracks loaded around the playhead.` : 'No completed tracking run yet. Run tracking on the Process page.'}</p>
+            <p className="mt-1 text-xs text-slate-400">{trackingRun ? `${tracks.length} tracks loaded around the playhead.` : 'No completed tracking run yet. Set it up and track the survey in the Setup tab.'}</p>
           </div>
         </aside>
       </div>}

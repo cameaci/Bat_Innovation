@@ -70,10 +70,13 @@ export function drawCounts(context: CanvasRenderingContext2D, view: View, counts
     context.fillText('B', mx - lx * 18 * view.dpr, my - ly * 18 * view.dpr);
   }
   if (!valid) {
+    // Centred on the gate, clear of the counter board in the top left corner.
+    const cx = view.dx + points.reduce((sum, point) => sum + point[0], 0) / points.length * view.scale;
+    const cy = view.dy + points.reduce((sum, point) => sum + point[1], 0) / points.length * view.scale;
     context.fillStyle = 'rgba(15, 23, 42, 0.85)';
-    context.fillRect(view.dx + ax * view.scale, view.dy + ay * view.scale, 190 * view.dpr, 20 * view.dpr);
+    context.fillRect(cx - 95 * view.dpr, cy - 10 * view.dpr, 190 * view.dpr, 20 * view.dpr);
     context.fillStyle = '#e2e8f0';
-    context.fillText('Gate paused: reconfirm it', view.dx + ax * view.scale + 6 * view.dpr, view.dy + ay * view.scale + 14 * view.dpr);
+    context.fillText('Gate paused: reconfirm it', cx - 89 * view.dpr, cy + 4 * view.dpr);
   }
   // Counter board.
   const total = soFar(counts, order, segmentID, now);
