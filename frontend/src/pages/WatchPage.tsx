@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw, ScanSearch, SkipBack, SkipForward } from 'lucide-react';
-import type { MediaSegment, PlaybackFrames } from '../../../electron/src/contracts';
+import type { MediaSegment, PlaybackFrames, TrackingSettings, TrackingTest } from '../../../electron/src/contracts';
 import { getAPI } from '../api';
-import { useSurvey } from '../survey';
+import { activeRun, activeTracking, useSurvey } from '../survey';
 import { clock } from '../lib/time';
 import { cn } from '../lib/utils';
 import { Messages } from '../components/layout/Messages';
@@ -14,6 +14,10 @@ import { SourcePreview } from '../components/SourcePreview';
 import { Player, type DisplayedFrame, type Draw, type PlayerHandle } from '../components/watch/Player';
 import { drawBats } from '../components/watch/BatsLayer';
 import { CHUNK_MS, useTracks } from '../components/watch/useTracks';
+import { drawDetections, drawSetup } from '../components/watch/SetupLayer';
+import { SetupPanel, type DrawKind } from '../components/watch/SetupPanel';
+import { floorIndex, toTrackData } from '../components/watch/tracks';
+import { settingsOf } from '../lib/trackingSettings';
 
 const SPEEDS = [0.25, 0.5, 1, 2, 4, 8];
 
@@ -37,6 +41,19 @@ export function WatchPage() {
   const [live, setLive] = useState(0);
   const player = useRef<PlayerHandle>(null);
   const tenths = useRef(-1);
+  const [panel, setPanel] = useState<'tracks' | 'setup'>('tracks');
+  const [settings, setSettings] = useState<TrackingSettings>(() => settingsOf(survey.tracking));
+  const [drawing, setDrawing] = useState<DrawKind>(null);
+  const [draft, setDraft] = useState<[number, number][]>([]);
+  const [reference, setReference] = useState<[number, number] | null>(null);
+  const [test, setTest] = useState<TrackingTest | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testRange, setTestRange] = useState<{ startMs: number; endMs: number } | null>(null);
+  const settingsRun = useRef<string | null>(null);
+  useEffect(() => {
+    // Adopt the latest run's settings once per run, never over the user's unsaved changes to another run's values.
+    if (survey.tracking && settingsRun.current !== survey.tracking.id) { settingsRun.current = survey.tracking.id; setSettings(settingsOf(survey.tracking)); }
+  }, [survey.tracking]);
 
   useEffect(() => {
     setFrames(null); setFrameError(''); setDisplayed(null); tenths.current = -1;
@@ -54,16 +71,66 @@ export function WatchPage() {
   const { tracks, error: trackError } = useTracks(trackingRun, frames, chunk);
   const rate = segment ? ticksPerSecond(segment) : 1;
 
+  const testTracks = useMemo(() => test?.result?.tracks.map(toTrackData) ?? null, [test]);
   const draw = useCallback<Draw>((context, view, frame) => {
-    setLive(drawBats(context, view, tracks, frame.pts, rate));
-  }, [tracks, rate]);
+    if (panel === 'setup' && segment) {
+      drawSetup(context, view, { area: settings.detection_area, exclusions: settings.exclusions, draft, draftKind: drawing,
+        reference: reference ?? [segment.metadata.width / 2, segment.metadata.height / 2], targetPx: settings.target_px });
+    }
+    if (testTracks && test?.result) {
+      drawDetections(context, view, test.result, frame.pts);
+      setLive(drawBats(context, view, testTracks, frame.pts, rate));
+    } else setLive(drawBats(context, view, tracks, frame.pts, rate));
+  }, [tracks, rate, panel, settings, draft, drawing, reference, testTracks, test, segment]);
   useEffect(() => { player.current?.redraw(); }, [draw]);
 
   const onFrame = useCallback((frame: DisplayedFrame | null) => {
     // The page re-renders ten times a second at most; the canvas redraws on every displayed frame.
     const bucket = frame === null ? -1 : Math.floor(frame.ms / 100);
     if (bucket !== tenths.current) { tenths.current = bucket; setDisplayed(frame); }
+    // A tested range loops so the overlay can be judged on the same footage.
+    const range = testRangeRef.current;
+    if (frame && range && frame.ms >= range.endMs) player.current?.seekMs(range.startMs);
   }, []);
+  const testRangeRef = useRef(testRange);
+  testRangeRef.current = testRange;
+
+  async function runTest() {
+    if (!segment || !frames || !displayed) return;
+    const end = Math.min(frames.proxy_ms.length - 1, Math.max(displayed.index + 1, floorIndex(frames.proxy_ms, displayed.ms + 10000)));
+    setTesting(true); setTest(null); setTestRange(null);
+    player.current?.pause();
+    try {
+      const api = getAPI();
+      let result = await api?.startTrackingTest({ segment_id: segment.id, start_pts: frames.source_pts[displayed.index]!, end_pts: frames.source_pts[end]!, settings });
+      while (result?.ok && result.value.state === 'running') {
+        await new Promise(resolve => setTimeout(resolve, 400));
+        result = await api?.trackingTest(result.value.id);
+      }
+      if (!result?.ok) { setFrameError(result?.error.message ?? 'The test run could not be started.'); return; }
+      setTest(result.value);
+      if (result.value.state === 'complete') {
+        setTestRange({ startMs: displayed.ms, endMs: frames.proxy_ms[end]! });
+        player.current?.seekMs(displayed.ms);
+        player.current?.play();
+      }
+    } catch { setFrameError('The test run could not be completed.'); }
+    finally { setTesting(false); }
+  }
+
+  function clearTest() { setTest(null); setTestRange(null); }
+
+  function pick(point: [number, number]) {
+    if (drawing) setDraft(previous => previous.length < 32 ? [...previous, point] : previous);
+    else setReference(point);
+  }
+
+  function finishShape() {
+    if (draft.length < 3 || !drawing) return;
+    const key = drawing === 'area' ? 'detection_area' : 'exclusions';
+    setSettings(previous => ({ ...previous, [key]: [...previous[key], draft] }));
+    setDraft([]); setDrawing(null);
+  }
 
   const next = useCallback(() => {
     if (position + 1 < segments.length) { setAutoPlay(true); setPosition(position + 1); }
@@ -75,6 +142,8 @@ export function WatchPage() {
     function key(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       if (verify || (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (drawing && event.key === 'Enter') { event.preventDefault(); finishShape(); return; }
+      if (drawing && event.key === 'Escape') { event.preventDefault(); setDraft([]); setDrawing(null); return; }
       const handle = player.current;
       if (!handle) return;
       const actions: Record<string, () => void> = {
@@ -90,7 +159,7 @@ export function WatchPage() {
     }
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
-  }, [displayed, verify]);
+  }, [displayed, verify, drawing, draft]);
 
   const elapsed = segment && displayed ? clock(Number(BigInt(Math.round(displayed.pts)) - BigInt(segment.metadata.first_pts)) / rate) : '--';
   const status = useMemo(() => {
@@ -134,11 +203,12 @@ export function WatchPage() {
           : 'This video has no playback copy yet.'}
         <div className="mt-3"><Button onClick={() => void survey.startPlayback()} disabled={survey.busy}><RotateCcw />Prepare playback copies</Button></div>
       </div>}
-      {segment && frames && <div className="grid gap-4 lg:grid-cols-[1fr_18rem]">
+      {segment && frames && <div className="grid gap-4 md:grid-cols-[1fr_17rem]">
         <section aria-label="Bats view" className="space-y-2">
           <div className="aspect-video max-h-[70vh] w-full">
             <Player key={frames.id} ref={player} frames={frames} sourceWidth={segment.metadata.width} sourceHeight={segment.metadata.height}
-              draw={draw} onFrame={onFrame} onPlaying={setPlaying} onEnded={next} autoPlay={autoPlay} />
+              draw={draw} onFrame={onFrame} onPlaying={setPlaying} onEnded={next} autoPlay={autoPlay}
+              onPick={panel === 'setup' ? pick : undefined} />
           </div>
           <div className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm">
             <Button size="sm" variant="ghost" className="text-slate-100" aria-label="Previous video" disabled={position === 0} onClick={() => { setAutoPlay(false); setPosition(position - 1); }}><SkipBack /></Button>
@@ -151,6 +221,7 @@ export function WatchPage() {
                 className={cn('rounded px-2 py-0.5 text-xs tabular-nums', index === speed ? 'bg-slate-100 text-slate-900' : 'text-slate-300 hover:bg-slate-800')}>{value}x</button>)}
             </div>
             <span className="ml-auto font-mono tabular-nums" aria-label="Time in video">{elapsed}</span>
+            <span className="font-mono text-xs tabular-nums text-slate-400" aria-label="Frame number">frame {displayed ? displayed.index + 1 : '-'}</span>
             <span className="text-xs text-slate-400">video {position + 1}/{segments.length}</span>
             <Button size="sm" variant="outline" className="border-slate-600 bg-transparent text-slate-100" disabled={!displayed}
               onClick={() => { player.current?.pause(); setVerify(displayed ? String(Math.round(displayed.pts)) : null); }}><ScanSearch />Verify original</Button>
@@ -158,6 +229,18 @@ export function WatchPage() {
           <p className="text-xs text-slate-500">Space play/pause - , . frame step - arrows 5 s - 1-6 speed. Playback copy: lossy VP9 for viewing; Verify opens the exact original frames.</p>
         </section>
         <aside className="space-y-3">
+          <div className="flex gap-1" role="tablist" aria-label="Side panel">
+            {([['tracks', 'Tracks'], ['setup', 'Setup']] as const).map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={panel === key}
+              onClick={() => { setPanel(key); if (key === 'tracks') { setDrawing(null); setDraft([]); } }}
+              className={cn('rounded-md px-3 py-1 text-sm', panel === key ? 'bg-slate-100 text-slate-900' : 'text-slate-300 hover:bg-slate-800')}>{label}</button>)}
+          </div>
+          {panel === 'setup' && <SetupPanel settings={settings} onChange={setSettings} drawing={drawing} draft={draft}
+            onDraw={kind => { setDrawing(kind); setDraft([]); player.current?.pause(); }} onFinishShape={finishShape} onCancelShape={() => { setDraft([]); setDrawing(null); }}
+            test={test} testing={testing} onTest={() => void runTest()} onClearTest={clearTest}
+            onApply={() => { clearTest(); void survey.startTracking(settings); }}
+            canTest={Boolean(displayed && frames)} canApply={Boolean(survey.run) && !activeRun(survey.run) && !activeTracking(survey.tracking) && !survey.busy}
+            applyReason={activeTracking(survey.tracking) ? 'Tracking is running.' : 'Wait for motion summaries and other processing to finish.'} />}
+          {activeTracking(survey.tracking) && <p role="status" className="rounded-lg border border-slate-800 bg-slate-900 p-3 text-sm">Tracking the whole survey with these settings...</p>}
           <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
             <p className="text-xs uppercase tracking-wide text-slate-400">Tracked now</p>
             <p className="text-4xl font-bold tabular-nums text-red-400" aria-label="Tracks at this frame">{trackingRun ? live : '-'}</p>

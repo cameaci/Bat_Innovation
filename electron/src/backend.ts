@@ -8,7 +8,7 @@ import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia, SummaryRequest, SummaryRun, SummaryDetail, ReviewChange, WindowReview, ReviewHistory } from './contracts';
-import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, PlaybackFrames, PlaybackStatus, TrackingRun, TrackRecord, Gate, GateChange, GateCounts, CountReviewInput, CountQAInput, Candidate, CandidateDecisionInput, Heatmap, HeatmapMode, AudioSource, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, AudioDerived } from './contracts';
+import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, PlaybackFrames, PlaybackStatus, SceneEvent, TrackingRun, TrackingSettings, TrackingTest, TrackingTestInput, TrackRecord, Gate, GateChange, GateCounts, CountReviewInput, CountQAInput, Candidate, CandidateDecisionInput, Heatmap, HeatmapMode, AudioSource, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, AudioDerived } from './contracts';
 
 export const isAudioMode = (value: unknown): value is AudioSourceMode =>
   ['full_spectrum', 'heterodyne', 'frequency_division', 'time_expansion', 'unknown'].includes(String(value));
@@ -27,6 +27,20 @@ export const isHeatmapMode = (value: unknown): value is HeatmapMode => value ===
 const within = (input: Record<string, unknown>, keys: string[]) => Object.keys(input).every(key => keys.includes(key));
 const text = (value: unknown, max: number, required = true) => typeof value === 'string' && value.length <= max && (!required || value.trim().length > 0);
 const count = (value: unknown, max: number) => typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= max;
+const polygonList = (value: unknown, max: number) => Array.isArray(value) && value.length <= max && value.every(polygon =>
+  Array.isArray(polygon) && polygon.length >= 3 && polygon.length <= 32 && polygon.every(point => Array.isArray(point) && point.length === 2 &&
+    point.every(item => typeof item === 'number' && Number.isFinite(item) && item >= 0 && item <= 8192)));
+const between = (value: unknown, low: number, high: number) => typeof value === 'number' && Number.isFinite(value) && value >= low && value <= high;
+export function isTrackingSettings(input: unknown): input is TrackingSettings {
+  return object(input) && exactKeys(input, ['target_px', 'polarity', 'sensitivity', 'activity', 'detection_area', 'exclusions', 'max_gap_s', 'min_track_s', 'join_gap_s', 'min_displacement_targets']) &&
+    between(input.target_px, 3, 80) && ['both', 'light', 'dark'].includes(String(input.polarity)) && between(input.sensitivity, 4, 40) &&
+    ['sparse', 'normal', 'dense'].includes(String(input.activity)) && polygonList(input.detection_area, 4) && polygonList(input.exclusions, 8) &&
+    between(input.max_gap_s, 0.04, 2) && between(input.min_track_s, 0, 5) && between(input.join_gap_s, 0, 5) && between(input.min_displacement_targets, 0, 20);
+}
+export function isTrackingTestInput(input: unknown): input is TrackingTestInput {
+  return object(input) && exactKeys(input, ['segment_id', 'start_pts', 'end_pts', 'settings']) && isUUID(input.segment_id) &&
+    isPTS(input.start_pts) && isPTS(input.end_pts) && isTrackingSettings(input.settings);
+}
 export function isGateChange(input: unknown): input is GateChange {
   if (!object(input) || !exactKeys(input, ['actor', 'expected_revision', 'value']) || !text(input.actor, 120) || !isReviewCursor(input.expected_revision)) return false;
   const value = input.value;
@@ -152,6 +166,8 @@ export function isSaveMedia(input: unknown): input is SaveMedia {
 
 // Only known error codes cross the desktop boundary; arbitrary response text never does.
 const mediaErrors: Record<string, string> = {
+  tracking_settings: 'The tracking settings leave no area to search. Check the detection area and exclusion zones.',
+  tracking_test_missing: 'The test run does not exist or has been replaced by a newer one.',
   proxy_busy: 'Playback copies of another survey are being prepared. Wait for them to finish.',
   proxy_missing: 'The playback copy does not exist or is not ready.',
   proxy_upgrade_required: 'Upgrade storage before preparing playback copies.',
@@ -269,7 +285,7 @@ function mediaFailure(code: unknown) {
 type ApiRoute = '/api/exports' | `/api/exports/${string}` | `/api/exports/${string}/cancel` | '/api/qa/upgrade' | `/api/summary-windows/${string}/qa` | `/api/summary-windows/${string}/qa-actions` | `/api/summary-windows/${string}/qa-history?after_revision=${number}` | '/api/reviews/upgrade' | `/api/summary-windows/${string}/review` | `/api/summary-windows/${string}/review-actions` | `/api/summary-windows/${string}/review-history?after_revision=${number}` | '/api/health' | '/api/sessions' | '/api/media/upgrade' | '/api/media/import' |
   `/api/sessions/${string}/media` | `/api/media/import/${string}` | `/api/media/import/${string}/cancel` |
   '/api/summaries/upgrade' | '/api/summaries' | `/api/summaries/${string}` | `/api/summaries/${string}/cancel` | `/api/sessions/${string}/summary-runs` |
-  '/api/storage/upgrade' | '/api/proxy' | `/api/proxy?session_id=${string}` | '/api/proxy/cancel' | `/api/proxy/${string}/frames` | `/api/sessions/${string}/audio` | `/api/audio/${string}` | `/api/sessions/${string}/gates` | `/api/sessions/${string}/gates/${string}` | '/api/tracking' | `/api/tracking/${string}` | `/api/summaries/${string}/tracking` | '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
+  '/api/storage/upgrade' | '/api/tracking-tests' | `/api/tracking-tests/${string}` | '/api/proxy' | `/api/proxy?session_id=${string}` | '/api/proxy/cancel' | `/api/proxy/${string}/frames` | `/api/sessions/${string}/audio` | `/api/audio/${string}` | `/api/sessions/${string}/gates` | `/api/sessions/${string}/gates/${string}` | '/api/tracking' | `/api/tracking/${string}` | `/api/summaries/${string}/tracking` | '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
 
 /** Read only known, redacted startup codes from the Python process. */
 function safeStartupFailure(output: string): string | undefined {
@@ -353,9 +369,14 @@ export class BackendClient {
   }
   upgradeMedia(): Promise<ApiResult<{ schema_version: 2 | 3 | 4 | 5 }>> { return this.call('/api/media/upgrade', 'POST'); }
   upgradeStorage(): Promise<ApiResult<{ schema_version: number }>> { return this.call('/api/storage/upgrade', 'POST'); }
-  startTracking(summaryRunID: string): Promise<ApiResult<TrackingRun>> {
-    return isUUID(summaryRunID) ? this.call('/api/tracking', 'POST', { summary_run_id: summaryRunID }) : Promise.resolve(invalid());
+  startTracking(summaryRunID: string, settings: TrackingSettings): Promise<ApiResult<TrackingRun>> {
+    return isUUID(summaryRunID) && isTrackingSettings(settings) ? this.call('/api/tracking', 'POST', { summary_run_id: summaryRunID, settings }) : Promise.resolve(invalid());
   }
+  startTrackingTest(input: TrackingTestInput): Promise<ApiResult<TrackingTest>> {
+    return isTrackingTestInput(input) ? this.call('/api/tracking-tests', 'POST', { ...input, start_pts: Number(input.start_pts), end_pts: Number(input.end_pts) }) : Promise.resolve(invalid());
+  }
+  trackingTest(testID: string): Promise<ApiResult<TrackingTest>> { return isUUID(testID) ? this.call(`/api/tracking-tests/${testID}`) : Promise.resolve(invalid()); }
+  trackingEvents(runID: string): Promise<ApiResult<SceneEvent[]>> { return isUUID(runID) ? this.call(`/api/tracking/${runID}/events`) : Promise.resolve(invalid()); }
   trackingRun(runID: string): Promise<ApiResult<TrackingRun>> { return isUUID(runID) ? this.call(`/api/tracking/${runID}`) : Promise.resolve(invalid()); }
   startPlayback(sessionID: string): Promise<ApiResult<PlaybackStatus>> {
     return isUUID(sessionID) ? this.call('/api/proxy', 'POST', { session_id: sessionID }) : Promise.resolve(invalid());
@@ -708,7 +729,10 @@ export class BackendRuntime {
   saveMedia(sessionID: string, input: SaveMedia): Promise<ApiResult<MediaSession>> { return this.ready(client => client.saveMedia(sessionID, input)); }
   importSelectedMedia(sessionID: string, paths: string[], modality: Modality = 'active_ir'): Promise<ApiResult<ImportJob>> { return this.ready(client => client.importSelectedMedia(sessionID, paths, modality)); }
   upgradeStorage(): Promise<ApiResult<{ schema_version: number }>> { return this.ready(client => client.upgradeStorage()); }
-  startTracking(summaryRunID: string): Promise<ApiResult<TrackingRun>> { return this.ready(client => client.startTracking(summaryRunID)); }
+  startTracking(summaryRunID: string, settings: TrackingSettings): Promise<ApiResult<TrackingRun>> { return this.ready(client => client.startTracking(summaryRunID, settings)); }
+  startTrackingTest(input: TrackingTestInput): Promise<ApiResult<TrackingTest>> { return this.ready(client => client.startTrackingTest(input)); }
+  trackingTest(testID: string): Promise<ApiResult<TrackingTest>> { return this.ready(client => client.trackingTest(testID)); }
+  trackingEvents(runID: string): Promise<ApiResult<SceneEvent[]>> { return this.ready(client => client.trackingEvents(runID)); }
   trackingRun(runID: string): Promise<ApiResult<TrackingRun>> { return this.ready(client => client.trackingRun(runID)); }
   startPlayback(sessionID: string): Promise<ApiResult<PlaybackStatus>> { return this.ready(client => client.startPlayback(sessionID)); }
   playbackStatus(sessionID: string): Promise<ApiResult<PlaybackStatus>> { return this.ready(client => client.playbackStatus(sessionID)); }

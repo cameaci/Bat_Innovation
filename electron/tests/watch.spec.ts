@@ -26,14 +26,16 @@ test('Watch plays the prepared copy continuously and rings every tracked target 
     // Seek to the middle of the clip: both synthetic dots are tracked there.
     await video.evaluate(element => { (element as HTMLVideoElement).currentTime = 0.2; });
     await expect(shell.page.getByLabel('Tracks at this frame', { exact: true })).toHaveText('2', { timeout: 15_000 });
-    const before = await shell.page.getByLabel('Time in video', { exact: true }).textContent();
+    const frameLabel = shell.page.getByLabel('Frame number', { exact: true });
+    await expect(frameLabel).toHaveText(/^frame \d+$/);
+    const before = await frameLabel.textContent();
     await shell.page.keyboard.press('.');
-    await expect(shell.page.getByLabel('Time in video', { exact: true })).not.toHaveText(before ?? '');
+    await expect(frameLabel).toHaveText(`frame ${Number(before!.slice(6)) + 1}`);
     await shell.page.getByRole('button', { name: '4x', exact: true }).click();
     expect(await video.evaluate(element => (element as HTMLVideoElement).playbackRate)).toBe(4);
     // At the end of the first video, playback continues with the next one.
     await video.evaluate(element => { const player = element as HTMLVideoElement; player.currentTime = player.duration - 0.05; void player.play(); });
-    await expect(shell.page.getByRole('tab', { selected: true })).toContainText('2. ', { timeout: 15_000 });
+    await expect(shell.page.getByRole('tablist', { name: 'Videos' }).getByRole('tab', { selected: true })).toContainText('2. ', { timeout: 15_000 });
     // The playback scheme serves ready copies by ID only.
     const refused = await shell.page.evaluate(() => new Promise<boolean>(resolve => {
       const probe = document.createElement('video');

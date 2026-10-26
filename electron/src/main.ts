@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import { existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, isGateChange, isCountReviewInput, isCountQAInput, isCandidateDecision, isHeatmapMode, isAudioMode, isAudioAnchor, isAudioDerive, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
+import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, isGateChange, isCountReviewInput, isCountQAInput, isCandidateDecision, isHeatmapMode, isAudioMode, isAudioAnchor, isAudioDerive, isTrackingSettings, isTrackingTestInput, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
 import { ExportSaver } from './export_saver';
 import type { NewSession } from './contracts';
 
@@ -229,7 +229,10 @@ async function open(): Promise<void> {
   handle('bat:playback-status', 1, ([id]) => isUUID(id) ? backend.playbackStatus(id) : invalid('Select a valid survey.'));
   handle('bat:cancel-playback', 1, ([id]) => isUUID(id) ? backend.cancelPlayback(id) : invalid('Select a valid survey.'));
   handle('bat:playback-frames', 1, ([id]) => isUUID(id) ? backend.playbackFrames(id) : invalid('Select a valid playback copy.'));
-  handle('bat:start-tracking', 1, ([id]) => isUUID(id) ? backend.startTracking(id) : invalid('Select a valid summary run ID.'));
+  handle('bat:start-tracking', 2, ([id, settings]) => isUUID(id) && isTrackingSettings(settings) ? backend.startTracking(id, settings) : invalid('Check the tracking settings.'));
+  handle('bat:start-tracking-test', 1, ([input]) => isTrackingTestInput(input) ? backend.startTrackingTest(input) : invalid('Check the tracking settings and test range.'));
+  handle('bat:tracking-test', 1, ([id]) => isUUID(id) ? backend.trackingTest(id) : invalid('Select a valid test run.'));
+  handle('bat:tracking-events', 1, ([id]) => isUUID(id) ? backend.trackingEvents(id) : invalid('Select a valid tracking run ID.'));
   handle('bat:tracking-run', 1, ([id]) => isUUID(id) ? backend.trackingRun(id) : invalid('Select a valid tracking run ID.'));
   handle('bat:list-tracking', 1, ([id]) => isUUID(id) ? backend.listTracking(id) : invalid('Select a valid summary run ID.'));
   handle('bat:cancel-tracking', 1, ([id]) => isUUID(id) ? backend.cancelTracking(id) : invalid('Select a valid tracking run ID.'));

@@ -34,7 +34,9 @@ export const Player = forwardRef<PlayerHandle, {
   onEnded: () => void;
   startPTS?: number | null;
   autoPlay?: boolean;
-}>(function Player({ frames, sourceWidth, sourceHeight, draw, onFrame, onPlaying, onEnded, startPTS, autoPlay }, ref) {
+  /** When set, clicks on the video report the point in source pixels (drawing areas, placing the size reference). */
+  onPick?: (point: [number, number]) => void;
+}>(function Player({ frames, sourceWidth, sourceHeight, draw, onFrame, onPlaying, onEnded, startPTS, autoPlay, onPick }, ref) {
   const video = useRef<HTMLVideoElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const current = useRef<DisplayedFrame | null>(null);
@@ -109,11 +111,19 @@ export const Player = forwardRef<PlayerHandle, {
         publish(null);
         return;
       }
-      if (player.seeking) publish(null);
-      else publish({ index, pts: pts.current[index]!, ms: frames.proxy_ms[index]! });
+      const mapped = { index, pts: pts.current[index]!, ms: frames.proxy_ms[index]! };
+      // A presented frame may precede the seeked event of the same seek; it is shown once the seek completes.
+      if (player.seeking) { pending = mapped; publish(null); } else { pending = null; publish(mapped); }
       callback = player.requestVideoFrameCallback(frame);
     }
+    let pending: DisplayedFrame | null = null;
     const seeking = () => publish(null);
+    const seeked = () => {
+      const position = player.currentTime * 1000;
+      const end = frames.proxy_ms[(pending?.index ?? -2) + 1] ?? frames.duration_ms;
+      if (pending && pending.ms <= position + 0.5001 && position < end) publish(pending);
+      pending = null;
+    };
     const playing = () => onPlaying(true);
     const paused = () => onPlaying(false);
     const ended = () => { onPlaying(false); onEnded(); };
@@ -123,6 +133,7 @@ export const Player = forwardRef<PlayerHandle, {
       if (autoPlay) void player.play().catch(() => undefined);
     };
     player.addEventListener('seeking', seeking);
+    player.addEventListener('seeked', seeked);
     player.addEventListener('play', playing);
     player.addEventListener('pause', paused);
     player.addEventListener('ended', ended);
@@ -134,6 +145,7 @@ export const Player = forwardRef<PlayerHandle, {
       active = false;
       player.cancelVideoFrameCallback(callback);
       player.removeEventListener('seeking', seeking);
+      player.removeEventListener('seeked', seeked);
       player.removeEventListener('play', playing);
       player.removeEventListener('pause', paused);
       player.removeEventListener('ended', ended);
@@ -146,7 +158,16 @@ export const Player = forwardRef<PlayerHandle, {
   return <div className="relative h-full w-full overflow-hidden rounded-lg bg-black">
     <video ref={video} src={`bat-media://proxy/${frames.id}`} preload="auto" muted playsInline aria-label="Playback copy"
       className="absolute inset-0 h-full w-full object-contain" />
-    <canvas ref={canvas} aria-hidden className="pointer-events-none absolute inset-0 h-full w-full" />
+    <canvas ref={canvas} aria-label={onPick ? 'Video drawing area' : undefined} aria-hidden={onPick ? undefined : true}
+      className={`absolute inset-0 h-full w-full ${onPick ? 'cursor-crosshair' : 'pointer-events-none'}`}
+      onClick={event => {
+        const target = canvas.current;
+        if (!onPick || !target) return;
+        const box = target.getBoundingClientRect();
+        const view = containView(box.width, box.height, sourceWidth, sourceHeight, 1);
+        const x = (event.clientX - box.left - view.dx) / view.scale, y = (event.clientY - box.top - view.dy) / view.scale;
+        if (x >= 0 && y >= 0 && x <= sourceWidth && y <= sourceHeight) onPick([Math.round(x * 10) / 10, Math.round(y * 10) / 10]);
+      }} />
     {failure && <p role="alert" className="absolute inset-x-4 top-4 rounded-md bg-red-600/90 px-3 py-2 text-sm text-white">{failure}</p>}
   </div>;
 });

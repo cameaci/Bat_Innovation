@@ -1,5 +1,13 @@
 # 07 - Research log
 
+## 2026-10-26 - Phase 2 W3: tracking setup and a 10 s test on the footage
+
+**Question:** how does a reviewer choose tracking settings that suit their footage before processing a whole survey (the ThruTracker test-clip principle)?
+
+**Implementation:** a Setup tab beside the Watch player: target size with a red reference circle placed by clicking a bat, sensitivity, light/dark polarity, expected activity, drawn search areas and excluded zones (polygons in source pixels), and advanced gap, join and minimum-track values. "Test 10 s from here" runs the contained worker over the displayed range without storing anything and loops it with accepted (green) and size-rejected (grey) detection boxes, rings for the test tracks and a summary of stable, uncertain, noise, size-rejected and joined counts. "Looks good - track whole survey" starts the run with exactly those settings, which are stored and hashed with the run. A frame shown just after a seek is now kept until the seek completes, so stepping never loses the source time.
+
+**Verified:** an end-to-end test draws an excluded zone over one of two synthetic targets, sees one stable track in the test, tracks the survey and finds the stored settings and one ring at the displayed frame. **Not verified:** suitable settings for real camera originals; they need the owner and representative footage.
+
 ## 2026-10-26 - Phase 2 W2: tracks-v2 individual tracking
 
 **Question:** can the tracker follow each bat as one object, without new dependencies, and tell a camera move from a lighting change?

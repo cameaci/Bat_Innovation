@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { ApiResult, BatAPI, Modality, ImportJob, MediaSession, RecordingSession, SaveMedia, SummaryDetail, SummaryRun, TrackingRun, Gate, GateChange, AudioSource, PlaybackStatus } from '../../electron/src/contracts';
+import type { ApiResult, BatAPI, Modality, ImportJob, MediaSession, RecordingSession, SaveMedia, SummaryDetail, SummaryRun, TrackingRun, Gate, GateChange, AudioSource, PlaybackStatus, TrackingSettings } from '../../electron/src/contracts';
 import { getAPI } from './api';
+import { settingsOf } from './lib/trackingSettings';
 
 const unavailable = 'The local backend is unavailable. Retry, or close and reopen the app.';
 export const activeRun = (run: SummaryRun | null | undefined) => run?.state === 'queued' || run?.state === 'running';
@@ -39,7 +40,8 @@ export interface Survey {
   setExportBusy: (busy: boolean) => void;
   /** Latest tracking run of the selected summary run, with per-window track counts. */
   tracking: TrackingRun | null;
-  startTracking: () => Promise<void>;
+  /** Track the selected summary run with these settings (default: those of the latest run). */
+  startTracking: (settings?: TrackingSettings) => Promise<void>;
   cancelTracking: () => Promise<void>;
   /** Counting gates drawn on this survey's scene (all revisions' current state, including retired). */
   gates: Gate[];
@@ -293,10 +295,11 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
     return value;
   }
 
-  async function startTracking() {
+  async function startTracking(settings?: TrackingSettings) {
     if (!runID) return;
     setError(''); setNotice('');
-    const value = await request(api => api.startTracking(runID));
+    const chosen = settings ?? settingsOf(tracking);
+    const value = await request(api => api.startTracking(runID, chosen));
     if (value) { setTracking(value); setTrackingRefresh(current => current + 1); }
   }
 

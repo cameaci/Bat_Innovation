@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { Modality, CandidateDecisionInput, HeatmapMode, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, GateChange, CountReviewInput, CountQAInput, BatAPI, NewSession, PreviewRequest, SaveMedia, SummaryRequest, ReviewChange, QAChange } from './contracts';
+import type { Modality, TrackingSettings, TrackingTestInput, CandidateDecisionInput, HeatmapMode, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, GateChange, CountReviewInput, CountQAInput, BatAPI, NewSession, PreviewRequest, SaveMedia, SummaryRequest, ReviewChange, QAChange } from './contracts';
 
 const api: BatAPI = {
   startExport: (...args: [string]) => ipcRenderer.invoke('bat:start-export', ...args),
@@ -28,7 +28,10 @@ const api: BatAPI = {
   upgradeMedia: (...args: []) => ipcRenderer.invoke('bat:upgrade-media', ...args),
   chooseMedia: (...args: [string, Modality]) => ipcRenderer.invoke('bat:choose-media', ...args),
   upgradeStorage: (...args: []) => ipcRenderer.invoke('bat:upgrade-storage', ...args),
-  startTracking: (...args: [string]) => ipcRenderer.invoke('bat:start-tracking', ...args),
+  startTracking: (...args: [string, TrackingSettings]) => ipcRenderer.invoke('bat:start-tracking', ...args),
+  startTrackingTest: (...args: [TrackingTestInput]) => ipcRenderer.invoke('bat:start-tracking-test', ...args),
+  trackingTest: (...args: [string]) => ipcRenderer.invoke('bat:tracking-test', ...args),
+  trackingEvents: (...args: [string]) => ipcRenderer.invoke('bat:tracking-events', ...args),
   startPlayback: (...args: [string]) => ipcRenderer.invoke('bat:start-playback', ...args),
   playbackStatus: (...args: [string]) => ipcRenderer.invoke('bat:playback-status', ...args),
   cancelPlayback: (...args: [string]) => ipcRenderer.invoke('bat:cancel-playback', ...args),

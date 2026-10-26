@@ -92,6 +92,30 @@ export interface PlaybackFrames {
   proxy_ms: number[];
 }
 
+/** tracks-v2 settings (Phase 2). Defaults are starting values, not validated thresholds. Polygons are in source pixels. */
+export interface TrackingSettings {
+  target_px: number;
+  polarity: 'both' | 'light' | 'dark';
+  sensitivity: number;
+  activity: 'sparse' | 'normal' | 'dense';
+  detection_area: [number, number][][];
+  exclusions: [number, number][][];
+  max_gap_s: number;
+  min_track_s: number;
+  join_gap_s: number;
+  min_displacement_targets: number;
+}
+export interface SceneEvent { id?: string; segment_id?: string; kind: 'camera_moved' | 'lighting_change' | 'glitch'; start_pts: string; end_pts: string; details: Record<string, unknown> }
+export interface TrackingTestInput { segment_id: string; start_pts: string; end_pts: string; settings: TrackingSettings }
+export interface TrackingTestResult {
+  segment_id: string; start_pts: string; end_pts: string;
+  stats: Record<string, unknown> & { detections: number; rejected_size: number; tracks: number; coherent: number; uncertain: number; noise: number; joins: number };
+  detections: { pts: string; accepted: [number, number, number, number][]; rejected: [number, number, number, number, string][] }[];
+  tracks: TrackRecord[];
+  events: SceneEvent[];
+}
+export interface TrackingTest { id: string; state: 'running' | 'complete' | 'failed'; error: string | null; result: TrackingTestResult | null }
+
 export interface TrackingRun {
   id: string;
   summary_run_id: string;
@@ -100,7 +124,8 @@ export interface TrackingRun {
   algorithm_version: string;
   parameter_hash: string;
   parameters: Record<string, unknown>;
-  stats: Record<string, { frames: number; candidates: number; framewide_frames: number; candidate_limit_frames: number; tracks: number }>;
+  /** Per segment: tracks-v1 runs report framewide_frames, tracks-v2 runs disturbed_frames, quality counts and scene events. */
+  stats: Record<string, Record<string, unknown> & { frames: number; tracks: number; framewide_frames?: number; disturbed_frames?: number }>;
   error: string | null;
   started_at_utc: string;
   finished_at_utc: string | null;
@@ -457,7 +482,10 @@ export interface BatAPI {
   upgradeMedia(): Promise<ApiResult<{ schema_version: 2 | 3 | 4 | 5 }>>;
   chooseMedia(sessionID: string, modality: Modality): Promise<ApiResult<ImportJob | null>>;
   upgradeStorage(): Promise<ApiResult<{ schema_version: number }>>;
-  startTracking(summaryRunID: string): Promise<ApiResult<TrackingRun>>;
+  startTracking(summaryRunID: string, settings: TrackingSettings): Promise<ApiResult<TrackingRun>>;
+  startTrackingTest(input: TrackingTestInput): Promise<ApiResult<TrackingTest>>;
+  trackingTest(testID: string): Promise<ApiResult<TrackingTest>>;
+  trackingEvents(runID: string): Promise<ApiResult<SceneEvent[]>>;
   startPlayback(sessionID: string): Promise<ApiResult<PlaybackStatus>>;
   playbackStatus(sessionID: string): Promise<ApiResult<PlaybackStatus>>;
   cancelPlayback(sessionID: string): Promise<ApiResult<PlaybackStatus>>;
