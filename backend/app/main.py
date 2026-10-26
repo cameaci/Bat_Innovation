@@ -178,12 +178,12 @@ def create_app(settings: Settings) -> FastAPI:
     jobs = ImportJobs(db_path, settings.data_dir, activity_lock)
     previews = PreviewJobs(db_path, settings.data_dir, activity_lock)
     summaries = SummaryJobs(db_path, settings.data_dir, activity_lock)
-    reviews = ReviewService(db_path, summaries, previews, activity_lock)
+    proxies = ProxyJobs(db_path, settings.data_dir)
+    reviews = ReviewService(db_path, summaries, previews, activity_lock, proxies)
     qa = QAService(reviews)
     exports = ExportJobs(db_path, settings.data_dir)
     tracking = TrackingJobs(db_path, activity_lock)
     audio = AudioService(db_path, settings.data_dir, activity_lock)
-    proxies = ProxyJobs(db_path, settings.data_dir)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -372,7 +372,7 @@ def create_app(settings: Settings) -> FastAPI:
 
     install_review_routes(app, reviews, authenticate)
     install_qa_routes(app, qa, authenticate)
-    install_tracking_routes(app, tracking, authenticate, previews)
+    install_tracking_routes(app, tracking, authenticate, previews, proxies)
     install_count_routes(app, db_path, authenticate)
     install_audio_routes(app, audio, authenticate)
     install_proxy_routes(app, proxies, authenticate)

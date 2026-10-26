@@ -104,3 +104,47 @@ def test_proxy_upgrade_from_v10_and_rollback(tmp_path: Path) -> None:
         connection.execute("DROP TABLE proxy")
     proxy_store.upgrade(db_path)
     assert store.schema_version(db_path) == store.PROXY_SCHEMA_VERSION
+
+
+def test_watched_windows_are_marked_together_only_when_every_one_qualifies(tmp_path: Path) -> None:
+    from backend.tests.test_tracking import wait
+
+    quiet, busy = tmp_path / "quiet.mp4", tmp_path / "busy.mp4"
+    encode_frames(quiet, scenario("noise"), [index * 40 for index in range(20)])
+    encode_frames(busy, scenario("two_dots"), [index * 40 for index in range(20)])
+    with TestClient(create_app(Settings(tmp_path / "app-data", TOKEN))) as client:
+        session_id = session(client)
+        assert import_files(client, session_id, [quiet, busy])["state"] == "complete"
+        summary = client.post("/api/summaries", headers=HEADERS, json={"session_id": session_id, "window_seconds": 30}).json()
+        summary = wait(client, f"/api/summaries/{summary['id']}", ("queued", "running"))
+        run = client.post("/api/tracking", headers=HEADERS, json={"summary_run_id": summary["id"]}).json()
+        wait(client, f"/api/tracking/{run['id']}", ("queued", "running"))
+        client.post("/api/proxy", headers=HEADERS, json={"session_id": session_id})
+        copies = {item["segment_id"]: item for item in wait_copies(client, session_id)["proxies"]}
+        windows = {window["segment_id"]: window for window in summary["windows"]}
+        quiet_window, busy_window = list(windows.values())
+        def item(window: dict, rate: float = 2, last: bool = True) -> dict:
+            frames = client.get(f"/api/proxy/{copies[window['segment_id']]['id']}/frames", headers=HEADERS).json()
+            end = frames["source_pts"][-1] if last else frames["source_pts"][5]
+            return {"window_id": window["id"], "proxy_id": copies[window["segment_id"]]["id"],
+                    "intervals": [[int(frames["source_pts"][0]), int(end)]], "max_rate": rate}
+        post = lambda items: client.post("/api/reviews/watched", headers=HEADERS, json={"actor": "Reviewer One", "items": items})
+        for bad, reason in (([item(quiet_window, rate=8)], "faster than 4x"), ([item(quiet_window, last=False)], "not watched end to end"),
+                            ([item(quiet_window), item(busy_window)], "have tracks to decide")):
+            refused = post(bad)
+            assert refused.status_code == 409 and reason in refused.json()["detail"]["message"], refused.text
+        assert client.get(f"/api/summary-windows/{quiet_window['id']}/review", headers=HEADERS).json()["decision"] == "unreviewed"
+        saved = post([item(quiet_window)])
+        assert saved.status_code == 200, saved.text
+        review = client.get(f"/api/summary-windows/{quiet_window['id']}/review", headers=HEADERS).json()
+        assert review["decision"] == "reviewed_no_discernible_event" and review["verification"]["playback"]["max_rate"] == 2
+        assert review["verification"]["playback"]["kind"] == "playback_copy"
+        again = post([item(quiet_window)])
+        assert again.status_code == 409 and "already reviewed" in again.json()["detail"]["message"]
+        # A track decision may be proven by watching it in the playback copy.
+        track = client.get(f"/api/tracking/{run['id']}/candidates", headers=HEADERS).json()[0]
+        proof = item(busy_window)
+        decided = client.post(f"/api/tracking/{run['id']}/candidates/{track['track_id']}/decision", headers=HEADERS,
+                              json={"actor": "Reviewer One", "expected_revision": 0, "decision": "bat",
+                                    "playback": {"proxy_id": proof["proxy_id"], "intervals": proof["intervals"], "max_rate": 1}})
+        assert decided.status_code == 200 and decided.json()["decision"]["decision"] == "bat", decided.text

@@ -15,8 +15,6 @@ import { Label, Select } from '../components/ui/input';
 import { Progress } from '../components/ui/progress';
 import { SummaryImage } from '../components/SummaryImage';
 import { WindowDialog } from '../components/WindowDialog';
-import { ActivityTimeline } from '../components/ActivityTimeline';
-import { HeatmapPanel } from '../components/HeatmapPanel';
 import { decisionText } from '../components/ReviewPanel';
 
 const PAGE = 24;
@@ -67,14 +65,7 @@ export function ReviewPage() {
               </Select></div>}
             <Button disabled={!windows.some(isUnreviewed)} onClick={() => setOpen(windows.find(isUnreviewed)?.id ?? null)}><Eye />Start reviewing</Button>
           </div>
-          {survey.media && <details className="rounded-lg border bg-white p-3" open>
-            <summary className="cursor-pointer text-sm font-semibold">Activity timeline</summary>
-            <div className="mt-2"><ActivityTimeline segments={survey.media.segments} windows={windows} trackCounts={survey.tracking?.summary_run_id === run.id ? survey.tracking.window_counts : undefined} onOpen={setOpen} /></div>
-          </details>}
-          {survey.media && survey.tracking?.state === 'complete' && survey.tracking.summary_run_id === run.id && <details className="rounded-lg border bg-white p-3">
-            <summary className="cursor-pointer text-sm font-semibold">Heatmap of candidate tracks</summary>
-            <div className="mt-2"><HeatmapPanel runID={survey.tracking.id} segments={survey.media.segments} gates={survey.gates} /></div>
-          </details>}
+          <p className="text-sm text-muted-foreground">Faster: <Link to={`/surveys/${survey.session.id}/watch`} className="font-medium text-primary hover:underline">watch the survey continuously</Link> with tracks, flight map and counts, and mark watched quiet windows together.</p>
           {activeRun(run) && <p className="text-xs text-muted-foreground">Processing is still running. Windows can be opened, and review unlocks when it finishes.</p>}
           <div role="toolbar" aria-label="Window filter" className="flex flex-wrap gap-1.5">
             {filters.map(item => {

@@ -4,7 +4,6 @@ import { SurveysPage } from './pages/SurveysPage';
 import { ProcessPage } from './pages/ProcessPage';
 import { ReviewPage } from './pages/ReviewPage';
 import { ExportPage } from './pages/ExportPage';
-import { EventsPage } from './pages/EventsPage';
 import { WatchPage } from './pages/WatchPage';
 
 // HashRouter: the desktop shell serves only app://bat/index.html, so routes live in the fragment.
@@ -17,7 +16,7 @@ export function App() {
         <Route path="process" element={<ProcessPage />} />
         <Route path="watch" element={<WatchPage />} />
         <Route path="review" element={<ReviewPage />} />
-        <Route path="events" element={<EventsPage />} />
+        <Route path="events" element={<Navigate to="../watch" replace />} />
         <Route path="counts" element={<Navigate to="../watch" replace />} />
         <Route path="export" element={<ExportPage />} />
       </Route>

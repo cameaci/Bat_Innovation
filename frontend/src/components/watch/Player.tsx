@@ -141,7 +141,13 @@ export const Player = forwardRef<PlayerHandle, {
     };
     const playing = () => onPlaying(true);
     const paused = () => onPlaying(false);
-    const ended = () => { onPlaying(false); onEnded(); };
+    const ended = () => {
+      // At the end the element keeps showing the last frame, which a frame callback may not report.
+      const last = frames.proxy_ms.length - 1;
+      if (last >= 0 && current.current?.index !== last) publish({ index: last, pts: pts.current[last]!, ms: frames.proxy_ms[last]! });
+      onPlaying(false);
+      onEnded();
+    };
     const loaded = () => {
       if (startPTS !== undefined && startPTS !== null) seekIndex(Math.max(0, floorIndex(pts.current, startPTS)));
       else seekIndex(0);

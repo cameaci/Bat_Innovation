@@ -222,47 +222,6 @@ def tracks_between(db_path: Path, run_id: str, segment_id: str, start_pts: int, 
 HEATMAP_COLUMNS = 64
 
 
-def heatmap(db_path: Path, run_id: str, segment_id: str, mode: str, confirmed: set[str]) -> dict:
-    """Counts of track points per grid cell in source coordinates. Points are not individuals."""
-    import numpy as np
-
-    with closing(store.connect(db_path)) as connection:
-        segment = connection.execute("SELECT metadata_json FROM segment WHERE id=?", (segment_id,)).fetchone()
-        rows = connection.execute("""SELECT id, points, points_sha256 FROM track WHERE run_id=? AND segment_id=?
-            AND quality != 'noise'""", (run_id, segment_id)).fetchall()
-    if segment is None:
-        raise LookupError("segment")
-    metadata = json.loads(segment["metadata_json"])
-    width, height = int(metadata["width"]), int(metadata["height"])
-    columns = HEATMAP_COLUMNS
-    rows_count = max(1, round(columns * height / width))
-    grid = np.zeros((rows_count, columns), dtype=np.int64)
-    included = 0
-    for row in rows:
-        if mode == "confirmed" and row["id"] not in confirmed:
-            continue
-        if tracks.digest(row["points"]) != row["points_sha256"]:
-            raise ValueError("track_integrity")
-        points = tracks.unpack(row["points"])
-        if mode == "first":
-            points = points[:1]
-        xs = np.clip((points["x"] / width * columns).astype(int), 0, columns - 1)
-        ys = np.clip((points["y"] / height * rows_count).astype(int), 0, rows_count - 1)
-        np.add.at(grid, (ys, xs), 1)
-        included += 1
-    return {"segment_id": segment_id, "mode": mode, "width": width, "height": height, "columns": columns, "rows": rows_count,
-            "cells": grid.flatten().tolist(), "points": int(grid.sum()), "tracks": included}
-
-
-def events(db_path: Path, run_id: str) -> list[dict]:
-    """Classified scene disturbances of a run, in segment and time order."""
-    with closing(store.connect(db_path)) as connection:
-        rows = connection.execute("""SELECT tracking_event.* FROM tracking_event JOIN segment ON segment.id = tracking_event.segment_id
-            WHERE run_id=? ORDER BY segment.position, CAST(start_pts AS INTEGER)""", (run_id,)).fetchall()
-    return [{"id": row["id"], "segment_id": row["segment_id"], "kind": row["kind"], "start_pts": row["start_pts"],
-             "end_pts": row["end_pts"], "details": json.loads(row["details_json"])} for row in rows]
-
-
 FLIGHT_BIN_SECONDS = 10
 
 
@@ -301,3 +260,12 @@ def flight_bins(db_path: Path, run_id: str, segment_id: str) -> dict:
             "bin_seconds": FLIGHT_BIN_SECONDS, "first_pts": str(first),
             "bins": [{"index": index, "cells": [[int(cell), int(grid[cell])] for cell in np.flatnonzero(grid)]}
                      for index, grid in sorted(bins.items())]}
+
+
+def events(db_path: Path, run_id: str) -> list[dict]:
+    """Classified scene disturbances of a run, in segment and time order."""
+    with closing(store.connect(db_path)) as connection:
+        rows = connection.execute("""SELECT tracking_event.* FROM tracking_event JOIN segment ON segment.id = tracking_event.segment_id
+            WHERE run_id=? ORDER BY segment.position, CAST(start_pts AS INTEGER)""", (run_id,)).fetchall()
+    return [{"id": row["id"], "segment_id": row["segment_id"], "kind": row["kind"], "start_pts": row["start_pts"],
+             "end_pts": row["end_pts"], "details": json.loads(row["details_json"])} for row in rows]

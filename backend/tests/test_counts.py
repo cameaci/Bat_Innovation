@@ -317,19 +317,3 @@ def test_highlight_clip_lengths_are_bounded(tmp_path: Path) -> None:
         segment = client.get(f"/api/sessions/{session_id}/media", headers=HEADERS).json()["segments"][0]
         refused = client.post("/api/media/preview", headers=HEADERS, json={"segment_id": segment["id"], "source_pts": segment["metadata"]["first_pts"], "clip_seconds": 30})
         assert refused.status_code == 422
-
-
-def test_heatmap_modes_count_points_not_individuals(tmp_path: Path) -> None:
-    with TestClient(create_app(Settings(tmp_path / "app-data", TOKEN))) as client:
-        _session_id, run_id, summary = tracked(client, tmp_path, scenario("two_dots"))
-        segment_id = summary["windows"][0]["segment_id"]
-        url = f"/api/tracking/{run_id}/heatmap"
-        first = client.get(url, headers=HEADERS, params={"segment_id": segment_id, "mode": "first"}).json()
-        every = client.get(url, headers=HEADERS, params={"segment_id": segment_id, "mode": "all"}).json()
-        confirmed = client.get(url, headers=HEADERS, params={"segment_id": segment_id, "mode": "confirmed"}).json()
-        assert first["points"] == 2 and first["tracks"] == 2 and sum(first["cells"]) == 2
-        assert every["points"] == sum(item["point_count"] for item in client.get(f"/api/tracking/{run_id}/candidates", headers=HEADERS).json())
-        assert confirmed["points"] == 0 and confirmed["tracks"] == 0, "Nothing is confirmed until a person decides 'bat'"
-        assert len(first["cells"]) == first["columns"] * first["rows"] and first["rows"] == 48
-        bad = client.get(url, headers=HEADERS, params={"segment_id": segment_id, "mode": "density"})
-        assert bad.status_code == 422

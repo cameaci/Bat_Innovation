@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw, ScanSearch, SkipBack, SkipForward } from 'lucide-react';
-import type { GateCounts, InvalidSpan, SceneEvent, MediaSegment, PlaybackFrames, TrackingSettings, TrackingTest } from '../../../electron/src/contracts';
+import type { Candidate, GateCounts, InvalidSpan, SceneEvent, MediaSegment, PlaybackFrames, TrackingSettings, TrackingTest } from '../../../electron/src/contracts';
 import { getAPI } from '../api';
 import { activeRun, activeTracking, useSurvey } from '../survey';
 import { clock } from '../lib/time';
@@ -23,6 +23,8 @@ import { savedReviewer } from '../lib/reviewer';
 import { drawCounts, soFar } from '../components/watch/CountLayer';
 import { CountsPanel } from '../components/watch/CountsPanel';
 import { SurveyTimeline } from '../components/watch/SurveyTimeline';
+import { useCoverage, WATCH_MAX_RATE } from '../components/watch/useCoverage';
+import { WatchReviewPanel, windowStates } from '../components/watch/WatchReviewPanel';
 import { addPoint, type GateDraft } from '../components/GatePanel';
 
 const SPEEDS = [0.25, 0.5, 1, 2, 4, 8];
@@ -47,7 +49,14 @@ export function WatchPage() {
   const [live, setLive] = useState(0);
   const player = useRef<PlayerHandle>(null);
   const tenths = useRef(-1);
-  const [panel, setPanel] = useState<'tracks' | 'setup' | 'counts'>('tracks');
+  const [panel, setPanel] = useState<'tracks' | 'setup' | 'counts' | 'review'>('tracks');
+  const coverage = useCoverage();
+  const [smart, setSmart] = useState(false);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [reel, setReel] = useState<number | null>(null);
+  const [marking, setMarking] = useState(false);
+  const playingRef = useRef(false);
+  const rateRef = useRef(1);
   const [layout, setLayout] = useState<'split' | 'single'>('split');
   const [viewKey, setViewKey] = useState<'bats' | 'flight' | 'count'>('bats');
   const [actor, setActor] = useState(savedReviewer);
@@ -118,6 +127,24 @@ export function WatchPage() {
     return () => { active = false; };
   }, [trackingRun, segment?.id]);
 
+  // The reel: undecided uncertain crossings of the chosen gate, then undecided uncertain tracks, in survey order.
+  type ReelItem = { kind: 'crossing' | 'track'; id: string; segmentID: string; start: number; end: number; trackID: string; label: string; revision: number };
+  const reelItems = useMemo<ReelItem[]>(() => {
+    const items: ReelItem[] = [];
+    for (const crossing of counts?.crossings ?? []) {
+      if (crossing.quality !== 'uncertain' || crossing.review) continue;
+      items.push({ kind: 'crossing', id: crossing.key, segmentID: crossing.segment_id, start: Number(crossing.pts), end: Number(crossing.pts), trackID: crossing.track_id,
+        label: `track #${crossing.track_index + 1} crossing the gate`, revision: 0 });
+    }
+    const crossed = new Set(items.map(item => item.trackID));
+    for (const candidate of candidates) {
+      if (candidate.quality !== 'uncertain' || candidate.decision || crossed.has(candidate.track_id)) continue;
+      items.push({ kind: 'track', id: candidate.track_id, segmentID: candidate.segment_id, start: Number(candidate.first_pts), end: Number(candidate.last_pts),
+        trackID: candidate.track_id, label: `uncertain track #${candidate.track_index + 1}`, revision: candidate.revision });
+    }
+    return items.sort((a, b) => (order.get(a.segmentID)! - order.get(b.segmentID)!) || a.start - b.start);
+  }, [counts, candidates, order]);
+  const reelItem = reel !== null ? reelItems[Math.min(reel, reelItems.length - 1)] ?? null : null;
   // Overlays that belong to whichever view takes clicks: setup shapes, the size reference and a gate being drawn.
   const extras = useCallback((context: CanvasRenderingContext2D, view: View) => {
     if (panel === 'setup' && segment) {
@@ -141,7 +168,7 @@ export function WatchPage() {
       if (testTracks && test?.result) {
         drawDetections(context, view, test.result, frame.pts);
         setLive(drawBats(context, view, testTracks, frame.pts, rate));
-      } else setLive(drawBats(context, view, tracks, frame.pts, rate));
+      } else setLive(drawBats(context, view, tracks, frame.pts, rate, { highlight: reelItem?.trackID ?? null }));
     } },
     { key: 'flight', label: 'Flight map', draw: (context, view, frame) => {
       if (flight) drawFlightMap(context, view, flight, flightMode === 'whole' ? flight.total : gridAt(flight, tracks, frame.pts));
@@ -152,19 +179,105 @@ export function WatchPage() {
       if (counts && segment) drawCounts(context, view, counts, order, segment.id, frame.pts, rate);
       extras(context, view);
     } },
-  ], [extras, testTracks, test, tracks, rate, flight, flightMode, counts, segment, order]);
+  ], [extras, testTracks, test, tracks, rate, flight, flightMode, counts, segment, order, reelItem]);
   useEffect(() => { player.current?.redraw(); }, [views, layout, viewKey]);
 
+  const loadCandidates = useCallback(async () => {
+    if (!trackingRun) { setCandidates([]); return; }
+    const result = await getAPI()?.listCandidates(trackingRun);
+    if (result?.ok) setCandidates(result.value);
+  }, [trackingRun]);
+  useEffect(() => { void loadCandidates(); }, [loadCandidates]);
+
+  const frameState = useRef({ segment, copy, tracks, counts, smart, speed, reelItem });
+  frameState.current = { segment, copy, tracks, counts, smart, speed, reelItem };
   const onFrame = useCallback((frame: DisplayedFrame | null) => {
     // The page re-renders ten times a second at most; the canvas redraws on every displayed frame.
     const bucket = frame === null ? -1 : Math.floor(frame.ms / 100);
     if (bucket !== tenths.current) { tenths.current = bucket; setDisplayed(frame); }
+    const state = frameState.current;
+    if (state.segment && state.copy) coverage.record(state.segment.id, state.copy.id, frame, playingRef.current, rateRef.current);
+    if (!frame || !state.segment) return;
     // A tested range loops so the overlay can be judged on the same footage.
     const range = testRangeRef.current;
-    if (frame && range && frame.ms >= range.endMs) player.current?.seekMs(range.startMs);
-  }, []);
+    if (range && frame.ms >= range.endMs) player.current?.seekMs(range.startMs);
+    const second = ticksPerSecond(state.segment);
+    // The reel loops its event from one second before to one and a half seconds after.
+    const item = state.reelItem;
+    if (item && item.segmentID === state.segment.id && frame.pts > item.end + 1.5 * second) player.current?.seekPTS(Math.max(0, item.start - second));
+    // Smart speed: normal speed near any tracked target or crossing, the chosen speed elsewhere.
+    if (state.smart && !item) {
+      const near = state.tracks.some(track => track.quality !== 'noise' && frame.pts >= track.first - second && frame.pts <= track.last + second) ||
+        (state.counts?.crossings ?? []).some(crossing => crossing.segment_id === state.segment!.id && Math.abs(Number(crossing.pts) - frame.pts) <= second);
+      const wanted = near ? 1 : SPEEDS[state.speed]!;
+      if (wanted !== rateRef.current) { rateRef.current = wanted; player.current?.setRate(wanted); }
+    }
+  }, [coverage.record]);
   const testRangeRef = useRef(testRange);
   testRangeRef.current = testRange;
+
+  function playReel(index: number) {
+    if (!reelItems[index]) { setReel(null); return; }
+    setSpeed(2);
+    rateRef.current = 1;
+    player.current?.setRate(1);
+    setReel(index);
+  }
+
+  async function decideReel(decision: 'bat' | 'not_bat' | 'opposite') {
+    const item = reelItem;
+    const api = getAPI();
+    if (!item || !api || !trackingRun) return;
+    if (!actor.trim()) { setFrameError('Enter your name or initials in the Counts tab first.'); return; }
+    if (item.kind === 'crossing') {
+      if (!counts) return;
+      const result = await api.saveCountReview(trackingRun, counts.gate.id, { actor: actor.trim(), expected_revision: counts.revision,
+        action: decision === 'not_bat' ? 'reject' : 'confirm', key: item.id, flipped: decision === 'opposite', count: 1, direction: null,
+        segment_id: null, pts: null, rationale: '' });
+      if (!result.ok) { setFrameError(result.error.message); return; }
+      setCounts(result.value);
+    } else {
+      if (decision === 'opposite') return;
+      const watched = coverage.spans(item.segmentID);
+      const intervals = (watched?.spans ?? []).filter(span => span.start <= item.end && span.end >= item.start)
+        .map(span => [String(Math.round(span.start)), String(Math.round(span.end))] as [string, string]);
+      if (!watched || intervals.length === 0) { setFrameError('Let the event play before deciding.'); return; }
+      const result = await api.decideCandidate(trackingRun, item.trackID, { actor: actor.trim(), expected_revision: item.revision, decision, note: '',
+        preview_id: null, playback: { proxy_id: watched.proxyID, intervals, max_rate: Math.max(...watched.spans.map(span => span.maxRate)) } });
+      if (!result.ok) { setFrameError(result.error.message); return; }
+      await loadCandidates();
+    }
+    // The decided item leaves the queue, so the same index now points at the next one (see the effect below).
+    setFrameError('');
+  }
+
+  useEffect(() => {
+    // Start or continue playback of the reel item under the index after each decision.
+    if (reel === null) return;
+    if (reelItems.length === 0) { setReel(null); player.current?.pause(); return; }
+    const item = reelItems[Math.min(reel, reelItems.length - 1)]!;
+    goTo(item.segmentID, String(item.start), true);
+  }, [reel, reelItems.length]);
+
+  const windowList = useMemo(() => windowStates(survey.run?.windows ?? [], survey.tracking?.window_counts ?? {}, coverage.covers),
+    [survey.run, survey.tracking, coverage.covers, coverage.version]);
+  async function markWatched() {
+    const api = getAPI();
+    if (!api || !actor.trim()) return;
+    const items = windowList.filter(item => !item.reviewed && item.tracks === 0 && item.watched).flatMap(item => {
+      const watched = coverage.spans(item.window.segment_id);
+      const first = Number(item.window.stats.first_pts), last = Number(item.window.stats.last_pts);
+      const span = watched?.spans.find(value => value.start <= first && value.end >= last);
+      return watched && span ? [{ window_id: item.window.id, proxy_id: watched.proxyID, max_rate: span.maxRate,
+        intervals: [[String(Math.round(span.start)), String(Math.round(span.end))] as [string, string]] }] : [];
+    });
+    if (items.length === 0) return;
+    setMarking(true);
+    const result = await api.markWatched({ actor: actor.trim(), items });
+    setMarking(false);
+    if (!result.ok) { setFrameError(result.error.message); return; }
+    survey.reloadRun();
+  }
 
   async function runTest() {
     if (!segment || !frames || !displayed) return;
@@ -190,12 +303,15 @@ export function WatchPage() {
   }
 
   /** Show a moment of the survey from one second before it, opening another video when needed. */
-  function goTo(segmentID: string, pts: string) {
+  function goTo(segmentID: string, pts: string, play = false) {
     const index = segments.findIndex(item => item.id === segmentID);
     if (index < 0) return;
     const target = Math.max(Number(segments[index]!.metadata.first_pts), Number(pts) - ticksPerSecond(segments[index]!));
-    if (index === position) { player.current?.pause(); player.current?.seekPTS(target); }
-    else { setAutoPlay(false); setStartAt(target); setPosition(index); }
+    if (index === position) {
+      player.current?.pause();
+      player.current?.seekPTS(target);
+      if (play) player.current?.play();
+    } else { setAutoPlay(play); setStartAt(target); setPosition(index); }
   }
 
   function clearTest() { setTest(null); setTestRange(null); }
@@ -214,10 +330,11 @@ export function WatchPage() {
   }
 
   const next = useCallback(() => {
+    if (reel !== null) return;
     if (position + 1 < segments.length) { setAutoPlay(true); setPosition(position + 1); }
-  }, [position, segments.length]);
+  }, [position, segments.length, reel]);
 
-  useEffect(() => { player.current?.setRate(SPEEDS[speed]!); }, [speed, frames]);
+  useEffect(() => { rateRef.current = SPEEDS[speed]!; player.current?.setRate(SPEEDS[speed]!); }, [speed, frames]);
 
   useEffect(() => {
     function key(event: KeyboardEvent) {
@@ -225,6 +342,12 @@ export function WatchPage() {
       if (verify || (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) || event.ctrlKey || event.metaKey || event.altKey) return;
       if (drawing && event.key === 'Enter') { event.preventDefault(); finishShape(); return; }
       if (drawing && event.key === 'Escape') { event.preventDefault(); setDraft([]); setDrawing(null); return; }
+      if (reel !== null) {
+        const reelKeys: Record<string, () => void> = { b: () => void decideReel('bat'), n: () => void decideReel('not_bat'), d: () => void decideReel('opposite'),
+          u: () => setReel(current => current === null ? null : current + 1 < reelItems.length ? current + 1 : null), Escape: () => { setReel(null); player.current?.pause(); } };
+        const reelAction = reelKeys[event.key];
+        if (reelAction) { event.preventDefault(); reelAction(); return; }
+      }
       const handle = player.current;
       if (!handle) return;
       const actions: Record<string, () => void> = {
@@ -236,12 +359,13 @@ export function WatchPage() {
       };
       SPEEDS.forEach((_, index) => { actions[String(index + 1)] = () => setSpeed(index); });
       actions.v = () => setLayout(current => current === 'split' ? 'single' : 'split');
+      actions.m = () => void markWatched();
       const action = actions[event.key];
       if (action) { event.preventDefault(); action(); }
     }
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
-  }, [displayed, verify, drawing, draft]);
+  }, [displayed, verify, drawing, draft, reel, reelItems, actor, counts, windowList]);
 
   const elapsed = segment && displayed ? clock(Number(BigInt(Math.round(displayed.pts)) - BigInt(segment.metadata.first_pts)) / rate) : '--';
   const status = useMemo(() => {
@@ -289,7 +413,7 @@ export function WatchPage() {
         <section aria-label="Player" className="space-y-2">
           <div className="w-full">
             <Player key={frames.id} ref={player} frames={frames} sourceWidth={segment.metadata.width} sourceHeight={segment.metadata.height}
-              views={views} layout={layout} active={viewKey} onFrame={onFrame} onPlaying={setPlaying} onEnded={next} autoPlay={autoPlay}
+              views={views} layout={layout} active={viewKey} onFrame={onFrame} onPlaying={value => { playingRef.current = value; setPlaying(value); if (!value) coverage.flush(); }} onEnded={next} autoPlay={autoPlay}
               startPTS={startAt} onPick={panel === 'setup' || gateDraft ? pick : undefined} />
           </div>
           <div className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm">
@@ -308,6 +432,9 @@ export function WatchPage() {
               {layout === 'single' && ([['bats', 'Bats'], ['flight', 'Flight map'], ['count', 'Count']] as const).map(([key, label]) =>
                 <button key={key} type="button" aria-pressed={viewKey === key} onClick={() => setViewKey(key)}
                   className={cn('rounded px-2 py-0.5 text-xs', viewKey === key ? 'bg-slate-100 text-slate-900' : 'text-slate-300 hover:bg-slate-800')}>{label}</button>)}
+              <button type="button" aria-pressed={smart} title={`Normal speed near tracks and crossings, the chosen speed elsewhere. Only ${WATCH_MAX_RATE}x or slower counts as watched.`}
+                onClick={() => { setSmart(!smart); rateRef.current = SPEEDS[speed]!; player.current?.setRate(SPEEDS[speed]!); }}
+                className={cn('rounded px-2 py-0.5 text-xs', smart ? 'bg-amber-500 text-slate-950' : 'text-slate-300 hover:bg-slate-800')}>Smart speed</button>
               <button type="button" aria-pressed={flightMode === 'whole'} title="Flight map: build up with playback or show the whole video"
                 onClick={() => setFlightMode(flightMode === 'whole' ? 'building' : 'whole')}
                 className="rounded px-2 py-0.5 text-xs text-slate-300 hover:bg-slate-800">Map: {flightMode === 'whole' ? 'whole video' : 'so far'}</button>
@@ -325,7 +452,7 @@ export function WatchPage() {
         </section>
         <aside className={cn('space-y-3', layout === 'split' && 'grid gap-3 space-y-0 md:grid-cols-2 xl:grid-cols-3')}>
           <div className={cn('flex gap-1', layout === 'split' && 'md:col-span-2 xl:col-span-3')} role="tablist" aria-label="Side panel">
-            {([['tracks', 'Tracks'], ['setup', 'Setup'], ['counts', 'Counts']] as const).map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={panel === key}
+            {([['tracks', 'Tracks'], ['setup', 'Setup'], ['counts', 'Counts'], ['review', 'Review']] as const).map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={panel === key}
               onClick={() => { setPanel(key); setViewKey(key === 'counts' ? 'count' : 'bats'); if (key === 'tracks') { setDrawing(null); setDraft([]); } }}
               className={cn('rounded-md px-3 py-1 text-sm', panel === key ? 'bg-slate-100 text-slate-900' : 'text-slate-300 hover:bg-slate-800')}>{label}</button>)}
           </div>
@@ -335,6 +462,9 @@ export function WatchPage() {
             onApply={() => { clearTest(); void survey.startTracking(settings); }}
             canTest={Boolean(displayed && frames)} canApply={Boolean(survey.run) && !activeRun(survey.run) && !activeTracking(survey.tracking) && !survey.busy}
             applyReason={activeTracking(survey.tracking) ? 'Tracking is running.' : 'Wait for motion summaries and other processing to finish.'} />}
+          {panel === 'review' && <WatchReviewPanel states={windowList} segments={segments} reelSize={reelItems.length}
+            reel={reelItem && reel !== null ? { position: Math.min(reel, reelItems.length - 1), total: reelItems.length, label: reelItem.label } : null}
+            onStartReel={() => playReel(0)} onStopReel={() => { setReel(null); player.current?.pause(); }} onMark={() => void markWatched()} marking={marking} actor={actor} />}
           {panel === 'counts' && segment && <CountsPanel counts={counts} setCounts={setCounts} gateID={chosenGate?.id ?? null} setGateID={setGateID}
             actor={actor} setActor={setActor} segment={segment} segments={segments}
             live={counts && displayed ? soFar(counts, order, segment.id, displayed.pts) : null}

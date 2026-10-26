@@ -62,7 +62,8 @@ def candidates(db_path: Path, run_id: str) -> list[dict]:
         run = connection.execute("SELECT summary_run_id FROM tracking_run WHERE id=?", (run_id,)).fetchone()
         if run is None:
             raise CandidateError("tracking_missing", "The tracking run does not exist.", 404)
-        rows = connection.execute("""SELECT t.id, t.segment_id, t.track_index, t.first_pts, t.last_pts, t.point_count, s.position
+        quality = "t.quality" if store.schema_version_of(connection) >= store.TRACKS_V2_SCHEMA_VERSION else "'unrated' AS quality"
+        rows = connection.execute(f"""SELECT t.id, t.segment_id, t.track_index, t.first_pts, t.last_pts, t.point_count, s.position, {quality}
             FROM track t JOIN segment s ON s.id = t.segment_id WHERE t.run_id=?""", (run_id,)).fetchall()
         events = connection.execute("""SELECT e.* FROM candidate_event e JOIN track t ON t.id = e.track_id WHERE t.run_id=?
             ORDER BY e.track_id, e.revision""", (run_id,)).fetchall()
@@ -80,14 +81,16 @@ def candidates(db_path: Path, run_id: str) -> list[dict]:
     for row in sorted(rows, key=lambda item: (item["position"], int(item["first_pts"]), item["track_index"])):
         event = latest.get(row["id"])
         result.append({"track_id": row["id"], "segment_id": row["segment_id"], "track_index": row["track_index"],
-                       "first_pts": row["first_pts"], "last_pts": row["last_pts"], "point_count": row["point_count"],
+                       "first_pts": row["first_pts"], "last_pts": row["last_pts"], "point_count": row["point_count"], "quality": row["quality"],
                        "window_id": window(row["segment_id"], int(row["first_pts"])),
                        "revision": event["revision"] if event else 0,
                        "decision": {"decision": event["decision"], "actor": event["actor"], "note": event["note"], "utc": event["utc"]} if event else None})
     return result
 
 
-def decide(db_path: Path, run_id: str, track_id: str, actor: str, expected_revision: int, decision: str, note: str, preview: dict) -> dict:
+def decide(db_path: Path, run_id: str, track_id: str, actor: str, expected_revision: int, decision: str, note: str,
+           preview: dict | None, playback: dict | None = None) -> dict:
+    """Append one decision on a track, proven by an original preview or by watching it in the playback copy."""
     require_schema(db_path)
     actor = " ".join(actor.split())
     if not actor or decision not in DECISIONS:
@@ -98,16 +101,22 @@ def decide(db_path: Path, run_id: str, track_id: str, actor: str, expected_revis
             WHERE t.id=? AND t.run_id=?""", (track_id, run_id)).fetchone()
         if track is None:
             raise CandidateError("candidate_missing", "The candidate track does not exist.", 404)
-        manifest = preview.get("manifest") or {}
-        frames = manifest.get("frames") or []
-        if (preview.get("state") != "ready" or manifest.get("segment_id") != track["segment_id"] or manifest.get("source_sha256") != track["sha256"]
-                or not frames or int(frames[0]["source_pts"]) > int(track["last_pts"]) or int(frames[-1]["source_pts"]) < int(track["first_pts"])):
-            raise CandidateError("candidate_unverified", "Watch an original preview that covers this candidate before deciding.")
+        if playback is not None:
+            overlaps = any(int(start) <= int(track["last_pts"]) and int(end) >= int(track["first_pts"]) for start, end in playback["intervals"])
+            if playback.get("segment_id") != track["segment_id"] or not overlaps:
+                raise CandidateError("candidate_unverified", "Watch this track in the playback copy before deciding.")
+            receipt = {key: value for key, value in playback.items() if key != "segment_id"}
+        else:
+            manifest = (preview or {}).get("manifest") or {}
+            frames = manifest.get("frames") or []
+            if (preview is None or preview.get("state") != "ready" or manifest.get("segment_id") != track["segment_id"] or manifest.get("source_sha256") != track["sha256"]
+                    or not frames or int(frames[0]["source_pts"]) > int(track["last_pts"]) or int(frames[-1]["source_pts"]) < int(track["first_pts"])):
+                raise CandidateError("candidate_unverified", "Watch an original preview that covers this candidate before deciding.")
+            receipt = {"preview_id": preview["id"], "actual_pts": manifest["actual_pts"], "last_frame_pts": frames[-1]["source_pts"],
+                       "source_sha256": manifest["source_sha256"]}
         latest = connection.execute("SELECT COALESCE(MAX(revision), 0) FROM candidate_event WHERE track_id=?", (track_id,)).fetchone()[0]
         if latest != expected_revision:
             raise CandidateError("candidate_conflict", "This candidate changed since you loaded it. Reload before saving.")
-        receipt = {"preview_id": preview["id"], "actual_pts": manifest["actual_pts"], "last_frame_pts": frames[-1]["source_pts"],
-                   "source_sha256": manifest["source_sha256"]}
         connection.execute("INSERT INTO candidate_event VALUES (?,?,?,?,?,?,?)",
                            (track_id, latest + 1, actor, decision, note.strip(), json.dumps(receipt),
                             datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")))

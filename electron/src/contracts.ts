@@ -173,7 +173,7 @@ export interface CountReviewInput {
 export interface CountQAInput { actor: string; expected_revision: number; review_revision: number; decision: 'approve' | 'reject'; note: string }
 
 export interface Candidate {
-  track_id: string; segment_id: string; track_index: number; first_pts: string; last_pts: string; point_count: number; window_id: string | null;
+  track_id: string; segment_id: string; track_index: number; first_pts: string; last_pts: string; point_count: number; window_id: string | null; quality: TrackQuality;
   revision: number; decision: { decision: 'bat' | 'not_bat' | 'uncertain'; actor: string; note: string; utc: string } | null;
 }
 export type AudioSourceMode = 'full_spectrum' | 'heterodyne' | 'frequency_division' | 'time_expansion' | 'unknown';
@@ -190,9 +190,11 @@ export interface AudioDerived {
   start_offset_seconds: number; covered_seconds: number; anchor_revision: number; drift_corrected: false;
   frequency_max_hz?: number; tune_hz?: number;
 }
-export type HeatmapMode = 'first' | 'all' | 'confirmed';
-export interface Heatmap { segment_id: string; mode: HeatmapMode; width: number; height: number; columns: number; rows: number; cells: number[]; points: number; tracks: number }
-export interface CandidateDecisionInput { actor: string; expected_revision: number; decision: 'bat' | 'not_bat' | 'uncertain'; note: string; preview_id: string }
+/** Continuous viewing in the playback copy: frame PTS intervals and the fastest speed used (at most 4x counts). */
+export interface PlaybackProof { proxy_id: string; intervals: [string, string][]; max_rate: number }
+/** A decision proven by an original preview or by watching the track in the playback copy (exactly one). */
+export interface CandidateDecisionInput { actor: string; expected_revision: number; decision: 'bat' | 'not_bat' | 'uncertain'; note: string; preview_id: string | null; playback: PlaybackProof | null }
+export interface WatchedInput { actor: string; items: (PlaybackProof & { window_id: string })[] }
 
 /** points: [source_pts, x, y, area] in original source pixels. */
 export type TrackQuality = 'coherent' | 'uncertain' | 'noise' | 'unrated';
@@ -515,7 +517,6 @@ export interface BatAPI {
   saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>>;
   reconfirmGate(runID: string, gateID: string, input: ReconfirmInput): Promise<ApiResult<GateCounts>>;
   listCandidates(runID: string): Promise<ApiResult<Candidate[]>>;
-  getHeatmap(runID: string, segmentID: string, mode: HeatmapMode): Promise<ApiResult<Heatmap>>;
   getFlightMap(runID: string, segmentID: string): Promise<ApiResult<FlightMap>>;
   listAudio(sessionID: string): Promise<ApiResult<AudioSource[]>>;
   chooseAudio(sessionID: string, sourceMode: AudioSourceMode, channel: number): Promise<ApiResult<AudioSource[] | null>>;
@@ -523,6 +524,7 @@ export interface BatAPI {
   deriveAudio(audioID: string, input: AudioDeriveInput): Promise<ApiResult<AudioDerived>>;
   audioContent(derivedID: string, kind: 'spectrogram' | 'heterodyne'): Promise<ApiResult<{ bytes: Uint8Array }>>;
   decideCandidate(runID: string, trackID: string, input: CandidateDecisionInput): Promise<ApiResult<Candidate>>;
+  markWatched(input: WatchedInput): Promise<ApiResult<unknown[]>>;
   importStatus(jobID: string): Promise<ApiResult<ImportJob>>;
   cancelImport(jobID: string): Promise<ApiResult<ImportJob>>;
   saveMedia(sessionID: string, input: SaveMedia): Promise<ApiResult<MediaSession>>;

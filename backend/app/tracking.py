@@ -244,10 +244,22 @@ class CandidateDecision(BaseModel):
     expected_revision: int = Field(ge=0)
     decision: Literal["bat", "not_bat", "uncertain"]
     note: str = Field(default="", max_length=2000)
-    preview_id: UUID
+    preview_id: UUID | None = None
+    playback: "PlaybackProof | None" = None
 
 
-def install_routes(app: FastAPI, jobs: TrackingJobs, authenticate, previews) -> None:
+class PlaybackProof(BaseModel):
+    """Continuous viewing in the playback copy: frame PTS intervals and the fastest speed used."""
+    model_config = ConfigDict(extra="forbid")
+    proxy_id: UUID
+    intervals: list[tuple[int, int]] = Field(min_length=1, max_length=50)
+    max_rate: float = Field(gt=0, le=16)
+
+
+CandidateDecision.model_rebuild()
+
+
+def install_routes(app: FastAPI, jobs: TrackingJobs, authenticate, previews, proxies) -> None:
     @app.post("/api/tracking", status_code=202, dependencies=[Depends(authenticate)])
     def start(payload: NewTracking) -> dict:
         return jobs.start(str(payload.summary_run_id), payload.settings.checked())
@@ -292,6 +304,17 @@ def install_routes(app: FastAPI, jobs: TrackingJobs, authenticate, previews) -> 
 
     @app.post("/api/tracking/{run_id}/candidates/{track_id}/decision", dependencies=[Depends(authenticate)])
     def decide(run_id: UUID, track_id: UUID, payload: CandidateDecision) -> dict:
+        if (payload.preview_id is None) == (payload.playback is None):
+            raise candidate_store.CandidateError("candidate_unverified", "Give either an original preview or a playback viewing.", 422)
+        if payload.playback is not None:
+            track = next((item for item in candidate_store.candidates(jobs.db_path, str(run_id)) if item["track_id"] == str(track_id)), None)
+            segment = store.segment_by_id(jobs.db_path, track["segment_id"]) if track else None
+            if segment is None:
+                raise candidate_store.CandidateError("candidate_missing", "The candidate track does not exist.", 404)
+            spans = [list(span) for span in payload.playback.intervals]
+            receipt = proxies.receipt(str(payload.playback.proxy_id), segment, spans, payload.playback.max_rate)
+            return candidate_store.decide(jobs.db_path, str(run_id), str(track_id), payload.actor, payload.expected_revision,
+                                          payload.decision, payload.note, None, {**receipt, "segment_id": segment["id"]})
         try:
             preview = previews.get(str(payload.preview_id))
         except ImportErrorResponse:
@@ -304,20 +327,6 @@ def install_routes(app: FastAPI, jobs: TrackingJobs, authenticate, previews) -> 
         jobs.get(str(run_id))
         try:
             return tracking_store.flight_bins(jobs.db_path, str(run_id), str(segment_id))
-        except LookupError:
-            raise TrackingError("tracking_missing", 404) from None
-        except ValueError:
-            raise TrackingError("tracking_integrity") from None
-
-    @app.get("/api/tracking/{run_id}/heatmap", dependencies=[Depends(authenticate)])
-    def heatmap(run_id: UUID, segment_id: UUID, mode: Literal["first", "all", "confirmed"]) -> dict:
-        jobs.get(str(run_id))
-        confirmed = set()
-        if mode == "confirmed":
-            confirmed = {item["track_id"] for item in candidate_store.candidates(jobs.db_path, str(run_id))
-                         if item["decision"] and item["decision"]["decision"] == "bat"}
-        try:
-            return tracking_store.heatmap(jobs.db_path, str(run_id), str(segment_id), mode, confirmed)
         except LookupError:
             raise TrackingError("tracking_missing", 404) from None
         except ValueError:

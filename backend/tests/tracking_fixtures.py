@@ -21,6 +21,14 @@ def generate_tracking_media(directory: Path) -> dict[str, Path]:
     moved = moved_camera_frames()
     result["moved_camera"] = directory / "tracking-moved-camera.mp4"
     encode_frames(result["moved_camera"], moved, [index * 40 for index in range(len(moved))])
+    from backend.tests.test_tracking import frame, path
+    dots = path((4, 40), (3, 0), 40)
+    # Seen in only half of its frames: an uncertain track for the review reel.
+    gappy = [frame([dots[i]] if i % 2 == 0 or i > 36 else []) for i in range(40)]
+    result["gappy"] = directory / "tracking-gappy.mp4"
+    encode_frames(result["gappy"], gappy, [index * 40 for index in range(40)])
+    result["quiet"] = directory / "tracking-quiet.mp4"
+    encode_frames(result["quiet"], scenario("noise"), [index * 40 for index in range(20)])
     from backend.tests.test_audio import tone
     result["tone_wav"] = tone(directory / "detector-45khz.wav")
     return result

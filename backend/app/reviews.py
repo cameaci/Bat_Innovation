@@ -93,8 +93,9 @@ class SummaryEvidence(Protocol):
 
 
 class ReviewService:
-    def __init__(self, db_path: Path, summaries: SummaryEvidence, previews: PreviewJobs | None, activity_lock: LockType):
-        self.db_path, self.summaries, self.previews = db_path, summaries, previews
+    def __init__(self, db_path: Path, summaries: SummaryEvidence, previews: PreviewJobs | None, activity_lock: LockType,
+                 proxies=None):
+        self.db_path, self.summaries, self.previews, self.proxies = db_path, summaries, previews, proxies
         self.activity_lock = activity_lock
 
     def _schema(self) -> None:
@@ -282,12 +283,105 @@ class ReviewService:
         finally:
             self.activity_lock.release()
 
+    def watched(self, actor: str, items: list[dict]) -> list[dict]:
+        """Mark windows watched end to end in the playback copy as "no activity seen" (owner decision 2026-10-24).
+
+        All or nothing: every window must be unreviewed, without stored non-noise tracks, and covered by continuous
+        viewing at 4x or slower. One failing window refuses the whole request with its reason; nothing is saved.
+        """
+        from . import store as store_module, tracking_store
+
+        if self.proxies is None:
+            raise _error("review_unavailable", "Playback copies are unavailable.")
+        if not self.activity_lock.acquire(blocking=False):
+            raise _error("review_busy", "Wait for the active media operation before saving review.")
+        try:
+            prepared, problems = [], []
+            for item in items:
+                private, row = self._window(item["window_id"])
+                header = self.get(item["window_id"])
+                if header.get("decision", "unreviewed") != "unreviewed" or header.get("observations"):
+                    problems.append({"window_id": item["window_id"], "reason": "already_reviewed"})
+                    continue
+                runs = [run for run in tracking_store.list_runs(self.db_path, private["run"]["id"]) if run["state"] == "complete"]
+                if runs and tracking_store.window_counts(self.db_path, runs[0]["id"], [row]).get(row["id"], 0) > 0:
+                    problems.append({"window_id": item["window_id"], "reason": "has_tracks"})
+                    continue
+                segment = store_module.segment_by_id(self.db_path, row["segment_id"])
+                first, last = row["stats"].get("first_pts"), row["stats"].get("last_pts")
+                spans = sorted((int(start), int(end)) for start, end in item["intervals"])
+                covered = first is not None and last is not None and _covers(spans, int(first), int(last))
+                if segment is None or not covered:
+                    problems.append({"window_id": item["window_id"], "reason": "not_watched"})
+                    continue
+                try:
+                    playback = self.proxies.receipt(item["proxy_id"], segment, spans, item["max_rate"])
+                except ImportErrorResponse as error:
+                    problems.append({"window_id": item["window_id"], "reason": error.code})
+                    continue
+                evidence = self._evidence(private, row, latch=True)
+                if evidence["warning"] is not None:
+                    problems.append({"window_id": item["window_id"], "reason": "evidence_changed"})
+                    continue
+                prepared.append((item["window_id"], header["revision"], {
+                    "fingerprint": evidence["fingerprint"], "evidence_revision": evidence["evidence_revision"],
+                    "source_sha256": row["source_sha256"], "parameter_hash": evidence["binding"]["parameter_hash"],
+                    "interval": row["interval"], "image_sha256": row["image_sha256"], "playback": playback}))
+            if problems:
+                reasons = {"already_reviewed": "already reviewed", "has_tracks": "have tracks to decide", "not_watched": "were not watched end to end",
+                           "playback_too_fast": "were watched faster than 4x", "playback_unverified": "do not match a ready playback copy",
+                           "evidence_changed": "have changed evidence"}
+                summary = ", ".join(f"{sum(1 for item in problems if item['reason'] == code)} {text}"
+                                    for code, text in reasons.items() if any(item["reason"] == code for item in problems))
+                raise _error("review_not_watched", f"Nothing was saved: {summary}.")
+            for window_id, revision, verification in prepared:
+                review_store.apply(self.db_path, window_id, actor=actor, expected_revision=revision, action="set_decision",
+                                   decision="reviewed_no_discernible_event", verification=verification)
+            return [self.get(window_id) for window_id, _, _ in prepared]
+        finally:
+            self.activity_lock.release()
+
     def history(self, window_id: str, after_revision: int = 0) -> dict:
         self._schema()
         return review_store.history(self.db_path, window_id, after_revision=after_revision, limit=50)
 
 
+def _covers(spans: list[tuple[int, int]], first: int, last: int) -> bool:
+    """Watched intervals (frame PTS, merged when they touch or overlap) contain every frame from first to last."""
+    reach = None
+    for start, end in spans:
+        if reach is None:
+            if start > first:
+                return False
+            reach = end
+        elif start <= reach:
+            reach = max(reach, end)
+        else:
+            break
+    return reach is not None and reach >= last
+
+
+class WatchedItem(StrictModel):
+    window_id: UUID
+    proxy_id: UUID
+    intervals: list[tuple[int, int]] = Field(min_length=1, max_length=200)
+    max_rate: float = Field(gt=0, le=16)
+
+
+class Watched(StrictModel):
+    actor: str = Field(min_length=1, max_length=120)
+    items: list[WatchedItem] = Field(min_length=1, max_length=500)
+
+
 def install_routes(app: FastAPI, service: ReviewService, authenticate) -> None:
+    @app.post("/api/reviews/watched", dependencies=[Depends(authenticate)])
+    def watched(payload: Watched) -> list[dict]:
+        if not payload.actor.strip():
+            raise _error("review_invalid", "Enter your name or initials.", 422)
+        items = [{"window_id": str(item.window_id), "proxy_id": str(item.proxy_id), "intervals": [list(span) for span in item.intervals],
+                  "max_rate": item.max_rate} for item in payload.items]
+        return service.watched(payload.actor.strip(), items)
+
     @app.post("/api/reviews/upgrade", dependencies=[Depends(authenticate)])
     def upgrade(_payload: StrictModel = Body(default_factory=StrictModel)) -> dict[str, int]:
         if not service.activity_lock.acquire(blocking=False):

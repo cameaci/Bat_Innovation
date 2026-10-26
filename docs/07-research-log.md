@@ -1,5 +1,17 @@
 # 07 - Research log
 
+## 2026-10-26 - Phase 2 W6: event reel, smart speed and watched-window receipts
+
+**Problem:** too many human checks: every track was a candidate on the Events page, every crossing needed Confirm, and every window needed its own lossless preview before a decision.
+
+**Implementation (no schema change; receipts are JSON):** a Review tab beside the Watch player.
+- The event reel queues only undecided uncertain crossings of the chosen gate and undecided uncertain tracks, in survey order. Each loops from 1 s before to 1.5 s after at normal speed with its track highlighted; B bat, N not a bat, D opposite way (crossings), U skip, Esc stop; the next event follows.
+- Smart speed plays at the chosen speed and drops to normal speed within 1 s of a tracked target or crossing.
+- Viewing is recorded from presented frames: an interval grows while frames follow during playback (allowing the frames a fast rate skips, and the last frame at the end), closes on a seek, and records the fastest speed. A window is "watched" when one interval at 4x or slower spans its first to last frame. "Mark k watched windows: no activity seen" (M) saves those windows that are unreviewed and have no stored non-noise tracks, all or nothing, with a playback-copy receipt (copy ID, frame-map SHA-256, intervals that start and end on copy frames, maximum speed); the backend re-checks every condition. Track decisions in the reel use the same receipt. The original-preview receipt remains valid everywhere.
+- The Events page, the Review page timeline and the static heatmap (route and bridge included) are removed; their work is done on Watch.
+
+**Verified:** backend tests for the all-or-nothing marking (too fast, partly watched, windows with tracks, already reviewed) and a track decision with a playback receipt; an end-to-end test that the reel asks only about one uncertain track and that a quiet video played end to end is marked in one step. **Not verified:** reviewer workload on real surveys (E8); whether 4x is the right limit for real footage (owner decision, not a validated threshold).
+
 ## 2026-10-26 - Phase 2 W5: three synchronised views, a flowing flight map and the survey timeline
 
 **Owner request:** individual tracking, a red-yellow-green flight map that moves with the video, and the count, all on one screen.

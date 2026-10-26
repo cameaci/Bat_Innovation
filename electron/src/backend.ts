@@ -8,7 +8,7 @@ import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia, SummaryRequest, SummaryRun, SummaryDetail, ReviewChange, WindowReview, ReviewHistory } from './contracts';
-import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, FlightMap, ReconfirmInput, PlaybackFrames, PlaybackStatus, SceneEvent, TrackingRun, TrackingSettings, TrackingTest, TrackingTestInput, TrackRecord, Gate, GateChange, GateCounts, CountReviewInput, CountQAInput, Candidate, CandidateDecisionInput, Heatmap, HeatmapMode, AudioSource, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, AudioDerived } from './contracts';
+import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, PlaybackProof, WatchedInput, FlightMap, ReconfirmInput, PlaybackFrames, PlaybackStatus, SceneEvent, TrackingRun, TrackingSettings, TrackingTest, TrackingTestInput, TrackRecord, Gate, GateChange, GateCounts, CountReviewInput, CountQAInput, Candidate, CandidateDecisionInput, AudioSource, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, AudioDerived } from './contracts';
 
 export const isAudioMode = (value: unknown): value is AudioSourceMode =>
   ['full_spectrum', 'heterodyne', 'frequency_division', 'time_expansion', 'unknown'].includes(String(value));
@@ -22,7 +22,6 @@ export function isAudioDerive(input: unknown): input is AudioDeriveInput {
     count(input.seconds, 12) && (input.seconds as number) >= 1 && (input.kind === 'spectrogram' || input.kind === 'heterodyne') &&
     (input.tune_hz === null || (typeof input.tune_hz === 'number' && input.tune_hz >= 10000 && input.tune_hz <= 150000));
 }
-export const isHeatmapMode = (value: unknown): value is HeatmapMode => value === 'first' || value === 'all' || value === 'confirmed';
 
 const within = (input: Record<string, unknown>, keys: string[]) => Object.keys(input).every(key => keys.includes(key));
 const text = (value: unknown, max: number, required = true) => typeof value === 'string' && value.length <= max && (!required || value.trim().length > 0);
@@ -69,10 +68,23 @@ export function isCountQAInput(input: unknown): input is CountQAInput {
   return object(input) && exactKeys(input, ['actor', 'expected_revision', 'review_revision', 'decision', 'note']) && text(input.actor, 120) &&
     isReviewCursor(input.expected_revision) && isReviewCursor(input.review_revision) && ['approve', 'reject'].includes(String(input.decision)) && text(input.note, 2000, false);
 }
-export function isCandidateDecision(input: unknown): input is CandidateDecisionInput {
-  return object(input) && exactKeys(input, ['actor', 'expected_revision', 'decision', 'note', 'preview_id']) && text(input.actor, 120) &&
-    isReviewCursor(input.expected_revision) && ['bat', 'not_bat', 'uncertain'].includes(String(input.decision)) && text(input.note, 2000, false) && isUUID(input.preview_id);
+const safePTS = (value: unknown) => isPTS(value) && Number.isSafeInteger(Number(value));
+export function isPlaybackProof(input: unknown, keys: string[] = ['proxy_id', 'intervals', 'max_rate']): input is PlaybackProof {
+  return object(input) && exactKeys(input, keys) && isUUID(input.proxy_id) && typeof input.max_rate === 'number' && input.max_rate > 0 && input.max_rate <= 16 &&
+    Array.isArray(input.intervals) && input.intervals.length >= 1 && input.intervals.length <= 200 &&
+    input.intervals.every(span => Array.isArray(span) && span.length === 2 && span.every(safePTS));
 }
+export function isCandidateDecision(input: unknown): input is CandidateDecisionInput {
+  return object(input) && exactKeys(input, ['actor', 'expected_revision', 'decision', 'note', 'preview_id', 'playback']) && text(input.actor, 120) &&
+    isReviewCursor(input.expected_revision) && ['bat', 'not_bat', 'uncertain'].includes(String(input.decision)) && text(input.note, 2000, false) &&
+    ((input.preview_id === null) !== (input.playback === null)) && (input.preview_id === null || isUUID(input.preview_id)) &&
+    (input.playback === null || isPlaybackProof(input.playback));
+}
+export function isWatchedInput(input: unknown): input is WatchedInput {
+  return object(input) && exactKeys(input, ['actor', 'items']) && text(input.actor, 120) && Array.isArray(input.items) && input.items.length >= 1 &&
+    input.items.length <= 500 && input.items.every(item => object(item) && isUUID(item.window_id) && isPlaybackProof(item, ['window_id', 'proxy_id', 'intervals', 'max_rate']));
+}
+const numericSpans = (proof: PlaybackProof) => ({ ...proof, intervals: proof.intervals.map(([start, end]) => [Number(start), Number(end)]) });
 export const isPTS = (value: unknown): value is string => typeof value === 'string' && /^-?\d{1,19}$/.test(value);
 export const isModality = (value: unknown): value is Modality => value === 'active_ir' || value === 'rendered_thermal';
 
@@ -175,6 +187,9 @@ const mediaErrors: Record<string, string> = {
   tracking_settings: 'The tracking settings leave no area to search. Check the detection area and exclusion zones.',
   tracking_test_missing: 'The test run does not exist or has been replaced by a newer one.',
   count_unresolved: 'Decide every uncertain crossing and reconfirm the gate after each camera move first.',
+  review_not_watched: 'Some windows cannot be marked as watched. Nothing was saved.',
+  playback_unverified: 'The watched playback does not match a ready copy of this video. Watch it again.',
+  playback_too_fast: 'Watching faster than 4x does not count as review. Watch these parts again at 4x or slower.',
   proxy_busy: 'Playback copies of another survey are being prepared. Wait for them to finish.',
   proxy_missing: 'The playback copy does not exist or is not ready.',
   proxy_upgrade_required: 'Upgrade storage before preparing playback copies.',
@@ -292,7 +307,7 @@ function mediaFailure(code: unknown) {
 type ApiRoute = '/api/exports' | `/api/exports/${string}` | `/api/exports/${string}/cancel` | '/api/qa/upgrade' | `/api/summary-windows/${string}/qa` | `/api/summary-windows/${string}/qa-actions` | `/api/summary-windows/${string}/qa-history?after_revision=${number}` | '/api/reviews/upgrade' | `/api/summary-windows/${string}/review` | `/api/summary-windows/${string}/review-actions` | `/api/summary-windows/${string}/review-history?after_revision=${number}` | '/api/health' | '/api/sessions' | '/api/media/upgrade' | '/api/media/import' |
   `/api/sessions/${string}/media` | `/api/media/import/${string}` | `/api/media/import/${string}/cancel` |
   '/api/summaries/upgrade' | '/api/summaries' | `/api/summaries/${string}` | `/api/summaries/${string}/cancel` | `/api/sessions/${string}/summary-runs` |
-  '/api/storage/upgrade' | '/api/tracking-tests' | `/api/tracking-tests/${string}` | '/api/proxy' | `/api/proxy?session_id=${string}` | '/api/proxy/cancel' | `/api/proxy/${string}/frames` | `/api/sessions/${string}/audio` | `/api/audio/${string}` | `/api/sessions/${string}/gates` | `/api/sessions/${string}/gates/${string}` | '/api/tracking' | `/api/tracking/${string}` | `/api/summaries/${string}/tracking` | '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
+  '/api/storage/upgrade' | '/api/reviews/watched' | '/api/tracking-tests' | `/api/tracking-tests/${string}` | '/api/proxy' | `/api/proxy?session_id=${string}` | '/api/proxy/cancel' | `/api/proxy/${string}/frames` | `/api/sessions/${string}/audio` | `/api/audio/${string}` | `/api/sessions/${string}/gates` | `/api/sessions/${string}/gates/${string}` | '/api/tracking' | `/api/tracking/${string}` | `/api/summaries/${string}/tracking` | '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
 
 /** Read only known, redacted startup codes from the Python process. */
 function safeStartupFailure(output: string): string | undefined {
@@ -457,11 +472,13 @@ export class BackendClient {
   getFlightMap(runID: string, segmentID: string): Promise<ApiResult<FlightMap>> {
     return isUUID(runID) && isUUID(segmentID) ? this.call(`/api/tracking/${runID}/flight-map?segment_id=${segmentID}`) : Promise.resolve(invalid());
   }
-  getHeatmap(runID: string, segmentID: string, mode: HeatmapMode): Promise<ApiResult<Heatmap>> {
-    return isUUID(runID) && isUUID(segmentID) && isHeatmapMode(mode) ? this.call(`/api/tracking/${runID}/heatmap?segment_id=${segmentID}&mode=${mode}`) : Promise.resolve(invalid());
-  }
   decideCandidate(runID: string, trackID: string, input: CandidateDecisionInput): Promise<ApiResult<Candidate>> {
-    return isUUID(runID) && isUUID(trackID) && isCandidateDecision(input) ? this.call(`/api/tracking/${runID}/candidates/${trackID}/decision`, 'POST', input) : Promise.resolve(invalid());
+    if (!isUUID(runID) || !isUUID(trackID) || !isCandidateDecision(input)) return Promise.resolve(invalid());
+    const { preview_id: previewID, playback, ...rest } = input;
+    return this.call(`/api/tracking/${runID}/candidates/${trackID}/decision`, 'POST', { ...rest, ...(playback ? { playback: numericSpans(playback) } : { preview_id: previewID }) });
+  }
+  markWatched(input: WatchedInput): Promise<ApiResult<unknown[]>> {
+    return isWatchedInput(input) ? this.call('/api/reviews/watched', 'POST', { actor: input.actor, items: input.items.map(item => numericSpans(item)) }) : Promise.resolve(invalid());
   }
   saveMedia(sessionID: string, input: SaveMedia): Promise<ApiResult<MediaSession>> {
     return isUUID(sessionID) && isSaveMedia(input) ? this.call(`/api/sessions/${sessionID}/media`, 'PUT', input) : Promise.resolve(invalid('Use only selected segment IDs, continuity evidence and an optional UTC clock anchor.'));
@@ -766,7 +783,6 @@ export class BackendRuntime {
   saveCountReview(runID: string, gateID: string, input: CountReviewInput): Promise<ApiResult<GateCounts>> { return this.ready(client => client.saveCountReview(runID, gateID, input)); }
   saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>> { return this.ready(client => client.saveCountQA(runID, gateID, input)); }
   listCandidates(runID: string): Promise<ApiResult<Candidate[]>> { return this.ready(client => client.listCandidates(runID)); }
-  getHeatmap(runID: string, segmentID: string, mode: HeatmapMode): Promise<ApiResult<Heatmap>> { return this.ready(client => client.getHeatmap(runID, segmentID, mode)); }
   getFlightMap(runID: string, segmentID: string): Promise<ApiResult<FlightMap>> { return this.ready(client => client.getFlightMap(runID, segmentID)); }
   listAudio(sessionID: string): Promise<ApiResult<AudioSource[]>> { return this.ready(client => client.listAudio(sessionID)); }
   addSelectedAudio(sessionID: string, paths: string[], sourceMode: AudioSourceMode, channel: number): Promise<ApiResult<AudioSource[]>> { return this.ready(client => client.addSelectedAudio(sessionID, paths, sourceMode, channel)); }
@@ -774,6 +790,7 @@ export class BackendRuntime {
   deriveAudio(audioID: string, input: AudioDeriveInput): Promise<ApiResult<AudioDerived>> { return this.ready(client => client.deriveAudio(audioID, input)); }
   audioContent(derivedID: string, kind: 'spectrogram' | 'heterodyne'): Promise<ApiResult<{ bytes: Uint8Array }>> { return this.ready(client => client.audioContent(derivedID, kind)); }
   decideCandidate(runID: string, trackID: string, input: CandidateDecisionInput): Promise<ApiResult<Candidate>> { return this.ready(client => client.decideCandidate(runID, trackID, input)); }
+  markWatched(input: WatchedInput): Promise<ApiResult<unknown[]>> { return this.ready(client => client.markWatched(input)); }
   importStatus(jobID: string): Promise<ApiResult<ImportJob>> { return this.ready(client => client.importStatus(jobID)); }
   cancelImport(jobID: string): Promise<ApiResult<ImportJob>> { return this.ready(client => client.cancelImport(jobID)); }
   startPreview(input: PreviewRequest): Promise<ApiResult<PreviewJob>> { return this.ready(client => client.startPreview(input)); }

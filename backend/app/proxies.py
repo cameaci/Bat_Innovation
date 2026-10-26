@@ -23,6 +23,8 @@ from .imports import ImportErrorResponse, source_state
 from .proxy_worker import ERRORS as WORKER_ERRORS, MAX_REQUEST_BYTES, MEMORY_BYTES, cpu_seconds, unpack_frames
 
 MAX_RESULT_BYTES = 16 * 1024
+# Owner decision 2026-10-24: watching the playback copy counts as review only at this speed or slower.
+WATCH_MAX_RATE = 4
 MESSAGES = {
     "proxy_busy": "Playback copies of another survey are being prepared. Wait for them to finish.",
     "proxy_missing": "The playback copy does not exist or is not ready.",
@@ -38,6 +40,8 @@ MESSAGES = {
     "unsupported_codec": "The original codec or stream layout cannot be processed reliably.",
     "decode_failed": "The original recording could not be decoded reliably.",
     "unknown_timing": "The recording's end time is unknown, so its copy cannot be bounded.",
+    "playback_unverified": "The watched playback does not match a ready copy of this video. Watch it again.",
+    "playback_too_fast": "Watching faster than 4x does not count as review. Watch these parts again at 4x or slower.",
 }
 
 
@@ -178,6 +182,21 @@ class ProxyJobs:
             raise ProxyError("proxy_integrity")
         return {"id": proxy_id, "segment_id": row["segment_id"], "width": row["width"], "height": row["height"],
                 "duration_ms": row["duration_ms"], "source_pts": [str(value) for value in source_pts], "proxy_ms": proxy_ms}
+
+    def receipt(self, proxy_id: str, segment: dict, intervals: list[list[int]], max_rate: float) -> dict:
+        """Proof of continuous viewing in a ready playback copy: every interval starts and ends on a frame of the copy."""
+        if max_rate > WATCH_MAX_RATE:
+            raise ProxyError("playback_too_fast")
+        try:
+            row = self.ready(proxy_id)
+            frames = set(self.frames(proxy_id)["source_pts"])
+        except ProxyError:
+            raise ProxyError("playback_unverified") from None
+        if (row["segment_id"] != segment["id"] or row["source_sha256"] != segment["sha256"] or not intervals
+                or any(start > end or str(start) not in frames or str(end) not in frames for start, end in intervals)):
+            raise ProxyError("playback_unverified")
+        return {"kind": "playback_copy", "proxy_id": proxy_id, "frames_sha256": row["frames_sha256"],
+                "intervals": [[str(start), str(end)] for start, end in intervals], "max_rate": max_rate}
 
     def close(self) -> None:
         with self._lock:
