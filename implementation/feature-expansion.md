@@ -220,3 +220,25 @@ Separate from the fixed 44/70 tracker in [plan.md](plan.md); the two are never a
 | E6 | Heatmap read as absence or individuals | Labels and end-to-end checks |
 | E7 | High sample rates; clock drift; anchor unavailable | Bounded derivatives; drift warning; unsynchronised audio is labelled, never given an invented offset |
 | All | Event recall not proven | Windows are never hidden |
+
+## 9. Phase 2: individual tracking and the Watch workspace
+
+Owner request 2026-10-24 after testing E1-E7 on real footage: the review experience failed. A camera disturbance produced 164 crossings to confirm one by one, `tracks-v1` follows pixel change rather than bats, every view is a separate clip of at most 12 s, and the heatmap does not move with the video. Phase 2 fixes the experience first and fits the architecture to it. No new dependencies (NumPy and SciPy only); no trained models.
+
+- **Watch**: one page with continuous playback of a lossy playback copy (VP9, 960x540) per segment, three synchronised views of the same frame (Bats: red ring, ID and heading per track; Flight map: green-yellow-red density building up to the playhead; Count: gate with live IN/OUT/NET), a survey timeline, smart speed and event jumps. Exact-frame verification from the original stays one key away.
+- **tracks-v2**: centred temporal median background, target size and polarity, detection area and exclusion zones, closing to merge wings and body, constant-velocity Kalman association with a size term, tracklet joining and per-track quality (coherent, uncertain, noise). Disturbances are classified as camera moved, lighting change or glitch.
+- **Calibration**: a 10 s test run with an overlay and statistics before the whole survey is tracked.
+- **Counts**: a camera move ends the gate's valid span and asks for one reconfirmation; only coherent tracks feed the algorithm proposal; uncertain crossings go to a one-key event reel; the reviewer accepts the gate total with one action once nothing is unresolved.
+- **Review effort**: windows watched end to end in the playback copy at no more than 4x and without coherent tracks can be marked "no activity seen" together.
+
+Quality and size rules are parameters, not approved thresholds (E8).
+
+Phase 2 tracker (separate from the 22/27 above): **1/7**.
+
+- [x] W1: playback copy, `bat-media` scheme and Watch with the Bats view.
+- [ ] W2: tracks-v2 engine with scene events and range test mode.
+- [ ] W3: calibration drawer with test run.
+- [ ] W4: gate validity spans, quality-aware counts, reconfirm and accept.
+- [ ] W5: flight map, split/single panes and survey timeline.
+- [ ] W6: event reel, smart speed, watched-window receipts and retired pages.
+- [ ] W7: export v3, docs and frozen smoke.

@@ -33,6 +33,31 @@ def rational(value: Fraction) -> dict[str, str]:
     return {"num": str(value.numerator), "den": str(value.denominator)}
 
 
+def display_size(width: int, height: int) -> tuple[int, int]:
+    """Fit inside 960x540 without upscaling, with even dimensions for yuv420p."""
+    scale = min(Fraction(960, width), Fraction(540, height), Fraction(1))
+    return max(2, int(width * scale) // 2 * 2), max(2, int(height * scale) // 2 * 2)
+
+
+def vp9_stream(container, width: int, height: int, lossless: bool, threads: int = 1):
+    """One VP9 display stream with a millisecond timebase, shared by previews and playback copies."""
+    stream = container.add_stream("libvpx-vp9")
+    stream.width, stream.height = display_size(width, height)
+    stream.pix_fmt = "yuv420p"
+    stream.time_base = stream.codec_context.time_base = Fraction(1, 1000)
+    stream.codec_context.thread_count = threads
+    options = {"deadline": "realtime", "cpu-used": "8", "lag-in-frames": "0"}
+    if lossless:
+        options["lossless"] = "1"
+    else:
+        # Lossy playback copy: constant quality, a keyframe every 30 frames so seeking stays fast.
+        stream.codec_context.bit_rate = 0
+        stream.codec_context.gop_size = 30
+        options.update({"crf": "34", "b": "0", "row-mt": "1", "g": "30"})
+    stream.options = options
+    return stream
+
+
 def limits(parent_pid: int, seconds: int = CLIP_SECONDS) -> None:
     """Fail closed where hard process limits and a parent-death guard are unavailable."""
     if sys.platform == "win32":
@@ -114,14 +139,8 @@ def render(payload: dict) -> dict:
                 except (av.error.FFmpegError, ValueError, OSError):
                     fail("unseekable_source")
                 with av.open(str(output_path), "w", format="webm") as preview:
-                    stream = preview.add_stream("libvpx-vp9")
-                    scale = min(Fraction(960, metadata["width"]), Fraction(540, metadata["height"]), Fraction(1))
-                    output_width = max(2, int(metadata["width"] * scale) // 2 * 2)
-                    output_height = max(2, int(metadata["height"] * scale) // 2 * 2)
-                    stream.width, stream.height, stream.pix_fmt = output_width, output_height, "yuv420p"
-                    stream.time_base = stream.codec_context.time_base = display_base
-                    stream.codec_context.thread_count = 1
-                    stream.options = {"lossless": "1", "deadline": "realtime", "cpu-used": "8", "lag-in-frames": "0"}
+                    stream = vp9_stream(preview, metadata["width"], metadata["height"], lossless=True)
+                    output_width, output_height = stream.width, stream.height
                     if (output_width, output_height) != (metadata["width"], metadata["height"]):
                         warnings.append("Display pixels are resized to the bounded preview dimensions.")
                     if metadata.get("interlaced"):

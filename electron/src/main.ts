@@ -37,7 +37,11 @@ function confirmDiscard(force = false): boolean {
   return true;
 }
 
-protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } },
+  // Playback copies only: streamed with byte ranges so the player can seek (Phase 2 W1).
+  { scheme: 'bat-media', privileges: { standard: true, secure: true, stream: true } },
+]);
 
 /** Packaged data stays on the local machine (not the roaming profile): reviews, derived images and Chromium state. */
 function localData(): string | undefined {
@@ -105,16 +109,24 @@ async function open(): Promise<void> {
       const content = readFileSync(join(uiRoot, url.pathname));
       return new Response(content, { headers: {
         'Content-Type': url.pathname.endsWith('.js') ? 'text/javascript' : url.pathname.endsWith('.css') ? 'text/css' : 'text/html',
-        'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'",
+        'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src blob: bat-media:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'",
         'X-Content-Type-Options': 'nosniff',
       } });
     } catch { return new Response('Built UI missing. Run npm run build.', { status: 404 }); }
+  });
+  // bat-media://proxy/<id> serves one ready playback copy by ID; the renderer never names a path.
+  protocol.handle('bat-media', (request) => {
+    const url = new URL(request.url);
+    const match = /^\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.exec(url.pathname);
+    if (request.method !== 'GET' || url.host !== 'proxy' || url.search || match === null) return new Response('Not found', { status: 404 });
+    return backend.playbackVideo(match[1], request.headers.get('Range'));
   });
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   session.defaultSession.setPermissionCheckHandler(() => false);
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
     const previewBlob = ['media', 'image'].includes(details.resourceType) && /^blob:app:\/\/bat\/[0-9a-f-]+$/.test(details.url);
-    callback({ cancel: !details.url.startsWith('app://bat/') && !previewBlob });
+    const playback = details.resourceType === 'media' && /^bat-media:\/\/proxy\/[0-9a-f-]{36}$/.test(details.url);
+    callback({ cancel: !details.url.startsWith('app://bat/') && !previewBlob && !playback });
   });
   session.defaultSession.on('will-download', (event) => event.preventDefault());
   Menu.setApplicationMenu(null);
@@ -213,6 +225,10 @@ async function open(): Promise<void> {
   handle('bat:get-heatmap', 3, ([run, segment, mode]) => isUUID(run) && isUUID(segment) && isHeatmapMode(mode) ? backend.getHeatmap(run, segment, mode) : invalid());
   handle('bat:list-candidates', 1, ([id]) => isUUID(id) ? backend.listCandidates(id) : invalid());
   handle('bat:decide-candidate', 3, ([run, track, input]) => isUUID(run) && isUUID(track) && isCandidateDecision(input) ? backend.decideCandidate(run, track, input) : invalid('Use a valid candidate decision.'));
+  handle('bat:start-playback', 1, ([id]) => isUUID(id) ? backend.startPlayback(id) : invalid('Select a valid survey.'));
+  handle('bat:playback-status', 1, ([id]) => isUUID(id) ? backend.playbackStatus(id) : invalid('Select a valid survey.'));
+  handle('bat:cancel-playback', 1, ([id]) => isUUID(id) ? backend.cancelPlayback(id) : invalid('Select a valid survey.'));
+  handle('bat:playback-frames', 1, ([id]) => isUUID(id) ? backend.playbackFrames(id) : invalid('Select a valid playback copy.'));
   handle('bat:start-tracking', 1, ([id]) => isUUID(id) ? backend.startTracking(id) : invalid('Select a valid summary run ID.'));
   handle('bat:tracking-run', 1, ([id]) => isUUID(id) ? backend.trackingRun(id) : invalid('Select a valid tracking run ID.'));
   handle('bat:list-tracking', 1, ([id]) => isUUID(id) ? backend.listTracking(id) : invalid('Select a valid summary run ID.'));

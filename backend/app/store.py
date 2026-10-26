@@ -20,8 +20,9 @@ TRACKING_SCHEMA_VERSION = 7
 COUNT_SCHEMA_VERSION = 8
 CANDIDATE_SCHEMA_VERSION = 9
 AUDIO_SCHEMA_VERSION = 10
+PROXY_SCHEMA_VERSION = 11
 EXPANSION_SCHEMA_VERSIONS = (MODALITY_SCHEMA_VERSION, TRACKING_SCHEMA_VERSION, COUNT_SCHEMA_VERSION, CANDIDATE_SCHEMA_VERSION,
-                             AUDIO_SCHEMA_VERSION)
+                             AUDIO_SCHEMA_VERSION, PROXY_SCHEMA_VERSION)
 CURRENT_SCHEMA_VERSION = EXPANSION_SCHEMA_VERSIONS[-1]
 QA_SCHEMA_VERSIONS = (QA_SCHEMA_VERSION, *EXPANSION_SCHEMA_VERSIONS)
 REVIEW_SCHEMA_VERSIONS = (REVIEW_SCHEMA_VERSION, *QA_SCHEMA_VERSIONS)
@@ -158,9 +159,10 @@ def upgrade_modality(db_path: Path) -> None:
 
 def upgrade_expansion(db_path: Path) -> None:
     """Steps after the QA schema, run in order by one explicit storage upgrade action."""
-    from . import audio_store, candidate_store, count_store, tracking_store
+    from . import audio_store, candidate_store, count_store, proxy_store, tracking_store
 
-    for step in (upgrade_modality, tracking_store.upgrade, count_store.upgrade, candidate_store.upgrade, audio_store.upgrade):
+    for step in (upgrade_modality, tracking_store.upgrade, count_store.upgrade, candidate_store.upgrade, audio_store.upgrade,
+                 proxy_store.upgrade):
         step(db_path)
 
 

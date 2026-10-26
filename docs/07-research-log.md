@@ -1,5 +1,19 @@
 # 07 - Research log
 
+## 2026-10-26 - Phase 2 W1: playback copies and the Watch page
+
+**Question:** how can reviewers watch a whole survey continuously, with tracks drawn on every frame, without loosening source-time traceability?
+
+**Sources:** the owner's report on the failed review experience (164 per-crossing confirmations, 12 s clips, a static heatmap), and a public scan of UK and published tools: Wildlife Imaging Systems (motion summary images, WISARD reviewer), Geckoella POPO (ecologist-verified ML review, IR only), Thermal Vision Ecology (FLIR Research Studio flight-path tracking), EchoSight (annotated thermal review), ThruTracker (target size and polarity, exclusion zones, a test clip before full processing, overlay video with gate counts) and BatCount 2023 (local temporal median background, ROI, polarity; 50.8-94.8 % accuracy by site). LinkedIn could not be accessed. A 25 fps minimum for night vision footage in the BCT 2026 guide was seen only in secondary sources and is unverified.
+
+**Decision (owner, 2026-10-24):** a lossy playback copy per segment may be watched for review; exact-frame verification from the original stays one action away. Recorded in AGENTS.md.
+
+**Implementation:** `proxy_worker` re-verifies the original by SHA-256, decodes every frame and writes VP9/WebM (crf 34, realtime, keyframe every 30 frames) fitted to 960x540, plus a `prx1` sidecar mapping each copy frame (whole milliseconds from the first source PTS) to its exact source PTS. Schema v11 adds `proxy`. Copies are prepared one at a time in the background after a summary run completes and do not take the shared media lock, so previews and tracking stay available. Electron serves a ready copy only as `bat-media://proxy/<uuid>` (byte ranges forwarded to the loopback API with the token); the CSP allows that scheme for media only. The Watch page maps every presented frame through `requestVideoFrameCallback` (within 0.5 ms) to its source PTS and draws tracks on a canvas: a red ring, `#ID`, heading arrow and 1 s trail. Playback continues into the next video.
+
+**Measured:** worst-case synthetic 1080p with per-pixel noise encoded at about 22 frames per second including decode, at about 12 Mbit/s (real footage with less noise is expected to be smaller; not measured on camera originals).
+
+**Verified:** exact frame map and 206 range responses, changed-original and integrity refusals, upgrade and rollback (backend tests); continuous playback, rings at the displayed frame, speed, frame step, next-video continuation and refusal of a malformed `bat-media` URL (Electron end-to-end). **Not verified:** native Windows, real camera originals, disk use on long surveys.
+
 ## 2026-10-23 - Feature expansion E1-E7 closing check
 
 **Frozen build:** a Linux PyInstaller onedir build with SciPy (296 MB) passed `scripts/smoke_backend.py`, which now also upgrades expansion storage and runs tracking: health, schema upgrades, import, preview, 2 of 2 summary windows, tracking, provisional export and unchanged original.

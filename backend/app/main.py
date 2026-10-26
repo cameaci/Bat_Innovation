@@ -28,6 +28,7 @@ from .export_jobs import ExportJobs
 from .tracking import TrackingJobs, install_routes as install_tracking_routes
 from .counts import install_routes as install_count_routes
 from .audio import AudioService, install_routes as install_audio_routes
+from .proxies import ProxyJobs, install_routes as install_proxy_routes
 
 
 @dataclass(frozen=True)
@@ -182,11 +183,13 @@ def create_app(settings: Settings) -> FastAPI:
     exports = ExportJobs(db_path, settings.data_dir)
     tracking = TrackingJobs(db_path, activity_lock)
     audio = AudioService(db_path, settings.data_dir, activity_lock)
+    proxies = ProxyJobs(db_path, settings.data_dir)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         yield
         exports.close()
+        proxies.close()
         tracking.close()
         summaries.close()
         previews.close()
@@ -372,4 +375,5 @@ def create_app(settings: Settings) -> FastAPI:
     install_tracking_routes(app, tracking, authenticate, previews)
     install_count_routes(app, db_path, authenticate)
     install_audio_routes(app, audio, authenticate)
+    install_proxy_routes(app, proxies, authenticate)
     return app

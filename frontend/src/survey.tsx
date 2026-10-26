@@ -1,11 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { ApiResult, BatAPI, Modality, ImportJob, MediaSession, RecordingSession, SaveMedia, SummaryDetail, SummaryRun, TrackingRun, Gate, GateChange, AudioSource } from '../../electron/src/contracts';
+import type { ApiResult, BatAPI, Modality, ImportJob, MediaSession, RecordingSession, SaveMedia, SummaryDetail, SummaryRun, TrackingRun, Gate, GateChange, AudioSource, PlaybackStatus } from '../../electron/src/contracts';
 import { getAPI } from './api';
 
 const unavailable = 'The local backend is unavailable. Retry, or close and reopen the app.';
 export const activeRun = (run: SummaryRun | null | undefined) => run?.state === 'queued' || run?.state === 'running';
-export const CURRENT_SCHEMA = 10;
+export const CURRENT_SCHEMA = 11;
 export const activeTracking = (run: TrackingRun | null | undefined) => run?.state === 'queued' || run?.state === 'running';
 export const THERMAL_LABEL = 'Rendered thermal - no radiometric temperature analysis';
 
@@ -47,6 +47,9 @@ export interface Survey {
   /** Full-spectrum or other WAV recordings of this survey, with their sync anchors. */
   audio: AudioSource[];
   reloadAudio: () => Promise<void>;
+  /** Playback copies per segment (Phase 2); prepared automatically once a summary run completes. */
+  playback: PlaybackStatus | null;
+  startPlayback: () => Promise<void>;
 }
 
 const SurveyContext = createContext<Survey | null>(null);
@@ -75,6 +78,9 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
   const [trackingRefresh, setTrackingRefresh] = useState(0);
   const [gates, setGates] = useState<Gate[]>([]);
   const [audio, setAudio] = useState<AudioSource[]>([]);
+  const [playback, setPlayback] = useState<PlaybackStatus | null>(null);
+  const [playbackRefresh, setPlaybackRefresh] = useState(0);
+  const autoPlayback = useRef(false);
   const busy = importJob?.state === 'running' || activeRun(run) || exportBusy || activeTracking(tracking);
 
   const request = useCallback(async <T,>(action: (api: BatAPI) => Promise<ApiResult<T>>): Promise<T | undefined> => {
@@ -247,6 +253,35 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
   }, [request, session.id, media?.schema_version]);
   useEffect(() => { void reloadAudio(); }, [reloadAudio]);
 
+  // Playback copies: polled each second while a copy is being made.
+  useEffect(() => {
+    if ((media?.schema_version ?? 0) < 11) { setPlayback(null); return; }
+    let current = true;
+    let timer: ReturnType<typeof setTimeout>;
+    async function poll() {
+      const value = await request(api => api.playbackStatus(session.id));
+      if (!current || !value) return;
+      setPlayback(value);
+      if (value.active) timer = setTimeout(() => void poll(), 1000);
+    }
+    void poll();
+    return () => { current = false; clearTimeout(timer); };
+  }, [request, session.id, media?.schema_version, playbackRefresh]);
+
+  const startPlayback = useCallback(async () => {
+    const value = await request(api => api.startPlayback(session.id));
+    if (value) { setPlayback(value); setPlaybackRefresh(current => current + 1); }
+  }, [request, session.id]);
+
+  // Once per opened survey: after a summary run completes, copy any video that has no playback copy yet.
+  useEffect(() => {
+    if (autoPlayback.current || !playback || playback.active || run?.state !== 'complete' || !media) return;
+    const copied = new Set(playback.proxies.map(item => item.segment_id));
+    if (media.segments.every(segment => copied.has(segment.id))) return;
+    autoPlayback.current = true;
+    void startPlayback();
+  }, [playback, run?.state, media, startPlayback]);
+
   async function saveGate(gateID: string | null, change: GateChange) {
     setError(''); setNotice('');
     const value = await request(api => api.saveGate(session.id, gateID, change));
@@ -289,6 +324,7 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
     runs, runID, selectRun: id => { setRunID(id); setRefresh(current => current + 1); }, run, verified,
     startRun, cancelRun, cancelling, reloadRun: () => setRefresh(current => current + 1),
     setDraft, dirty, busy, setExportBusy, tracking, startTracking, cancelTracking, gates, saveGate, audio, reloadAudio,
+    playback, startPlayback,
   };
   return <SurveyContext.Provider value={value}>{children}</SurveyContext.Provider>;
 }

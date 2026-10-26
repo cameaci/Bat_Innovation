@@ -65,6 +65,33 @@ export interface MediaSegment {
 export type Modality = 'active_ir' | 'rendered_thermal';
 
 /** A derived tracking run over one summary run (feature expansion E2). Tracks are review aids, not animals. */
+export interface PlaybackCopy {
+  id: string;
+  segment_id: string;
+  state: 'queued' | 'running' | 'ready' | 'failed' | 'cancelled' | 'interrupted';
+  width: number | null;
+  height: number | null;
+  frame_count: number | null;
+  duration_ms: number | null;
+  bytes: number | null;
+  started_at_utc: string;
+  finished_at_utc: string | null;
+  error: string | null;
+}
+
+export interface PlaybackStatus { session_id: string; active: boolean; proxies: PlaybackCopy[] }
+
+/** Every playback-copy frame mapped to its exact source PTS (Phase 2 W1). */
+export interface PlaybackFrames {
+  id: string;
+  segment_id: string;
+  width: number;
+  height: number;
+  duration_ms: number;
+  source_pts: string[];
+  proxy_ms: number[];
+}
+
 export interface TrackingRun {
   id: string;
   summary_run_id: string;
@@ -427,6 +454,10 @@ export interface BatAPI {
   chooseMedia(sessionID: string, modality: Modality): Promise<ApiResult<ImportJob | null>>;
   upgradeStorage(): Promise<ApiResult<{ schema_version: number }>>;
   startTracking(summaryRunID: string): Promise<ApiResult<TrackingRun>>;
+  startPlayback(sessionID: string): Promise<ApiResult<PlaybackStatus>>;
+  playbackStatus(sessionID: string): Promise<ApiResult<PlaybackStatus>>;
+  cancelPlayback(sessionID: string): Promise<ApiResult<PlaybackStatus>>;
+  playbackFrames(proxyID: string): Promise<ApiResult<PlaybackFrames>>;
   trackingRun(runID: string): Promise<ApiResult<TrackingRun>>;
   listTracking(summaryRunID: string): Promise<ApiResult<TrackingRun[]>>;
   cancelTracking(runID: string): Promise<ApiResult<TrackingRun>>;

@@ -17,7 +17,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-MODULES = frozenset({"contained_import", "preview_worker", "summary_worker", "export_worker", "track_worker", "audio_worker"})
+MODULES = frozenset({"contained_import", "preview_worker", "summary_worker", "export_worker", "track_worker", "audio_worker", "proxy_worker"})
 # Windows NTSTATUS exit codes that mean a Job Object limit ended the worker.
 JOB_CPU_QUOTA_EXIT, NO_MEMORY_EXIT = 0xC0000044, 0xC0000017
 FROZEN = bool(getattr(sys, "frozen", False))

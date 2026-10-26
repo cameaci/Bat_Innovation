@@ -8,7 +8,7 @@ import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia, SummaryRequest, SummaryRun, SummaryDetail, ReviewChange, WindowReview, ReviewHistory } from './contracts';
-import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, TrackingRun, TrackRecord, Gate, GateChange, GateCounts, CountReviewInput, CountQAInput, Candidate, CandidateDecisionInput, Heatmap, HeatmapMode, AudioSource, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, AudioDerived } from './contracts';
+import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, PlaybackFrames, PlaybackStatus, TrackingRun, TrackRecord, Gate, GateChange, GateCounts, CountReviewInput, CountQAInput, Candidate, CandidateDecisionInput, Heatmap, HeatmapMode, AudioSource, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, AudioDerived } from './contracts';
 
 export const isAudioMode = (value: unknown): value is AudioSourceMode =>
   ['full_spectrum', 'heterodyne', 'frequency_division', 'time_expansion', 'unknown'].includes(String(value));
@@ -152,6 +152,12 @@ export function isSaveMedia(input: unknown): input is SaveMedia {
 
 // Only known error codes cross the desktop boundary; arbitrary response text never does.
 const mediaErrors: Record<string, string> = {
+  proxy_busy: 'Playback copies of another survey are being prepared. Wait for them to finish.',
+  proxy_missing: 'The playback copy does not exist or is not ready.',
+  proxy_upgrade_required: 'Upgrade storage before preparing playback copies.',
+  proxy_integrity: "The playback copy's frame map failed its integrity check. Prepare it again.",
+  proxy_limit: 'The playback copy exceeded a time, memory, frame or size limit.',
+  proxy_failed: 'The playback copy could not be made.',
   storage_busy: 'Wait for the active media operation before upgrading storage.',
   storage_upgrade_failed: 'The storage upgrade failed; the existing database was preserved.',
   tracking_busy: 'Another media operation is running. Wait for it or cancel it before tracking.',
@@ -263,7 +269,7 @@ function mediaFailure(code: unknown) {
 type ApiRoute = '/api/exports' | `/api/exports/${string}` | `/api/exports/${string}/cancel` | '/api/qa/upgrade' | `/api/summary-windows/${string}/qa` | `/api/summary-windows/${string}/qa-actions` | `/api/summary-windows/${string}/qa-history?after_revision=${number}` | '/api/reviews/upgrade' | `/api/summary-windows/${string}/review` | `/api/summary-windows/${string}/review-actions` | `/api/summary-windows/${string}/review-history?after_revision=${number}` | '/api/health' | '/api/sessions' | '/api/media/upgrade' | '/api/media/import' |
   `/api/sessions/${string}/media` | `/api/media/import/${string}` | `/api/media/import/${string}/cancel` |
   '/api/summaries/upgrade' | '/api/summaries' | `/api/summaries/${string}` | `/api/summaries/${string}/cancel` | `/api/sessions/${string}/summary-runs` |
-  '/api/storage/upgrade' | `/api/sessions/${string}/audio` | `/api/audio/${string}` | `/api/sessions/${string}/gates` | `/api/sessions/${string}/gates/${string}` | '/api/tracking' | `/api/tracking/${string}` | `/api/summaries/${string}/tracking` | '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
+  '/api/storage/upgrade' | '/api/proxy' | `/api/proxy?session_id=${string}` | '/api/proxy/cancel' | `/api/proxy/${string}/frames` | `/api/sessions/${string}/audio` | `/api/audio/${string}` | `/api/sessions/${string}/gates` | `/api/sessions/${string}/gates/${string}` | '/api/tracking' | `/api/tracking/${string}` | `/api/summaries/${string}/tracking` | '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
 
 /** Read only known, redacted startup codes from the Python process. */
 function safeStartupFailure(output: string): string | undefined {
@@ -351,6 +357,34 @@ export class BackendClient {
     return isUUID(summaryRunID) ? this.call('/api/tracking', 'POST', { summary_run_id: summaryRunID }) : Promise.resolve(invalid());
   }
   trackingRun(runID: string): Promise<ApiResult<TrackingRun>> { return isUUID(runID) ? this.call(`/api/tracking/${runID}`) : Promise.resolve(invalid()); }
+  startPlayback(sessionID: string): Promise<ApiResult<PlaybackStatus>> {
+    return isUUID(sessionID) ? this.call('/api/proxy', 'POST', { session_id: sessionID }) : Promise.resolve(invalid());
+  }
+  playbackStatus(sessionID: string): Promise<ApiResult<PlaybackStatus>> {
+    return isUUID(sessionID) ? this.call(`/api/proxy?session_id=${sessionID}`) : Promise.resolve(invalid());
+  }
+  cancelPlayback(sessionID: string): Promise<ApiResult<PlaybackStatus>> {
+    return isUUID(sessionID) ? this.call('/api/proxy/cancel', 'POST', { session_id: sessionID }) : Promise.resolve(invalid());
+  }
+  playbackFrames(proxyID: string): Promise<ApiResult<PlaybackFrames>> {
+    return isUUID(proxyID) ? this.call(`/api/proxy/${proxyID}/frames`) : Promise.resolve(invalid());
+  }
+  /** Stream one ready playback copy for the bat-media scheme, forwarding only a byte Range header. */
+  async playbackVideo(proxyID: string, range: string | null): Promise<Response> {
+    if (!isUUID(proxyID) || (range !== null && !/^bytes=\d{0,15}-\d{0,15}$/.test(range))) return new Response('Not found', { status: 404 });
+    try {
+      const upstream = await fetch(`http://127.0.0.1:${this.port}/api/proxy/${proxyID}/video`, {
+        headers: { 'X-Bat-Token': this.token, ...(range === null ? {} : { Range: range }) },
+      });
+      if (upstream.status !== 200 && upstream.status !== 206) return new Response('Not found', { status: 404 });
+      const headers = new Headers({ 'Content-Type': 'video/webm', 'Accept-Ranges': 'bytes', 'X-Content-Type-Options': 'nosniff' });
+      for (const name of ['Content-Length', 'Content-Range']) {
+        const value = upstream.headers.get(name);
+        if (value !== null) headers.set(name, value);
+      }
+      return new Response(upstream.body, { status: upstream.status, headers });
+    } catch { return new Response('Not found', { status: 404 }); }
+  }
   listTracking(summaryRunID: string): Promise<ApiResult<TrackingRun[]>> {
     return isUUID(summaryRunID) ? this.call(`/api/summaries/${summaryRunID}/tracking`) : Promise.resolve(invalid());
   }
@@ -676,6 +710,13 @@ export class BackendRuntime {
   upgradeStorage(): Promise<ApiResult<{ schema_version: number }>> { return this.ready(client => client.upgradeStorage()); }
   startTracking(summaryRunID: string): Promise<ApiResult<TrackingRun>> { return this.ready(client => client.startTracking(summaryRunID)); }
   trackingRun(runID: string): Promise<ApiResult<TrackingRun>> { return this.ready(client => client.trackingRun(runID)); }
+  startPlayback(sessionID: string): Promise<ApiResult<PlaybackStatus>> { return this.ready(client => client.startPlayback(sessionID)); }
+  playbackStatus(sessionID: string): Promise<ApiResult<PlaybackStatus>> { return this.ready(client => client.playbackStatus(sessionID)); }
+  cancelPlayback(sessionID: string): Promise<ApiResult<PlaybackStatus>> { return this.ready(client => client.cancelPlayback(sessionID)); }
+  playbackFrames(proxyID: string): Promise<ApiResult<PlaybackFrames>> { return this.ready(client => client.playbackFrames(proxyID)); }
+  playbackVideo(proxyID: string, range: string | null): Promise<Response> {
+    return this.client ? this.client.playbackVideo(proxyID, range) : Promise.resolve(new Response('Not found', { status: 404 }));
+  }
   listTracking(summaryRunID: string): Promise<ApiResult<TrackingRun[]>> { return this.ready(client => client.listTracking(summaryRunID)); }
   cancelTracking(runID: string): Promise<ApiResult<TrackingRun>> { return this.ready(client => client.cancelTracking(runID)); }
   getTracks(runID: string, segmentID: string, startPTS: string, endPTS: string | null): Promise<ApiResult<TrackRecord[]>> {
