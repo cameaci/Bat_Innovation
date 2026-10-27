@@ -148,3 +148,45 @@ def test_watched_windows_are_marked_together_only_when_every_one_qualifies(tmp_p
                               json={"actor": "Reviewer One", "expected_revision": 0, "decision": "bat",
                                     "playback": {"proxy_id": proof["proxy_id"], "intervals": proof["intervals"], "max_rate": 1}})
         assert decided.status_code == 200 and decided.json()["decision"]["decision"] == "bat", decided.text
+
+
+def test_enhanced_copy_has_the_same_frame_map_and_is_prepared_per_video(tmp_path: Path) -> None:
+    times = [index * 40 for index in range(20)]
+    with TestClient(create_app(Settings(tmp_path / "app-data", TOKEN))) as client:
+        session_id, _ = imported(client, tmp_path, times)
+        client.post("/api/proxy", headers=HEADERS, json={"session_id": session_id})
+        (standard,) = wait_copies(client, session_id)["proxies"]
+        missing = client.post("/api/proxy", headers=HEADERS, json={"session_id": session_id, "kind": "enhanced",
+                                                                   "segment_id": "00000000-0000-4000-8000-000000000000"})
+        assert missing.status_code == 404
+        started = client.post("/api/proxy", headers=HEADERS, json={"session_id": session_id, "kind": "enhanced", "segment_id": standard["segment_id"]})
+        assert started.status_code == 202, started.text
+        status = wait_copies(client, session_id)
+        (enhanced,) = status["enhanced"]
+        assert enhanced["kind"] == "enhanced" and enhanced["state"] == "ready" and [item["id"] for item in status["proxies"]] == [standard["id"]]
+        a = client.get(f"/api/proxy/{standard['id']}/frames", headers=HEADERS).json()
+        b = client.get(f"/api/proxy/{enhanced['id']}/frames", headers=HEADERS).json()
+        assert a["source_pts"] == b["source_pts"] and a["proxy_ms"] == b["proxy_ms"]
+        video = client.get(f"/api/proxy/{enhanced['id']}/video", headers=HEADERS)
+        assert video.status_code == 200 and video.content[:4] == b"\x1aE\xdf\xa3"
+        # Watching the enhanced copy is a receipt that names the view.
+        from backend.app.proxies import ProxyJobs
+        segment = store.segment_by_id(tmp_path / "app-data" / "bat_innovation.sqlite3", enhanced["segment_id"])
+        receipt = ProxyJobs(tmp_path / "app-data" / "bat_innovation.sqlite3", tmp_path / "app-data").receipt(
+            enhanced["id"], segment, [[int(b["source_pts"][0]), int(b["source_pts"][-1])]], 1)
+        assert receipt["view"] == "enhanced"
+
+
+def test_copy_kind_upgrade_from_v15_and_rollback(tmp_path: Path) -> None:
+    from backend.app import sample_store, template_store
+
+    db_path = legacy_v5(tmp_path)
+    for step in (store.upgrade_modality, tracking_store.upgrade, count_store.upgrade, candidate_store.upgrade, audio_store.upgrade,
+                 proxy_store.upgrade, tracking_store.upgrade_v2, count_store.upgrade_spans,
+                 sample_store.upgrade, template_store.upgrade):
+        step(db_path)
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("ALTER TABLE proxy ADD COLUMN kind TEXT")
+    with pytest.raises(sqlite3.OperationalError):
+        proxy_store.upgrade_kind(db_path)
+    assert store.schema_version(db_path) == store.TEMPLATE_SCHEMA_VERSION

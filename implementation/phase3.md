@@ -811,9 +811,9 @@ Separate from the 22/27 expansion tracker and the 7/7 Phase 2 tracker. Each box 
 - [x] X3: tracks-v3 association (speed limit, two-stage, flow prior, KD-tree) and the m-points crossing rule, with a v2/v3 benchmark.
 - [x] X4: guided setup (click to measure, noise map and suggested exclusions, presets, gate checks).
 - [x] X4: site templates (schema v15).
-- [ ] X5: enhanced view.
-- [ ] X6: track table, all-tracks map and group labels (schema v16).
-- [ ] X7: multiple gates at once, polyline gate, emergence profile and sunset (schema v17).
-- [ ] X8: overlay and highlights video, figures and PDF report (schema v18).
-- [ ] X9: several audio sources, proposed sync, call activity (schema v19).
+- [x] X5: enhanced view (schema v16, toggle rather than stacked copy).
+- [ ] X6: track table, all-tracks map and group labels (schema v17).
+- [ ] X7: multiple gates at once, polyline gate, emergence profile and sunset (schema v18).
+- [ ] X8: overlay and highlights video, figures and PDF report (schema v19).
+- [ ] X9: several audio sources, proposed sync, call activity (schema v20).
 - [ ] X10: Windows and real-footage validation (owner).

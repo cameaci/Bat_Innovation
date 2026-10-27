@@ -32,3 +32,12 @@ def test_a_faint_mover_leaves_a_warm_trail_and_a_cold_one_a_blue_trail() -> None
         assert quiet.max() <= 140 * PARAMETERS["scene_level"] + 10
         assert (np.abs(quiet[..., 0] - quiet[..., 2]) > 2).mean() < 0.01, "the static scene stays grey (rare noise blips aside)"
 
+
+
+def test_a_lighting_jump_does_not_flood_the_view() -> None:
+    frames = scene(30, 0)
+    jumped = [np.clip(image.astype(int) + 40, 0, 255).astype(np.uint8) for image in scene(5, 0, seed=4)]
+    enhancer = Enhancer(25.0)
+    out = [enhancer.frame(image) for image in frames + jumped]
+    coloured = np.abs(out[-1][..., 0].astype(int) - out[-1][..., 2].astype(int)) > 30
+    assert coloured.mean() < 0.01

@@ -1,4 +1,5 @@
-"""Disposable, OS-limited worker that encodes one segment's lossy playback copy (Phase 2, W1).
+"""Disposable, OS-limited worker that encodes one segment's lossy playback copy (Phase 2, W1), or its enhanced
+display copy (Phase 3 X5: the same frames and frame map, drawn by `enhance.Enhancer`).
 
 The copy is a display aid for continuous playback: VP9/WebM fitted to 960x540, timestamps in milliseconds from the
 segment's first source PTS, and a sidecar mapping every copy frame back to its exact source PTS. The original is
@@ -71,6 +72,12 @@ def render(payload: dict) -> dict:
                 raise ValueError("proxy_limit")
             first = int(metadata["first_pts"])
             time_base = video.time_base
+            enhancer = None
+            if payload.get("kind") == "enhanced":
+                from .enhance import Enhancer
+                from .track_worker import _timing
+
+                enhancer = Enhancer(_timing(metadata)[0])
             with av.open(str(output), "w", format="webm") as copy:
                 stream = preview_worker.vp9_stream(copy, metadata["width"], metadata["height"], lossless=False, threads=2)
                 durations: dict[int, int] = {}
@@ -94,7 +101,11 @@ def render(payload: dict) -> dict:
                         durations[proxy_ms[-1]] = millis - proxy_ms[-1]
                         mux(stream.encode(pending))
                     # reformat() may return the decoded frame itself, so its source PTS is read before retiming.
-                    converted = frame.reformat(width=stream.width, height=stream.height, format="yuv420p")
+                    if enhancer is not None:
+                        grey = frame.reformat(width=stream.width, height=stream.height, format="gray").to_ndarray()
+                        converted = av.VideoFrame.from_ndarray(enhancer.frame(grey), format="rgb24").reformat(format="yuv420p")
+                    else:
+                        converted = frame.reformat(width=stream.width, height=stream.height, format="yuv420p")
                     converted.pts, converted.time_base = millis, Fraction(1, 1000)
                     source_pts.append(pts)
                     proxy_ms.append(millis)

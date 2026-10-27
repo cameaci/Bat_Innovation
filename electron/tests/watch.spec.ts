@@ -50,6 +50,17 @@ test('Watch plays the prepared copy continuously and rings every tracked target 
     await shell.page.getByRole('button', { name: 'Flight map', exact: true }).click();
     await expect(shell.page.getByRole('region', { name: 'Flight map view', exact: true })).toBeVisible();
     await shell.page.getByRole('button', { name: 'Bats', exact: true }).click();
+    // The enhanced view is prepared on demand and replaces the picture at the same source time.
+    await shell.page.keyboard.press('e');
+    const enhancedStatus = shell.page.getByRole('status', { name: 'Enhanced view status' });
+    await expect(enhancedStatus).toContainText('no enhanced view yet');
+    await enhancedStatus.getByRole('button', { name: 'Prepare enhanced view', exact: true }).click();
+    await expect(enhancedStatus).toContainText('A derived display, not evidence', { timeout: 60_000 });
+    await expect.poll(() => video.evaluate(element => (element as HTMLVideoElement).readyState), { timeout: 30_000 }).toBeGreaterThanOrEqual(2);
+    await video.evaluate(element => { (element as HTMLVideoElement).currentTime = 0.2; });
+    await expect(shell.page.getByLabel('Tracks at this frame', { exact: true })).toHaveText('2', { timeout: 15_000 });
+    await shell.page.keyboard.press('e');
+    await expect(enhancedStatus).toHaveCount(0);
     await shell.page.getByRole('button', { name: '4x', exact: true }).click();
     expect(await video.evaluate(element => (element as HTMLVideoElement).playbackRate)).toBe(4);
     // At the end of the first video, playback continues with the next one.

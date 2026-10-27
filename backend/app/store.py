@@ -25,9 +25,11 @@ TRACKS_V2_SCHEMA_VERSION = 12
 GATE_SPAN_SCHEMA_VERSION = 13
 SAMPLE_CHECK_SCHEMA_VERSION = 14
 TEMPLATE_SCHEMA_VERSION = 15
+ENHANCED_SCHEMA_VERSION = 16
 EXPANSION_SCHEMA_VERSIONS = (MODALITY_SCHEMA_VERSION, TRACKING_SCHEMA_VERSION, COUNT_SCHEMA_VERSION, CANDIDATE_SCHEMA_VERSION,
                              AUDIO_SCHEMA_VERSION, PROXY_SCHEMA_VERSION, TRACKS_V2_SCHEMA_VERSION, GATE_SPAN_SCHEMA_VERSION,
-                             SAMPLE_CHECK_SCHEMA_VERSION, TEMPLATE_SCHEMA_VERSION)
+                             SAMPLE_CHECK_SCHEMA_VERSION, TEMPLATE_SCHEMA_VERSION,
+                             ENHANCED_SCHEMA_VERSION)
 CURRENT_SCHEMA_VERSION = EXPANSION_SCHEMA_VERSIONS[-1]
 QA_SCHEMA_VERSIONS = (QA_SCHEMA_VERSION, *EXPANSION_SCHEMA_VERSIONS)
 REVIEW_SCHEMA_VERSIONS = (REVIEW_SCHEMA_VERSION, *QA_SCHEMA_VERSIONS)
@@ -104,6 +106,8 @@ def initialise(db_path: Path) -> None:
             connection.execute("SELECT id, presses_json, result_json FROM sample_check LIMIT 1")
         if version >= TEMPLATE_SCHEMA_VERSION:
             connection.execute("SELECT id, value_json, retired_utc FROM site_template LIMIT 1")
+        if version >= ENHANCED_SCHEMA_VERSION:
+            connection.execute("SELECT kind FROM proxy LIMIT 1")
 
 
 def schema_version(db_path: Path) -> int:
@@ -176,7 +180,7 @@ def upgrade_expansion(db_path: Path) -> None:
 
     for step in (upgrade_modality, tracking_store.upgrade, count_store.upgrade, candidate_store.upgrade, audio_store.upgrade,
                  proxy_store.upgrade, tracking_store.upgrade_v2, count_store.upgrade_spans, sample_store.upgrade,
-                 template_store.upgrade):
+                 template_store.upgrade, proxy_store.upgrade_kind):
         step(db_path)
 
 

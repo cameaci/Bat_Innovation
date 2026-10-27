@@ -47,15 +47,40 @@ def upgrade(db_path: Path) -> None:
         connection.execute(f"PRAGMA user_version={store.PROXY_SCHEMA_VERSION}")
 
 
+def upgrade_kind(db_path: Path) -> None:
+    """Explicit v15 -> v16 transition: copies have a kind, standard (the scene as recorded) or enhanced (Phase 3 X5)."""
+    if not db_path.is_file():
+        raise store.DatabaseSchemaError("Enhanced display upgrade requires an existing version 15 database")
+    with closing(store.connect(db_path)) as connection, connection:
+        connection.execute("BEGIN IMMEDIATE")
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
+        if version >= store.ENHANCED_SCHEMA_VERSION:
+            return
+        if version != store.TEMPLATE_SCHEMA_VERSION:
+            raise store.DatabaseSchemaError("Enhanced display upgrade requires database schema version 15")
+        connection.execute("ALTER TABLE proxy ADD COLUMN kind TEXT NOT NULL DEFAULT 'standard' CHECK(kind IN ('standard','enhanced'))")
+        connection.execute(f"PRAGMA user_version={store.ENHANCED_SCHEMA_VERSION}")
+
+
+def _kinds(connection) -> bool:
+    return store.schema_version_of(connection) >= store.ENHANCED_SCHEMA_VERSION
+
+
 def ready_schema(db_path: Path) -> bool:
     return store.schema_version(db_path) >= store.PROXY_SCHEMA_VERSION
 
 
-def create(db_path: Path, segment_id: str, sha256: str) -> str:
+def create(db_path: Path, segment_id: str, sha256: str, kind: str = "standard") -> str:
     proxy_id = str(uuid4())
     with closing(store.connect(db_path)) as connection, connection:
-        connection.execute("INSERT INTO proxy (id, segment_id, source_sha256, state, started_at_utc) VALUES (?,?,?,?,?)",
-                           (proxy_id, segment_id, sha256, "queued", _now()))
+        if kind != "standard" and not _kinds(connection):
+            raise store.DatabaseSchemaError("Enhanced copies need storage version 16")
+        if _kinds(connection):
+            connection.execute("INSERT INTO proxy (id, segment_id, source_sha256, state, started_at_utc, kind) VALUES (?,?,?,?,?,?)",
+                               (proxy_id, segment_id, sha256, "queued", _now(), kind))
+        else:
+            connection.execute("INSERT INTO proxy (id, segment_id, source_sha256, state, started_at_utc) VALUES (?,?,?,?,?)",
+                               (proxy_id, segment_id, sha256, "queued", _now()))
     return proxy_id
 
 
@@ -84,9 +109,13 @@ def recover(db_path: Path) -> list[str]:
     return ids
 
 
+def _kind(row) -> str:
+    return row["kind"] if "kind" in row.keys() else "standard"
+
+
 def _public(row) -> dict:
     return {key: row[key] for key in ("id", "segment_id", "state", "width", "height", "frame_count", "duration_ms", "bytes",
-                                      "started_at_utc", "finished_at_utc")} | {"error": row["error_code"]}
+                                      "started_at_utc", "finished_at_utc")} | {"error": row["error_code"], "kind": _kind(row)}
 
 
 def get(db_path: Path, proxy_id: str) -> dict | None:
@@ -95,8 +124,8 @@ def get(db_path: Path, proxy_id: str) -> dict | None:
     return None if row is None else dict(row)
 
 
-def latest(db_path: Path, session_id: str) -> list[dict]:
-    """The newest copy per segment of the session, in segment order; segments without one are omitted."""
+def latest(db_path: Path, session_id: str, kind: str = "standard") -> list[dict]:
+    """The newest copy of one kind per segment of the session, in segment order; segments without one are omitted."""
     if not ready_schema(db_path):
         return []
     with closing(store.connect(db_path)) as connection:
@@ -105,12 +134,14 @@ def latest(db_path: Path, session_id: str) -> list[dict]:
             (session_id,)).fetchall()
     seen: dict[str, dict] = {}
     for row in rows:
-        seen.setdefault(row["segment_id"], _public(row))
+        if _kind(row) == kind:
+            seen.setdefault(row["segment_id"], _public(row))
     return list(seen.values())
 
 
-def ready_for(db_path: Path, segment: dict) -> dict | None:
+def ready_for(db_path: Path, segment: dict, kind: str = "standard") -> dict | None:
     with closing(store.connect(db_path)) as connection:
-        row = connection.execute("""SELECT * FROM proxy WHERE segment_id=? AND source_sha256=? AND state='ready'
-            ORDER BY started_at_utc DESC, rowid DESC LIMIT 1""", (segment["id"], segment["sha256"])).fetchone()
+        rows = connection.execute("""SELECT * FROM proxy WHERE segment_id=? AND source_sha256=? AND state='ready'
+            ORDER BY started_at_utc DESC, rowid DESC""", (segment["id"], segment["sha256"])).fetchall()
+    row = next((item for item in rows if _kind(item) == kind), None)
     return None if row is None else dict(row)

@@ -6,7 +6,9 @@ pixel's temporal noise from the same samples (the smaller of the deviation from 
 differences, so neither a slow target nor a lighting step inflates it); contrast in noise units after a light
 Gaussian; a persistence trail per polarity that keeps the strongest contrast and fades with a fixed half-life. The
 output is the scene at a third of its brightness in grey, with lighter-than-scene trails in orange and
-darker-than-scene trails in blue. Every constant is versioned in PARAMETERS.
+darker-than-scene trails in blue. Camera gain drift is fitted and undone first, and a frame where much of the image
+changes at once (a lighting jump, a keyframe, a camera move) adds nothing to the trails. Every constant is versioned in
+PARAMETERS.
 """
 
 from __future__ import annotations
@@ -16,8 +18,8 @@ from collections import deque
 import numpy as np
 from scipy import ndimage
 
-PARAMETERS = {"version": "enhance-v1", "samples": 9, "samples_per_second": 4, "sigma_px": 1.0, "floor": 1.0,
-              "start_z": 3.0, "full_z": 12.0, "half_life_s": 1.0, "scene_level": 0.35,
+PARAMETERS = {"version": "enhance-v1", "samples": 9, "samples_per_second": 4, "sigma_px": 1.5, "floor": 0.5,
+              "start_z": 5.0, "full_z": 12.0, "disturbed_fraction": 0.03, "max_gain_change": 10.0, "half_life_s": 1.0, "scene_level": 0.35,
               "warm_rgb": [255, 150, 30], "cold_rgb": [60, 170, 255]}
 
 
@@ -43,6 +45,22 @@ class Enhancer:
         else:
             self.noise = np.full(stack.shape[1:], 4.0 * PARAMETERS["floor"], np.float32)
 
+    def _compensated(self, image: np.ndarray) -> np.ndarray:
+        """Undo a camera gain or offset drift against the background (fitted on quiet pixels), as the tracker does;
+        larger changes are left visible."""
+        assert self.background is not None and self.noise is not None
+        difference = image - self.background
+        quiet = np.abs(difference - np.median(difference)) < 3 * self.noise
+        if int(quiet.sum()) < 100:
+            return image
+        b, d = self.background[quiet], image[quiet]
+        variance = float(b.var())
+        gain = min(1.5, max(0.67, float(((b - b.mean()) * (d - d.mean())).mean() / variance) if variance > 1e-6 else 1.0))
+        offset = float(d.mean() - gain * b.mean())
+        if abs(gain - 1) * float(b.mean()) + abs(offset) > PARAMETERS["max_gain_change"]:
+            return image
+        return (image - offset) / gain
+
     def frame(self, gray: np.ndarray) -> np.ndarray:
         """RGB uint8 of the enhanced view for one grey frame (frames must arrive in order)."""
         image = gray.astype(np.float32)
@@ -51,10 +69,14 @@ class Enhancer:
             self._model()
         self.index += 1
         assert self.background is not None and self.noise is not None
-        z = ndimage.gaussian_filter(image - self.background, PARAMETERS["sigma_px"]) / self.noise
+        z = ndimage.gaussian_filter(self._compensated(image) - self.background, PARAMETERS["sigma_px"]) / self.noise
         span = PARAMETERS["full_z"] - PARAMETERS["start_z"]
         light = np.clip((z - PARAMETERS["start_z"]) / span, 0, 1)
         dark = np.clip((-z - PARAMETERS["start_z"]) / span, 0, 1)
+        if float(((light > 0) | (dark > 0)).mean()) > PARAMETERS["disturbed_fraction"]:
+            # A lighting jump, a keyframe or a camera move lights up much of the frame: no target stands out there,
+            # so the frame adds nothing to the trails rather than flooding the view.
+            light = dark = np.zeros_like(z)
         self.light = light if self.light is None else np.maximum(self.light * self.decay, light)
         self.dark = dark if self.dark is None else np.maximum(self.dark * self.decay, dark)
         scene = (image * PARAMETERS["scene_level"])[..., None]

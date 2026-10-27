@@ -42,7 +42,11 @@ export function WatchPage() {
   const copies = survey.playback?.proxies ?? [];
   const [position, setPosition] = useState(0);
   const segment = segments[Math.min(position, Math.max(0, segments.length - 1))];
-  const copy = copies.find(item => item.segment_id === segment?.id && item.state === 'ready') ?? null;
+  const [look, setLook] = useState<'standard' | 'enhanced'>('standard');
+  const enhancedCopy = (survey.playback?.enhanced ?? []).find(item => item.segment_id === segment?.id) ?? null;
+  const standardCopy = copies.find(item => item.segment_id === segment?.id && item.state === 'ready') ?? null;
+  // The enhanced display has the same frames and frame map; switching keeps the displayed source time.
+  const copy = look === 'enhanced' && enhancedCopy?.state === 'ready' ? enhancedCopy : standardCopy;
   const [frames, setFrames] = useState<PlaybackFrames | null>(null);
   const [frameError, setFrameError] = useState('');
   const [displayed, setDisplayed] = useState<DisplayedFrame | null>(null);
@@ -341,6 +345,12 @@ export function WatchPage() {
     } else { setAutoPlay(play); setStartAt(target); setPosition(index); }
   }
 
+  function switchLook() {
+    const frame = lastFrame.current;
+    if (frame) { setStartAt(frame.pts); setAutoPlay(playingRef.current); }
+    setLook(current => current === 'standard' ? 'enhanced' : 'standard');
+  }
+
   function clearTest() { setTest(null); setTestRange(null); setIgnored([]); setMeasured(null); }
 
   function startSample() {
@@ -426,6 +436,7 @@ export function WatchPage() {
       SPEEDS.forEach((_, index) => { actions[String(index + 1)] = () => setSpeed(index); });
       actions.v = () => setLayout(current => current === 'split' ? 'single' : 'split');
       actions.m = () => void markWatched();
+      actions.e = () => switchLook();
       actions.c = () => setBoard(current => current === 'band' ? 'corner' : current === 'corner' ? 'off' : 'band');
       const action = actions[event.key];
       if (action) { event.preventDefault(); action(); }
@@ -506,6 +517,9 @@ export function WatchPage() {
                 {(['boxes', 'dots', 'rings'] as const).map(value => <button key={value} type="button" aria-pressed={markerStyle === value} onClick={() => setMarkerStyle(value)}
                   className={cn('rounded px-2 py-0.5 text-xs', markerStyle === value ? 'bg-slate-100 text-slate-900' : 'text-slate-300 hover:bg-slate-800')}>{value[0]!.toUpperCase() + value.slice(1)}</button>)}
               </div>
+              <button type="button" aria-pressed={look === 'enhanced'} aria-label="Enhanced view (E)" onClick={switchLook}
+                title="Motion boost: moving targets as fading trails over a dimmed scene (orange lighter, blue darker). A display aid, not evidence."
+                className={cn('rounded px-2 py-0.5 text-xs', look === 'enhanced' ? 'bg-orange-500 text-slate-950' : 'text-slate-300 hover:bg-slate-800')}>Enhanced (E)</button>
               <button type="button" aria-pressed={showNoise} onClick={() => setShowNoise(!showNoise)} title="Noise tracks are hidden by default; they never count."
                 className={cn('rounded px-2 py-0.5 text-xs', showNoise ? 'bg-slate-100 text-slate-900' : 'text-slate-300 hover:bg-slate-800')}>Noise {showNoise ? 'shown' : 'hidden'}</button>
               <button type="button" aria-label="Count board (C)" onClick={() => setBoard(board === 'band' ? 'corner' : board === 'corner' ? 'off' : 'band')}
@@ -520,13 +534,18 @@ export function WatchPage() {
             <Button size="sm" variant="outline" className="border-slate-600 bg-transparent text-slate-100" disabled={!displayed}
               onClick={() => { player.current?.pause(); setVerify(displayed ? String(Math.round(displayed.pts)) : null); }}><ScanSearch />Verify original</Button>
           </div>
+          {look === 'enhanced' && segment && <p role="status" aria-label="Enhanced view status" className="rounded-md bg-orange-500/15 px-3 py-1 text-xs text-orange-100">
+            {enhancedCopy?.state === 'ready' ? 'Enhanced view: moving targets as fading trails, orange lighter and blue darker than the scene. A derived display, not evidence; Verify opens the original.'
+              : enhancedCopy && ['queued', 'running'].includes(enhancedCopy.state) ? 'Preparing the enhanced view of this video...'
+              : <>This video has no enhanced view yet{enhancedCopy?.error ? ` (last attempt: ${enhancedCopy.error})` : ''}. <button type="button" className="underline" onClick={() => void survey.startEnhanced(segment.id)}>Prepare enhanced view</button> (about three times the work of a playback copy).</>}
+          </p>}
           {trackingRun && tracksShown < tracksTotal && <p role="status" aria-label="Display limit" className="rounded-md bg-amber-500/15 px-3 py-1 text-xs text-amber-200">
             Showing {tracksShown} of {tracksTotal} tracks in these 10 s (display limit, steadiest first); counts and exports include all.</p>}
           {trackingRun && noiseHidden > 0 && !showNoise && <p className="text-[11px] text-slate-500" aria-label="Hidden noise">{noiseHidden} noise tracks hidden here; they never count.</p>}
           <SurveyTimeline segments={segments} windows={survey.run?.windows ?? []} windowCounts={survey.tracking?.window_counts ?? {}}
             counts={counts} events={events} current={displayed ? { segmentID: segment.id, pts: displayed.pts } : null} onSeek={goTo} />
           <p className="text-[11px] text-slate-500">Timeline: red bars tracks per window, cyan in, magenta out, amber undecided, violet crossings per minute, x camera moved, green reviewed windows, hatched gaps between videos not marked contiguous.</p>
-          <p className="text-xs text-slate-500">Space play/pause - , . frame step - arrows 5 s - 1-6 speed - V side by side - C count board. Playback copy: lossy VP9 for viewing; Verify opens the exact original frames.</p>
+          <p className="text-xs text-slate-500">Space play/pause - , . frame step - arrows 5 s - 1-6 speed - V side by side - C count board - E enhanced view. Playback copy: lossy VP9 for viewing; Verify opens the exact original frames.</p>
         </section>
         <aside className={cn('space-y-3', layout === 'split' && 'grid gap-3 space-y-0 md:grid-cols-2 xl:grid-cols-3')}>
           <div className={cn('flex gap-1', layout === 'split' && 'md:col-span-2 xl:col-span-3')} role="tablist" aria-label="Side panel">

@@ -6,6 +6,8 @@ original previews, reviews and tracking stay available while a long survey is be
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fractions import Fraction
 import hashlib
 import json
@@ -82,9 +84,11 @@ class ProxyJobs:
         if not store.session_exists(self.db_path, session_id):
             raise ProxyError("session_missing", 404)
         return {"session_id": session_id, "active": self._session == session_id,
-                "proxies": proxy_store.latest(self.db_path, session_id)}
+                "proxies": proxy_store.latest(self.db_path, session_id),
+                "enhanced": proxy_store.latest(self.db_path, session_id, "enhanced")}
 
-    def start(self, session_id: str) -> dict:
+    def start(self, session_id: str, kind: str = "standard", segment_id: str | None = None) -> dict:
+        """Copies of every segment without one (standard), or the enhanced display copy of one segment on demand."""
         if not workers.supported():
             raise ProxyError("proxy_limits_unavailable")
         if not proxy_store.ready_schema(self.db_path):
@@ -97,9 +101,16 @@ class ProxyJobs:
             if self._closed or self._session is not None:
                 raise ProxyError("proxy_busy")
             todo = []
-            for segment in store.private_segments(self.db_path, session_id):
-                if proxy_store.ready_for(self.db_path, segment) is None:
-                    todo.append((proxy_store.create(self.db_path, segment["id"], segment["sha256"]), segment))
+            segments = store.private_segments(self.db_path, session_id)
+            if kind == "enhanced":
+                if store.schema_version(self.db_path) < store.ENHANCED_SCHEMA_VERSION:
+                    raise ProxyError("proxy_upgrade_required")
+                segments = [segment for segment in segments if segment["id"] == segment_id]
+                if not segments:
+                    raise ProxyError("session_missing", 404)
+            for segment in segments:
+                if proxy_store.ready_for(self.db_path, segment, kind) is None:
+                    todo.append((proxy_store.create(self.db_path, segment["id"], segment["sha256"], kind), segment, kind))
             if todo:
                 self._session, self._cancel = session_id, Event()
                 self._thread = Thread(target=self._run, args=(todo, self._cancel), daemon=True)
@@ -110,18 +121,19 @@ class ProxyJobs:
         with self._lock:
             self._process = process
 
-    def _one(self, proxy_id: str, segment: dict, cancelled: Event) -> None:
+    def _one(self, proxy_id: str, segment: dict, kind: str, cancelled: Event) -> None:
         code, value = "proxy_failed", None
         try:
             state = source_state(segment)
             if state != "ready":
                 code = state
                 return
-            cpu = cpu_seconds(_seconds(json.loads(segment["metadata_json"])))
+            # The enhanced display computes a background model per frame, about three times the work of a copy.
+            cpu = cpu_seconds(_seconds(json.loads(segment["metadata_json"]))) * (3 if kind == "enhanced" else 1)
             proxy_store.set_running(self.db_path, proxy_id)
             video, frames = self.paths(proxy_id)
             payload = {"parent_pid": os.getpid(), "db_path": str(self.db_path), "segment_id": segment["id"],
-                       "output_path": str(video), "frames_path": str(frames), "cpu_seconds": cpu}
+                       "output_path": str(video), "frames_path": str(frames), "cpu_seconds": cpu, "kind": kind}
             status, body = workers.supervise("proxy_worker", payload, cancelled.is_set, 2 * cpu, MEMORY_BYTES, cpu,
                                              MAX_REQUEST_BYTES, MAX_RESULT_BYTES, self._set_process)
             if status == "ok" and isinstance(body, dict) and set(body) == {"error", "value"}:
@@ -141,13 +153,13 @@ class ProxyJobs:
                 self._remove(proxy_id)
             proxy_store.finish(self.db_path, proxy_id, state, code, value)
 
-    def _run(self, todo: list[tuple[str, dict]], cancelled: Event) -> None:
+    def _run(self, todo: list[tuple[str, dict, str]], cancelled: Event) -> None:
         try:
-            for proxy_id, segment in todo:
+            for proxy_id, segment, kind in todo:
                 if cancelled.is_set() or self._closed:
                     proxy_store.finish(self.db_path, proxy_id, "cancelled", "cancelled")
                     continue
-                self._one(proxy_id, segment, cancelled)
+                self._one(proxy_id, segment, kind, cancelled)
         finally:
             with self._lock:
                 self._session = None
@@ -195,7 +207,7 @@ class ProxyJobs:
         if (row["segment_id"] != segment["id"] or row["source_sha256"] != segment["sha256"] or not intervals
                 or any(start > end or str(start) not in frames or str(end) not in frames for start, end in intervals)):
             raise ProxyError("playback_unverified")
-        return {"kind": "playback_copy", "proxy_id": proxy_id, "frames_sha256": row["frames_sha256"],
+        return {"kind": "playback_copy", "view": row["kind"] if "kind" in row else "standard", "proxy_id": proxy_id, "frames_sha256": row["frames_sha256"],
                 "intervals": [[str(start), str(end)] for start, end in intervals], "max_rate": max_rate}
 
     def close(self) -> None:
@@ -212,10 +224,15 @@ class SessionRequest(BaseModel):
     session_id: UUID
 
 
+class StartRequest(SessionRequest):
+    kind: Literal["standard", "enhanced"] = "standard"
+    segment_id: UUID | None = None
+
+
 def install_routes(app: FastAPI, jobs: ProxyJobs, authenticate) -> None:
     @app.post("/api/proxy", status_code=202, dependencies=[Depends(authenticate)])
-    def start(payload: SessionRequest) -> dict:
-        return jobs.start(str(payload.session_id))
+    def start(payload: StartRequest) -> dict:
+        return jobs.start(str(payload.session_id), payload.kind, str(payload.segment_id) if payload.segment_id else None)
 
     @app.get("/api/proxy", dependencies=[Depends(authenticate)])
     def status(session_id: UUID) -> dict:
