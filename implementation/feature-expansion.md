@@ -242,3 +242,7 @@ Phase 2 tracker (separate from the 22/27 above): **7/7**.
 - [x] W5: flight map, split/single panes and survey timeline.
 - [x] W6: event reel, smart speed, watched-window receipts and retired pages.
 - [x] W7: export v3, docs and frozen smoke.
+
+## 10. Phase 3: catching up with the reference tools
+
+Owner approval 2026-10-27. The plan, measured findings and tracker are in [phase3.md](phase3.md).

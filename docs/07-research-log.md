@@ -1,5 +1,15 @@
 # 07 - Research log
 
+## 2026-10-27 - Phase 3 research: reference tools and tracks-v2 on their clips
+
+**Question:** why do ThruTracker, TrackBats, O-GEO and DarkFlight UltraVision look and count better than this app on the owner's examples, and what should be built?
+
+**Sources:** the owner's shared clips of those tools (kept outside the repository), the ThruTracker 3.0 user guide and 2021 paper, the TrackBats site, pricing and four articles, and Ahlberg, Kuczynska and Kloepper 2025 (J. N. Am. Bat Res. SI1:46-58). LinkedIn posts were not accessible.
+
+**Measured (scratch runs of the repository tracker; the tools' counters are their outputs, not ground truth):** on the O-GEO church clip tracks-v2 produced 384 tracks in 11.5 s and 188 uncertain crossings against O-GEO's 29, with detection bursts of 99-126 per frame at camera gain jumps and temporal noise of about 3 grey levels on sky and 10-12 on stone. On ThruTracker's mass-emergence scene (about 500 exits in 4.8 s) it proposed 28 coherent exits, left 1,025 uncertain crossings and took about 5 minutes (0.9 frames/s; 75 % association, 20 % tracklet joining). About a third of frames in both clips repeat. Gain compensation, a noise-adaptive threshold or repeated-frame skipping alone did not fix the counts.
+
+**Decision (owner, 2026-10-27):** Phase 3 X1-X10 approved; see [implementation/phase3.md](../implementation/phase3.md).
+
 ## 2026-10-26 - Phase 2 closing check (W7)
 
 **Verified on Linux:** backend 433 tests passed (45 skipped), Node 58 tests, Playwright 27 end-to-end tests passed (1 skipped), including Watch, calibration, counting and reel. The frozen PyInstaller backend (296 MB) passed the extended smoke test: import, preview, summaries, tracking, a tracking test run that stores nothing, the playback copy with its frame map, export and an unchanged original. Export schema v3 was introduced with W4.
