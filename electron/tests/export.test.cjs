@@ -79,7 +79,7 @@ for (const mode of ['wrong-mime','wrong-length','wrong-hash','truncated','oversi
 }
 
 function manifest(run) {
-  return {schema_version:'bat-provisional-csv-v3',provisional_label:'PROVISIONAL — NOT ECOLOGICALLY FINALISED',run_id:run,
+  return {schema_version:'bat-provisional-csv-v4',provisional_label:'PROVISIONAL — NOT ECOLOGICALLY FINALISED',run_id:run,
     files:Object.fromEntries(Object.entries(EXPORT_FILES).map(([key,name])=>[key,{name,bytes:10,sha256:'0'.repeat(64)}]))};
 }
 for(const mode of ['enospc','rename-obstruction','cancel']) {

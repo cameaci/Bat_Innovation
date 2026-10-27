@@ -1,5 +1,5 @@
 import type { FlightMap } from '../../../../electron/src/contracts';
-import type { View } from './BatsLayer';
+import { trackColour, type View } from './BatsLayer';
 import type { TrackData } from './tracks';
 
 /** Cumulative grids: prefix[b] holds every point of bins before b. Built once per loaded map. */
@@ -79,4 +79,53 @@ export function drawFlightMap(context: CanvasRenderingContext2D, view: View, ind
   context.fillStyle = '#e2e8f0';
   context.font = `${11 * view.dpr}px ui-sans-serif, system-ui`;
   context.fillText(`Track points, not individuals (max ${max})`, x, y - 4 * view.dpr);
+}
+
+/**
+ * Every track of the video at once (TrackBats-style): each path in its colour with a hollow circle where it was first
+ * seen and an arrowhead where it was last seen. Selected tracks are drawn white and the focused one thicker.
+ */
+export function drawAllTracks(context: CanvasRenderingContext2D, view: View, tracks: TrackData[], selected: Set<string>, focused: string | null) {
+  const px = (x: number) => view.dx + x * view.scale, py = (y: number) => view.dy + y * view.scale;
+  context.save();
+  context.lineCap = 'round';
+  context.lineJoin = 'round';
+  // Unselected first so selections stay on top.
+  const ordered = [...tracks].sort((a, b) => Number(selected.has(a.id) || a.id === focused) - Number(selected.has(b.id) || b.id === focused));
+  for (const track of ordered) {
+    const count = track.x.length;
+    if (count === 0) continue;
+    const marked = selected.has(track.id) || track.id === focused;
+    const colour = marked ? '#ffffff' : trackColour(track.index);
+    context.strokeStyle = colour;
+    context.globalAlpha = marked ? 1 : selected.size > 0 ? 0.35 : 0.8;
+    context.lineWidth = (track.id === focused ? 3.5 : marked ? 2.5 : 1.5) * view.dpr;
+    context.setLineDash(track.quality === 'uncertain' ? [4 * view.dpr, 3 * view.dpr] : []);
+    context.beginPath();
+    for (let i = 0; i < count; i += 1) { if (i === 0) context.moveTo(px(track.x[i]!), py(track.y[i]!)); else context.lineTo(px(track.x[i]!), py(track.y[i]!)); }
+    context.stroke();
+    context.setLineDash([]);
+    context.beginPath();
+    context.arc(px(track.x[0]!), py(track.y[0]!), 4 * view.dpr, 0, Math.PI * 2);
+    context.stroke();
+    if (count > 1) {
+      const x1 = px(track.x[count - 1]!), y1 = py(track.y[count - 1]!);
+      const back = Math.max(0, count - 4);
+      const angle = Math.atan2(y1 - py(track.y[back]!), x1 - px(track.x[back]!));
+      const size = 7 * view.dpr;
+      context.fillStyle = colour;
+      context.beginPath();
+      context.moveTo(x1, y1);
+      context.lineTo(x1 - size * Math.cos(angle - 0.45), y1 - size * Math.sin(angle - 0.45));
+      context.lineTo(x1 - size * Math.cos(angle + 0.45), y1 - size * Math.sin(angle + 0.45));
+      context.closePath();
+      context.fill();
+    }
+  }
+  context.restore();
+  context.fillStyle = 'rgba(2, 6, 23, 0.7)';
+  context.fillRect(view.dx + 4 * view.dpr, view.dy + 4 * view.dpr, 300 * view.dpr, 20 * view.dpr);
+  context.fillStyle = '#e2e8f0';
+  context.font = `${11 * view.dpr}px ui-sans-serif, system-ui`;
+  context.fillText(`All ${tracks.length} tracks: o first seen, > last seen`, view.dx + 10 * view.dpr, view.dy + 18 * view.dpr);
 }

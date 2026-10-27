@@ -211,3 +211,29 @@ test('the declared recording clock is shown in its own offset', async () => {
   assert.equal(time.anchoredClock('2026-08-10T23:59:59.900Z', 0.2), '00:00:00.100');
   assert.equal(time.anchoredClock('not a time', 1), null);
 });
+
+test('the track table joins labels and gate crossings, filters and selects by area', async () => {
+  const table = await rendererModule('lib/trackTable');
+  const segment = (id, first) => ({ id, metadata: { time_base: { num: '1', den: '1000' }, first_pts: String(first) } });
+  const segments = [segment('s1', 0), segment('s2', 5000)];
+  const candidate = (id, segment_id, index, first, last, quality, points = 10) => ({ track_id: id, segment_id, track_index: index, first_pts: String(first),
+    last_pts: String(last), point_count: points, quality, window_id: null, revision: 0, decision: null });
+  const candidates = [candidate('b', 's2', 0, 6000, 6500, 'uncertain', 4), candidate('a', 's1', 1, 2000, 4000, 'coherent', 30), candidate('n', 's1', 0, 1000, 1100, 'noise')];
+  const labels = { events: [], custom: [], categories: ['exit'], tracks: { a: { category: 'exit', species: 'Pipistrellus pygmaeus', comment: '', actor: 'R', utc: '', event_id: 'e' } } };
+  const crossings = [{ track_id: 'a', direction: 'A_to_B' }, { track_id: 'b', direction: 'B_to_A' }];
+  const rows = table.trackRows(candidates, labels, crossings, 'B_to_A', segments);
+  assert.deepEqual(rows.map(row => row.id), ['n', 'a', 'b'], 'survey order: video, then time');
+  assert.deepEqual(rows.map(row => row.crossings), [[], ['out'], ['in']]);
+  assert.equal(rows[1].seconds, 2);
+  assert.equal(rows[2].start, 1, 'seconds from the start of its own video');
+  assert.equal(rows[1].category, 'exit');
+  const all = { quality: 'all', label: 'all', crossed: false, video: null };
+  assert.deepEqual(table.filterRows(rows, { ...all, label: 'unlabelled' }, 'time').map(row => row.id), ['n', 'b']);
+  assert.deepEqual(table.filterRows(rows, { ...all, crossed: true, video: 's1' }, 'time').map(row => row.id), ['a']);
+  assert.deepEqual(table.filterRows(rows, all, 'points').map(row => row.id), ['a', 'n', 'b']);
+  const square = [[0, 0], [10, 0], [10, 10], [0, 10]];
+  assert.equal(table.inside([5, 5], square), true);
+  assert.equal(table.inside([15, 5], square), false);
+  assert.deepEqual(table.tracksInArea([{ id: 'in', x: [20, 5], y: [20, 5] }, { id: 'out', x: [20, 30], y: [5, 5] }], square), ['in']);
+  assert.equal(table.categoryName('fly_by'), 'fly-by');
+});

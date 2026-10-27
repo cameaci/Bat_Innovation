@@ -13,7 +13,7 @@ const failure = () => ({ ok: false, error: { code: 'export_write_failed', messag
 const empty = { cancelled: true, folder_name: '', files: [] };
 
 export function validExportManifest(value: ExportManifest | null, runID: string): value is ExportManifest {
-  return !!value && value.schema_version === 'bat-provisional-csv-v3' && value.run_id === runID &&
+  return !!value && value.schema_version === 'bat-provisional-csv-v4' && value.run_id === runID &&
     value.provisional_label === 'PROVISIONAL — NOT ECOLOGICALLY FINALISED' && !!value.files &&
     Object.keys(value.files).length === 5 && (Object.keys(EXPORT_FILES) as ExportKind[]).every(kind => {
       const file = value.files[kind];
@@ -27,7 +27,7 @@ export function validExportManifest(value: ExportManifest | null, runID: string)
 export function validExportDiskManifest(value: unknown, runID: string): value is ExportDiskManifest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const row = value as Record<string, unknown>;
-  if (row.schema_version !== 'bat-provisional-csv-v3' || row.run_id !== runID ||
+  if (row.schema_version !== 'bat-provisional-csv-v4' || row.run_id !== runID ||
       row.provisional_label !== 'PROVISIONAL — NOT ECOLOGICALLY FINALISED' ||
       typeof row.as_of_utc !== 'string' || !row.as_of_utc ||
       typeof row.manifest_complete !== 'boolean' || typeof row.processing_complete !== 'boolean' ||

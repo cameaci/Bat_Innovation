@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw, ScanSearch, SkipBack, SkipForward } from 'lucide-react';
-import type { Candidate, SampleCheck, GateCounts, InvalidSpan, SceneEvent, MediaSegment, PlaybackFrames, TrackingSettings, TrackingTest } from '../../../electron/src/contracts';
+import type { Candidate, SampleCheck, TrackLabels, GateCounts, InvalidSpan, SceneEvent, MediaSegment, PlaybackFrames, TrackingSettings, TrackingTest } from '../../../electron/src/contracts';
 import { getAPI } from '../api';
 import { activeRun, activeTracking, useSurvey } from '../survey';
 import { clock } from '../lib/time';
@@ -12,13 +12,15 @@ import { Dialog } from '../components/ui/dialog';
 import { Progress } from '../components/ui/progress';
 import { SourcePreview } from '../components/SourcePreview';
 import { Player, type DisplayedFrame, type PlayerHandle, type PlayerView } from '../components/watch/Player';
-import { drawFlightMap, gridAt, indexFlightMap, type FlightIndex } from '../components/watch/FlightMap';
+import { drawAllTracks, drawFlightMap, gridAt, indexFlightMap, type FlightIndex } from '../components/watch/FlightMap';
 import { drawBats, type MarkerStyle, type View } from '../components/watch/BatsLayer';
 import { drawClock, frameClock } from '../components/watch/Hud';
 import { CHUNK_MS, useTracks } from '../components/watch/useTracks';
 import { drawDetections, drawSetup } from '../components/watch/SetupLayer';
 import { SetupPanel, type DrawKind } from '../components/watch/SetupPanel';
-import { floorIndex, toTrackData } from '../components/watch/tracks';
+import { floorIndex, toTrackData, type TrackData } from '../components/watch/tracks';
+import { TracksPanel } from '../components/watch/TracksPanel';
+import { trackRows, tracksInArea } from '../lib/trackTable';
 import { settingsOf } from '../lib/trackingSettings';
 import { applyMeasured, gateWarnings, measureAt } from '../lib/setupGuide';
 import { savedReviewer } from '../lib/reviewer';
@@ -139,7 +141,30 @@ export function WatchPage() {
     void getAPI()?.trackingEvents(trackingRun).then(result => { if (result.ok) setEvents(result.value); });
   }, [trackingRun]);
   const [flight, setFlight] = useState<FlightIndex | null>(null);
-  const [flightMode, setFlightMode] = useState<'building' | 'whole'>('building');
+  const [flightMode, setFlightMode] = useState<'building' | 'whole' | 'tracks'>('building');
+  const [labels, setLabels] = useState<TrackLabels | null>(null);
+  const [selectedTracks, setSelectedTracks] = useState<Set<string>>(new Set());
+  const [focusedTrack, setFocusedTrack] = useState<string | null>(null);
+  // Every track of the displayed video, for the all-tracks map and area selection (loaded when either is in use).
+  const [allTracks, setAllTracks] = useState<{ segmentID: string; tracks: TrackData[]; shown: number; total: number } | null>(null);
+  const needAll = Boolean(trackingRun && segment && (flightMode === 'tracks' || panel === 'tracks'));
+  useEffect(() => {
+    if (!needAll || !trackingRun || !segment || allTracks?.segmentID === segment.id) return;
+    let active = true;
+    void getAPI()?.getTracks(trackingRun, segment.id, segment.metadata.first_pts, null, false).then(result => {
+      if (!active) return;
+      if (!result.ok) { setFrameError(result.error.message); return; }
+      try { setAllTracks({ segmentID: segment.id, tracks: result.value.tracks.map(toTrackData), shown: result.value.shown, total: result.value.total }); }
+      catch (problem) { setFrameError(problem instanceof Error ? problem.message : 'Tracks could not be read.'); }
+    });
+    return () => { active = false; };
+  }, [needAll, trackingRun, segment?.id, allTracks?.segmentID]);
+  useEffect(() => { setAllTracks(null); setSelectedTracks(new Set()); setFocusedTrack(null); }, [trackingRun]);
+  useEffect(() => {
+    setLabels(null);
+    if (!trackingRun || (survey.media?.schema_version ?? 0) < 17) return;
+    void getAPI()?.listLabels(trackingRun).then(result => { if (result.ok) setLabels(result.value); });
+  }, [trackingRun, survey.media?.schema_version]);
   useEffect(() => {
     setFlight(null);
     if (!trackingRun || !segment) return;
@@ -172,9 +197,17 @@ export function WatchPage() {
   // Overlays that belong to whichever view takes clicks: setup shapes, the size reference and a gate being drawn.
   const extras = useCallback((context: CanvasRenderingContext2D, view: View) => {
     if (panel === 'setup' && segment) {
-      drawSetup(context, view, { area: settings.detection_area, exclusions: settings.exclusions, draft, draftKind: drawing,
+      drawSetup(context, view, { area: settings.detection_area, exclusions: settings.exclusions, draft, draftKind: drawing === 'select' ? null : drawing,
         reference: reference ?? [segment.metadata.width / 2, segment.metadata.height / 2], targetPx: settings.target_px,
         suggestions: suggestions.map(item => item.points) });
+    }
+    if (drawing === 'select' && draft.length > 0) {
+      context.strokeStyle = '#38bdf8';
+      context.lineWidth = 2 * view.dpr;
+      context.beginPath();
+      draft.forEach(([x, y], index) => { const px = view.dx + x * view.scale, py = view.dy + y * view.scale; if (index === 0) context.moveTo(px, py); else context.lineTo(px, py); });
+      if (draft.length > 2) context.closePath();
+      context.stroke();
     }
     if (gateDraft && gateDraft.points.length > 0) {
       context.strokeStyle = '#fde047';
@@ -194,13 +227,14 @@ export function WatchPage() {
         drawDetections(context, view, test.result, frame.pts);
         setLive(drawBats(context, view, testTracks, frame.pts, rate));
       } else {
-        setLive(drawBats(context, view, tracks, frame.pts, rate, { highlight: reelItem?.trackID ?? null, style: markerStyle, showRejected: showNoise }));
+        setLive(drawBats(context, view, tracks, frame.pts, rate, { highlight: reelItem?.trackID ?? focusedTrack, style: markerStyle, showRejected: showNoise }));
         if (counts && segment && board !== 'off') drawCounts(context, view, counts, order, segment.id, frame.pts, rate, tracks, board);
       }
       if (segment) drawClock(context, view, frameClock(segment, survey.media?.clock_anchor ?? null, frame.pts), frame.index + 1);
     } },
     { key: 'flight', label: 'Flight map', draw: (context, view, frame) => {
-      if (flight) drawFlightMap(context, view, flight, flightMode === 'whole' ? flight.total : gridAt(flight, tracks, frame.pts));
+      if (flightMode === 'tracks') { if (allTracks && allTracks.segmentID === segment?.id) drawAllTracks(context, view, allTracks.tracks, selectedTracks, focusedTrack); }
+      else if (flight) drawFlightMap(context, view, flight, flightMode === 'whole' ? flight.total : gridAt(flight, tracks, frame.pts));
       extras(context, view);
     } },
     { key: 'count', label: 'Count', draw: (context, view, frame) => {
@@ -209,7 +243,7 @@ export function WatchPage() {
       extras(context, view);
       if (segment) drawClock(context, view, frameClock(segment, survey.media?.clock_anchor ?? null, frame.pts), frame.index + 1);
     } },
-  ], [extras, testTracks, test, tracks, rate, flight, flightMode, counts, segment, order, reelItem, markerStyle, showNoise, board, survey.media?.clock_anchor]);
+  ], [extras, testTracks, test, tracks, rate, flight, flightMode, allTracks, selectedTracks, focusedTrack, counts, segment, order, reelItem, markerStyle, showNoise, board, survey.media?.clock_anchor]);
   useEffect(() => { player.current?.redraw(); }, [views, layout, viewKey]);
 
   const loadCandidates = useCallback(async () => {
@@ -334,10 +368,11 @@ export function WatchPage() {
   }
 
   /** Show a moment of the survey from one second before it, opening another video when needed. */
-  function goTo(segmentID: string, pts: string, play = false) {
+  function goTo(segmentID: string, pts: string, play = false, exact = false) {
     const index = segments.findIndex(item => item.id === segmentID);
     if (index < 0) return;
-    const target = Math.max(Number(segments[index]!.metadata.first_pts), Number(pts) - ticksPerSecond(segments[index]!));
+    // Events are approached from a second before; a track row goes to the track's first frame exactly.
+    const target = exact ? Number(pts) : Math.max(Number(segments[index]!.metadata.first_pts), Number(pts) - ticksPerSecond(segments[index]!));
     if (index === position) {
       player.current?.pause();
       player.current?.seekPTS(target);
@@ -382,6 +417,25 @@ export function WatchPage() {
     await loadSampleChecks();
   }
 
+  const rows = useMemo(() => trackRows(candidates, labels, counts?.crossings ?? [], counts?.gate.entry_direction ?? null, segments),
+    [candidates, labels, counts, segments]);
+  async function saveLabel(input: { track_ids: string[]; category: string; species: string; comment: string }): Promise<string | null> {
+    const api = getAPI();
+    if (!api || !trackingRun) return 'No tracking run.';
+    const result = await api.saveLabel(trackingRun, { actor: actor.trim(), ...input });
+    if (!result.ok) return result.error.message;
+    setLabels(result.value);
+    return null;
+  }
+  async function undoLabel(eventID: string): Promise<string | null> {
+    const api = getAPI();
+    if (!api || !trackingRun) return 'No tracking run.';
+    const result = await api.undoLabel(trackingRun, eventID, actor.trim());
+    if (!result.ok) return result.error.message;
+    setLabels(result.value);
+    return null;
+  }
+
   function pick(point: [number, number]) {
     if (gateDraft) setGateDraft(addPoint(gateDraft, point));
     else if (drawing) setDraft(previous => previous.length < 32 ? [...previous, point] : previous);
@@ -394,6 +448,12 @@ export function WatchPage() {
 
   function finishShape() {
     if (draft.length < 3 || !drawing) return;
+    if (drawing === 'select') {
+      const found = tracksInArea(allTracks?.segmentID === segment?.id ? allTracks!.tracks : [], draft);
+      setSelectedTracks(previous => new Set([...previous, ...found]));
+      setDraft([]); setDrawing(null);
+      return;
+    }
     const key = drawing === 'area' ? 'detection_area' : 'exclusions';
     setSettings(previous => ({ ...previous, [key]: [...previous[key], draft] }));
     setDraft([]); setDrawing(null);
@@ -492,7 +552,7 @@ export function WatchPage() {
           <div className="w-full">
             <Player key={frames.id} ref={player} frames={frames} sourceWidth={segment.metadata.width} sourceHeight={segment.metadata.height}
               views={views} layout={layout} active={viewKey} onFrame={onFrame} onPlaying={value => { playingRef.current = value; setPlaying(value); if (!value) coverage.flush(); }} onEnded={next} autoPlay={autoPlay}
-              startPTS={startAt} onPick={panel === 'setup' || gateDraft ? pick : undefined} />
+              startPTS={startAt} onPick={panel === 'setup' || gateDraft || drawing === 'select' ? pick : undefined} />
           </div>
           <div className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm">
             <Button size="sm" variant="ghost" className="text-slate-100" aria-label="Previous video" disabled={position === 0} onClick={() => { setAutoPlay(false); setPosition(position - 1); }}><SkipBack /></Button>
@@ -524,9 +584,9 @@ export function WatchPage() {
                 className={cn('rounded px-2 py-0.5 text-xs', showNoise ? 'bg-slate-100 text-slate-900' : 'text-slate-300 hover:bg-slate-800')}>Noise {showNoise ? 'shown' : 'hidden'}</button>
               <button type="button" aria-label="Count board (C)" onClick={() => setBoard(board === 'band' ? 'corner' : board === 'corner' ? 'off' : 'band')}
                 className="rounded px-2 py-0.5 text-xs text-slate-300 hover:bg-slate-800">Board: {board} (C)</button>
-              <button type="button" aria-pressed={flightMode === 'whole'} title="Flight map: build up with playback or show the whole video"
-                onClick={() => setFlightMode(flightMode === 'whole' ? 'building' : 'whole')}
-                className="rounded px-2 py-0.5 text-xs text-slate-300 hover:bg-slate-800">Map: {flightMode === 'whole' ? 'whole video' : 'so far'}</button>
+              <button type="button" aria-pressed={flightMode !== 'building'} title="Flight map: build up with playback, show the whole video, or draw every track of the video"
+                onClick={() => setFlightMode(flightMode === 'building' ? 'whole' : flightMode === 'whole' ? 'tracks' : 'building')}
+                className="rounded px-2 py-0.5 text-xs text-slate-300 hover:bg-slate-800">Map: {flightMode === 'whole' ? 'whole video' : flightMode === 'tracks' ? 'all tracks' : 'so far'}</button>
             </div>
             <span className="ml-auto font-mono tabular-nums" aria-label="Time in video">{elapsed}</span>
             <span className="font-mono text-xs tabular-nums text-slate-400" aria-label="Frame number">frame {displayed ? displayed.index + 1 : '-'}</span>
@@ -541,6 +601,9 @@ export function WatchPage() {
           </p>}
           {trackingRun && tracksShown < tracksTotal && <p role="status" aria-label="Display limit" className="rounded-md bg-amber-500/15 px-3 py-1 text-xs text-amber-200">
             Showing {tracksShown} of {tracksTotal} tracks in these 10 s (display limit, steadiest first); counts and exports include all.</p>}
+          {allTracks && allTracks.segmentID === segment?.id && allTracks.shown < allTracks.total && (flightMode === 'tracks' || panel === 'tracks') &&
+            <p role="status" aria-label="All-tracks limit" className="rounded-md bg-amber-500/15 px-3 py-1 text-xs text-amber-200">
+              The all-tracks map and area selection hold {allTracks.shown} of this video's {allTracks.total} tracks (display limit, steadiest first); the table lists all.</p>}
           {trackingRun && noiseHidden > 0 && !showNoise && <p className="text-[11px] text-slate-500" aria-label="Hidden noise">{noiseHidden} noise tracks hidden here; they never count.</p>}
           <SurveyTimeline segments={segments} windows={survey.run?.windows ?? []} windowCounts={survey.tracking?.window_counts ?? {}}
             counts={counts} events={events} current={displayed ? { segmentID: segment.id, pts: displayed.pts } : null} onSeek={goTo} />
@@ -576,6 +639,12 @@ export function WatchPage() {
           {panel === 'counts' && counts && <SampleCheckPanel checks={sampleChecks} active={sample} segments={segments} actor={actor} busy={sampleBusy}
             canStart={Boolean(displayed) && (survey.media?.schema_version ?? 0) >= 14} onStart={startSample} onFinish={() => void finishSample()}
             onCancel={() => setSample(null)} onGo={goTo} />}
+          {panel === 'tracks' && trackingRun && <div className={cn(layout === 'split' && 'md:col-span-2')}><TracksPanel rows={rows} labels={labels} segmentID={segment?.id ?? null}
+            selected={selectedTracks} setSelected={setSelectedTracks} focused={focusedTrack}
+            onFocus={row => { setFocusedTrack(row.id); goTo(row.segmentID, String(row.first), false, true); }}
+            actor={actor} onLabel={saveLabel} onUndo={undoLabel}
+            onSelectArea={() => { if (drawing === 'select') finishShape(); else { setDrawing('select'); setDraft([]); setFlightMode('tracks'); player.current?.pause(); } }}
+            selectingArea={drawing === 'select'} /></div>}
           {activeTracking(survey.tracking) && <p role="status" className="rounded-lg border border-slate-800 bg-slate-900 p-3 text-sm">Tracking the whole survey with these settings...</p>}
           <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
             <p className="text-xs uppercase tracking-wide text-slate-400">Tracked now</p>

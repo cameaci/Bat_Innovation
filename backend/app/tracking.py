@@ -13,7 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import candidate_store, store, summary_store, tracking_store, workers
+from . import candidate_store, label_store, store, summary_store, tracking_store, workers
 from .imports import ImportErrorResponse, source_state
 from .track_worker import CPU_SECONDS, ERRORS as WORKER_ERRORS, MAX_REQUEST_BYTES, MAX_TEST_RESULT_BYTES, MEMORY_BYTES
 
@@ -259,6 +259,20 @@ class PlaybackProof(BaseModel):
 CandidateDecision.model_rebuild()
 
 
+class TrackLabel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    actor: str = Field(min_length=1, max_length=120)
+    track_ids: list[UUID] = Field(min_length=1, max_length=label_store.MAX_TRACKS)
+    category: str = Field(min_length=1, max_length=30)
+    species: str = Field(default="", max_length=80)
+    comment: str = Field(default="", max_length=2000)
+
+
+class LabelUndo(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    actor: str = Field(min_length=1, max_length=120)
+
+
 def install_routes(app: FastAPI, jobs: TrackingJobs, authenticate, previews, proxies) -> None:
     @app.post("/api/tracking", status_code=202, dependencies=[Depends(authenticate)])
     def start(payload: NewTracking) -> dict:
@@ -319,6 +333,20 @@ def install_routes(app: FastAPI, jobs: TrackingJobs, authenticate, previews, pro
             raise candidate_store.CandidateError("candidate_unverified", "Watch an original preview that covers this candidate before deciding.") from None
         return candidate_store.decide(jobs.db_path, str(run_id), str(track_id), payload.actor, payload.expected_revision,
                                       payload.decision, payload.note, {**preview, "id": str(payload.preview_id)})
+
+    @app.get("/api/tracking/{run_id}/labels", dependencies=[Depends(authenticate)])
+    def list_labels(run_id: UUID) -> dict:
+        jobs.get(str(run_id))
+        return label_store.labels(jobs.db_path, str(run_id))
+
+    @app.post("/api/tracking/{run_id}/labels", dependencies=[Depends(authenticate)])
+    def save_label(run_id: UUID, payload: TrackLabel) -> dict:
+        return label_store.label(jobs.db_path, str(run_id), payload.actor, [str(item) for item in payload.track_ids],
+                                 payload.category, payload.species, payload.comment)
+
+    @app.post("/api/tracking/{run_id}/labels/{event_id}/undo", dependencies=[Depends(authenticate)])
+    def undo_label(run_id: UUID, event_id: UUID, payload: LabelUndo) -> dict:
+        return label_store.undo(jobs.db_path, str(run_id), str(event_id), payload.actor)
 
     @app.get("/api/tracking/{run_id}/flight-map", dependencies=[Depends(authenticate)])
     def flight_map(run_id: UUID, segment_id: UUID) -> dict:

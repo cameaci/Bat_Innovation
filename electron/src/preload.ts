@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { Modality, WatchedInput, ReconfirmInput, TrackingSettings, TrackingTestInput, CandidateDecisionInput, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, GateChange, CountReviewInput, CountQAInput, SampleCheckInput, NewTemplateInput, ApplyTemplateInput, BatAPI, NewSession, PreviewRequest, SaveMedia, SummaryRequest, ReviewChange, QAChange } from './contracts';
+import type { Modality, WatchedInput, ReconfirmInput, TrackingSettings, TrackingTestInput, CandidateDecisionInput, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, GateChange, CountReviewInput, CountQAInput, SampleCheckInput, TrackLabelInput, NewTemplateInput, ApplyTemplateInput, BatAPI, NewSession, PreviewRequest, SaveMedia, SummaryRequest, ReviewChange, QAChange } from './contracts';
 
 const api: BatAPI = {
   startExport: (...args: [string]) => ipcRenderer.invoke('bat:start-export', ...args),
@@ -38,6 +38,9 @@ const api: BatAPI = {
   cancelPlayback: (...args: [string]) => ipcRenderer.invoke('bat:cancel-playback', ...args),
   playbackFrames: (...args: [string]) => ipcRenderer.invoke('bat:playback-frames', ...args),
   listCandidates: (...args: [string]) => ipcRenderer.invoke('bat:list-candidates', ...args),
+  listLabels: (...args: [string]) => ipcRenderer.invoke('bat:list-labels', ...args),
+  saveLabel: (...args: [string, TrackLabelInput]) => ipcRenderer.invoke('bat:save-label', ...args),
+  undoLabel: (...args: [string, string, string]) => ipcRenderer.invoke('bat:undo-label', ...args),
   getFlightMap: (...args: [string, string]) => ipcRenderer.invoke('bat:get-flight-map', ...args),
   listAudio: (...args: [string]) => ipcRenderer.invoke('bat:list-audio', ...args),
   chooseAudio: (...args: [string, AudioSourceMode, number]) => ipcRenderer.invoke('bat:choose-audio', ...args),

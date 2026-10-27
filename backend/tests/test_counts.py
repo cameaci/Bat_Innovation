@@ -246,7 +246,7 @@ def test_export_v3_includes_tracks_quality_and_all_three_count_layers(tmp_path: 
         first = client.get(f"{url}/counts", headers=HEADERS).json()["crossings"][0]
         client.post(f"{url}/review", headers=HEADERS, json={"actor": "Reviewer One", "expected_revision": 0, "action": "confirm", "key": first["key"]})
         job = wait_export(client, summary["id"])
-        assert job["manifest"]["schema_version"] == "bat-provisional-csv-v3"
+        assert job["manifest"]["schema_version"] == "bat-provisional-csv-v4"
         assert job["manifest"]["tracking"]["settings"]["target_px"] == 12 and job["manifest"]["tracking"]["scene_events"] == []
         assert job["manifest"]["tracking"]["tracking_run_id"] == run_id and job["manifest"]["tracking"]["tracks"] == 2
 

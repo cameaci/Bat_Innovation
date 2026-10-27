@@ -200,6 +200,11 @@ export interface Candidate {
   track_id: string; segment_id: string; track_index: number; first_pts: string; last_pts: string; point_count: number; window_id: string | null; quality: TrackQuality;
   revision: number; decision: { decision: 'bat' | 'not_bat' | 'uncertain'; actor: string; note: string; utc: string } | null;
 }
+/** Group labels on tracks (Phase 3 X6): append-only events; undo is a new event naming the one it cancels. */
+export interface TrackLabelEvent { id: string; actor: string; track_ids: string[]; category: string | null; species: string; comment: string; undoes: string | null; utc: string }
+export interface TrackLabelState { category: string; species: string; comment: string; actor: string; utc: string; event_id: string }
+export interface TrackLabels { events: TrackLabelEvent[]; tracks: Record<string, TrackLabelState>; custom: string[]; categories: string[] }
+export interface TrackLabelInput { actor: string; track_ids: string[]; category: string; species: string; comment: string }
 export type AudioSourceMode = 'full_spectrum' | 'heterodyne' | 'frequency_division' | 'time_expansion' | 'unknown';
 export interface AudioSource {
   id: string; session_id: string; sha256: string; source_mode: AudioSourceMode; channel: number; retunable: boolean;
@@ -472,7 +477,7 @@ export interface QAHistory {
 export type ExportKind = 'observations' | 'audit' | 'tracks' | 'counts' | 'manifest';
 export interface ExportFile { name: string; bytes: number; sha256: string; rows?: number }
 export interface ExportManifest {
-  schema_version: 'bat-provisional-csv-v3';
+  schema_version: 'bat-provisional-csv-v4';
   /** Latest complete tracking run included in tracks and counts CSVs, or null. */
   tracking?: { tracking_run_id: string; algorithm_version: string; parameter_sha256: string; tracks: number; gates: number; note: string } | null;
   provisional_label: string;
@@ -555,6 +560,9 @@ export interface BatAPI {
   saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>>;
   reconfirmGate(runID: string, gateID: string, input: ReconfirmInput): Promise<ApiResult<GateCounts>>;
   listCandidates(runID: string): Promise<ApiResult<Candidate[]>>;
+  listLabels(runID: string): Promise<ApiResult<TrackLabels>>;
+  saveLabel(runID: string, input: TrackLabelInput): Promise<ApiResult<TrackLabels>>;
+  undoLabel(runID: string, eventID: string, actor: string): Promise<ApiResult<TrackLabels>>;
   getFlightMap(runID: string, segmentID: string): Promise<ApiResult<FlightMap>>;
   listAudio(sessionID: string): Promise<ApiResult<AudioSource[]>>;
   chooseAudio(sessionID: string, sourceMode: AudioSourceMode, channel: number): Promise<ApiResult<AudioSource[] | null>>;

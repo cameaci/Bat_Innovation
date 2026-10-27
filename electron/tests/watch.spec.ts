@@ -42,6 +42,33 @@ test('Watch plays the prepared copy continuously and rings every tracked target 
     const before = await frameLabel.textContent();
     await shell.page.keyboard.press('.');
     await expect(frameLabel).toHaveText(`frame ${Number(before!.slice(6)) + 1}`);
+    // The track table lists every track; a group label is one action, and undo restores the earlier state.
+    await shell.page.getByRole('tab', { name: 'Counts', exact: true }).click();
+    await shell.page.getByLabel('Your name or initials', { exact: true }).fill('Reviewer One');
+    await shell.page.getByRole('tab', { name: 'Tracks', exact: true }).click();
+    const table = shell.page.getByRole('region', { name: 'Track table' });
+    await table.getByRole('checkbox', { name: 'This video', exact: true }).check();
+    await expect(table.getByLabel('Track table summary')).toHaveText(/^2 of \d+ shown, 0 selected$/);
+    // Select by area: a polygon around the whole frame picks both tracks of this video.
+    await table.getByRole('button', { name: 'Select by area', exact: true }).click();
+    await expect(shell.page.getByRole('button', { name: /^Map: all tracks/ })).toBeVisible();
+    const area = shell.page.getByLabel('Video drawing area', { exact: true });
+    await area.scrollIntoViewIfNeeded();
+    const box = (await area.boundingBox())!;
+    const scale = Math.min(box.width / 128, box.height / 96), left = box.x + (box.width - 128 * scale) / 2, top = box.y + (box.height - 96 * scale) / 2;
+    for (const [x, y] of [[1, 1], [127, 1], [127, 95], [1, 95]]) await shell.page.mouse.click(left + x * scale, top + y * scale);
+    await shell.page.keyboard.press('Enter');
+    await expect(table.getByLabel('Track table summary')).toHaveText(/^2 of \d+ shown, 2 selected$/);
+    await table.getByLabel('Species', { exact: true }).fill('Pipistrellus pygmaeus');
+    await table.getByRole('button', { name: 'Label 2 tracks', exact: true }).click();
+    await expect(table.getByRole('status', { name: 'Label message' })).toHaveText('Labelled 2 tracks as exit.');
+    await expect(table.getByRole('row').filter({ hasText: 'Pipistrellus pygmaeus' })).toHaveCount(2);
+    await table.getByRole('button', { name: 'Undo label exit', exact: true }).click();
+    await expect(table.getByRole('row').filter({ hasText: 'Pipistrellus pygmaeus' })).toHaveCount(0);
+    // A row goes to the track's first frame.
+    await table.getByRole('row').nth(1).click();
+    await expect(table.getByRole('row').nth(1)).toHaveAttribute('aria-selected', 'true');
+    await expect(shell.page.getByLabel('Tracks at this frame', { exact: true })).not.toHaveText('0', { timeout: 15_000 });
     // Three synchronised views of the same frame, side by side by default; V switches to one large view.
     for (const name of ['Bats view', 'Flight map view', 'Count view']) await expect(shell.page.getByRole('region', { name, exact: true })).toBeVisible();
     await expect(shell.page.getByRole('img', { name: 'Survey timeline', exact: true })).toBeVisible();

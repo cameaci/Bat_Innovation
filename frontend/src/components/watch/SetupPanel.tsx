@@ -6,7 +6,7 @@ import { Button } from '../ui/button';
 import { ROOST_PRESETS, testWarnings, type Measured } from '../../lib/setupGuide';
 
 type Point = [number, number];
-export type DrawKind = 'area' | 'exclusion' | null;
+export type DrawKind = 'area' | 'exclusion' | 'select' | null;
 
 const segmented = (active: boolean) => cn('rounded px-2 py-1 text-xs', active ? 'bg-slate-100 text-slate-900' : 'bg-slate-800 text-slate-300 hover:bg-slate-700');
 

@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import { existsSync, readFileSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, isGateChange, isCountReviewInput, isCountQAInput, isSampleCheckInput, isNewTemplateInput, isApplyTemplateInput, isCandidateDecision, isAudioMode, isAudioAnchor, isAudioDerive, isTrackingSettings, isTrackingTestInput, isReconfirmInput, isWatchedInput, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
+import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, isGateChange, isCountReviewInput, isCountQAInput, isSampleCheckInput, isTrackLabelInput, isNewTemplateInput, isApplyTemplateInput, isCandidateDecision, isAudioMode, isAudioAnchor, isAudioDerive, isTrackingSettings, isTrackingTestInput, isReconfirmInput, isWatchedInput, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
 import { ExportSaver } from './export_saver';
 import type { NewSession } from './contracts';
 
@@ -260,6 +260,10 @@ async function open(): Promise<void> {
   });
   handle('bat:get-flight-map', 2, ([run, segment]) => isUUID(run) && isUUID(segment) ? backend.getFlightMap(run, segment) : invalid());
   handle('bat:list-candidates', 1, ([id]) => isUUID(id) ? backend.listCandidates(id) : invalid());
+  handle('bat:list-labels', 1, ([id]) => isUUID(id) ? backend.listLabels(id) : invalid());
+  handle('bat:save-label', 2, ([run, input]) => isUUID(run) && isTrackLabelInput(input) ? backend.saveLabel(run, input) : invalid('Use a valid track label.'));
+  handle('bat:undo-label', 3, ([run, event, actor]) => isUUID(run) && isUUID(event) && typeof actor === 'string' && actor.trim().length > 0 && actor.length <= 120
+    ? backend.undoLabel(run, event, actor) : invalid('Use a valid label action and your name.'));
   handle('bat:mark-watched', 1, ([input]) => isWatchedInput(input) ? backend.markWatched(input) : invalid('Check the watched windows.'));
   handle('bat:decide-candidate', 3, ([run, track, input]) => isUUID(run) && isUUID(track) && isCandidateDecision(input) ? backend.decideCandidate(run, track, input) : invalid('Use a valid candidate decision.'));
   handle('bat:start-enhanced', 2, ([id, segment]) => isUUID(id) && isUUID(segment) ? backend.startEnhanced(id, segment) : invalid('Select a valid survey and video.'));

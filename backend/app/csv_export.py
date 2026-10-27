@@ -15,7 +15,7 @@ import sqlite3
 from threading import Lock
 
 LABEL = "PROVISIONAL — NOT ECOLOGICALLY FINALISED"
-SCHEMA = "bat-provisional-csv-v3"
+SCHEMA = "bat-provisional-csv-v4"
 MAX_CSV_BYTES = 8 * 1024 * 1024
 MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024
 MAX_MANIFEST_BYTES = 64 * 1024
@@ -41,7 +41,8 @@ AUDIT_COLUMNS = COMMON + ["source_state", "evidence_revision", "evidence_fingerp
 # Feature expansion (E2/E3): derived tracks and gate counts of the latest complete tracking run of this summary run.
 TRACKING = ["schema_version", "provisional_label", "as_of_utc", "run_id", "tracking_run_id", "tracking_algorithm_version", "tracking_parameter_sha256"]
 TRACK_COLUMNS = TRACKING + ["track_id", "segment_id", "source_sha256", "track_index", "first_pts", "last_pts", "point_count", "bbox_json",
-                            "points_sha256", "quality", "metrics_json", "canonical_json"]
+                            "points_sha256", "quality", "metrics_json", "label_category", "label_species", "label_comment", "label_actor",
+                            "label_event_id", "canonical_json"]
 COUNT_COLUMNS = TRACKING + ["gate_id", "gate_name", "gate_revision", "gate_kind", "gate_points_json", "gate_frame_w", "gate_frame_h",
     "label_a", "label_b", "entry_direction", "hysteresis_px", "gate_algorithm_version", "row_kind", "layer", "crossing_key", "track_id",
     "segment_id", "source_pts", "direction", "track_quality", "review_action", "flipped", "count", "reviewer", "rationale",
@@ -187,7 +188,7 @@ def clock(anchor: dict | None, source: dict, start: dict, end: dict | None) -> d
 
 def expansion_rows(database: Path, directory: Path, run_id: str, as_of: str, check, files: dict) -> dict | None:
     """Tracks and three-layer gate counts; header-only files when no complete tracking run exists."""
-    from . import count_store, sample_store, store, tracking_store
+    from . import count_store, label_store, sample_store, store, tracking_store
 
     tracks_file = CSVFile(directory / FILES["tracks"], TRACK_COLUMNS, check)
     counts_file = None
@@ -204,13 +205,17 @@ def expansion_rows(database: Path, directory: Path, run_id: str, as_of: str, che
                 base = {"schema_version": SCHEMA, "provisional_label": LABEL, "as_of_utc": as_of, "run_id": run_id,
                         "tracking_run_id": run["id"], "tracking_algorithm_version": run["algorithm_version"],
                         "tracking_parameter_sha256": run["parameter_hash"]}
+                labelled = label_store.labels(database, run["id"])
                 for row in rows:
                     check()
+                    label = labelled["tracks"].get(row["id"]) or {}
                     tracks_file.row({**base, "track_id": row["id"], "segment_id": row["segment_id"], "source_sha256": row["sha256"],
                                      "track_index": row["track_index"], "first_pts": row["first_pts"], "last_pts": row["last_pts"],
                                      "point_count": row["point_count"], "bbox_json": row["bbox_json"], "points_sha256": row["points_sha256"],
                                      "quality": row["quality"] if "quality" in row.keys() else "unrated",
-                                     "metrics_json": row["metrics_json"] if "metrics_json" in row.keys() else "{}"})
+                                     "metrics_json": row["metrics_json"] if "metrics_json" in row.keys() else "{}",
+                                     "label_category": label.get("category"), "label_species": label.get("species"),
+                                     "label_comment": label.get("comment"), "label_actor": label.get("actor"), "label_event_id": label.get("event_id")})
                 gates = count_store.list_gates(database, run["session_id"])
                 for gate in gates:
                     if gate["state"] != "active":
@@ -246,7 +251,9 @@ def expansion_rows(database: Path, directory: Path, run_id: str, as_of: str, che
                 scene_events = tracking_store.events(database, run["id"]) if store.schema_version(database) >= store.TRACKS_V2_SCHEMA_VERSION else []
                 info = {"tracking_run_id": run["id"], "algorithm_version": run["algorithm_version"], "parameter_sha256": run["parameter_hash"],
                         "settings": settings, "scene_events": [{key: event[key] for key in ("segment_id", "kind", "start_pts", "end_pts")} for event in scene_events],
-                        "tracks": len(rows), "gates": sum(1 for gate in gates if gate["state"] == "active"),
+                        "tracks": len(rows), "labels": {"events": len(labelled["events"]), "undone": sum(1 for event in labelled["events"] if event["undoes"]),
+                                                         "labelled_tracks": len(labelled["tracks"]), "custom": labelled["custom"]},
+                        "gates": sum(1 for gate in gates if gate["state"] == "active"),
                         "sample_checks": [{"gate_id": check_["gate_id"], "gate_revision": check_["gate_revision"], "actor": check_["actor"],
                                            "segment_id": check_["segment_id"], "start_pts": check_["start_pts"], "end_pts": check_["end_pts"],
                                            "manual": check_["result"]["manual"], "algorithm": check_["result"]["algorithm"],
@@ -254,7 +261,7 @@ def expansion_rows(database: Path, directory: Path, run_id: str, as_of: str, che
                                            "extra_in_algorithm": len(check_["result"]["extra_in_algorithm"]), "max_rate": check_["receipt"]["max_rate"],
                                            "utc": check_["utc"]}
                                           for gate in gates for check_ in sample_store.checks(database, run["id"], gate["id"])],
-                        "note": "Tracks and crossings are review candidates, not animals. Layers: algorithm (unverified), reviewer, qa (null until approved)."}
+                        "note": "Tracks and crossings are review candidates, not animals. Track labels and species are reviewer entries that never change a count. Layers: algorithm (unverified), reviewer, qa (null until approved)."}
         files["tracks"], files["counts"] = tracks_file.close(), counts_file.close()
         return info
     finally:

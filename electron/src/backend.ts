@@ -8,7 +8,7 @@ import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia, SummaryRequest, SummaryRun, SummaryDetail, ReviewChange, WindowReview, ReviewHistory } from './contracts';
-import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, PlaybackProof, WatchedInput, FlightMap, ReconfirmInput, PlaybackFrames, PlaybackStatus, SceneEvent, TrackingRun, TrackingSettings, TrackingTest, TrackingTestInput, TrackPage, Gate, GateChange, GateValue, GateCounts, CountReviewInput, CountQAInput, SampleCheck, SampleCheckInput, SiteTemplate, NewTemplateInput, ApplyTemplateInput, Candidate, CandidateDecisionInput, AudioSource, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, AudioDerived } from './contracts';
+import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, PlaybackProof, WatchedInput, FlightMap, ReconfirmInput, PlaybackFrames, PlaybackStatus, SceneEvent, TrackingRun, TrackingSettings, TrackingTest, TrackingTestInput, TrackPage, Gate, GateChange, GateValue, GateCounts, CountReviewInput, CountQAInput, SampleCheck, SampleCheckInput, TrackLabels, TrackLabelInput, SiteTemplate, NewTemplateInput, ApplyTemplateInput, Candidate, CandidateDecisionInput, AudioSource, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, AudioDerived } from './contracts';
 
 export const isAudioMode = (value: unknown): value is AudioSourceMode =>
   ['full_spectrum', 'heterodyne', 'frequency_division', 'time_expansion', 'unknown'].includes(String(value));
@@ -74,6 +74,11 @@ export function isSampleCheckInput(input: unknown): input is SampleCheckInput {
     text(input.actor, 120) && isUUID(input.segment_id) && safePTS(input.start_pts) && safePTS(input.end_pts) && Array.isArray(input.presses) &&
     input.presses.length <= 5000 && input.presses.every(press => object(press) && exactKeys(press, ['pts', 'kind']) && safePTS(press.pts) &&
       (press.kind === 'entry' || press.kind === 'exit'));
+}
+export function isTrackLabelInput(input: unknown): input is TrackLabelInput {
+  return object(input) && exactKeys(input, ['actor', 'track_ids', 'category', 'species', 'comment']) && text(input.actor, 120) &&
+    Array.isArray(input.track_ids) && input.track_ids.length >= 1 && input.track_ids.length <= 5000 && input.track_ids.every(isUUID) &&
+    text(input.category, 30) && text(input.species, 80, false) && text(input.comment, 2000, false);
 }
 export function isNewTemplateInput(input: unknown): input is NewTemplateInput {
   return object(input) && exactKeys(input, ['name', 'actor', 'frame_w', 'frame_h', 'settings', 'gates']) && text(input.name, 60) && text(input.actor, 120) &&
@@ -494,6 +499,13 @@ export class BackendClient {
     return isUUID(runID) && isUUID(gateID) && isReconfirmInput(input) ? this.call(`/api/tracking/${runID}/gates/${gateID}/reconfirm`, 'POST', input) : Promise.resolve(invalid());
   }
   listCandidates(runID: string): Promise<ApiResult<Candidate[]>> { return isUUID(runID) ? this.call(`/api/tracking/${runID}/candidates`) : Promise.resolve(invalid()); }
+  listLabels(runID: string): Promise<ApiResult<TrackLabels>> { return isUUID(runID) ? this.call(`/api/tracking/${runID}/labels`) : Promise.resolve(invalid()); }
+  saveLabel(runID: string, input: TrackLabelInput): Promise<ApiResult<TrackLabels>> {
+    return isUUID(runID) && isTrackLabelInput(input) ? this.call(`/api/tracking/${runID}/labels`, 'POST', input) : Promise.resolve(invalid());
+  }
+  undoLabel(runID: string, eventID: string, actor: string): Promise<ApiResult<TrackLabels>> {
+    return isUUID(runID) && isUUID(eventID) && text(actor, 120) ? this.call(`/api/tracking/${runID}/labels/${eventID}/undo`, 'POST', { actor }) : Promise.resolve(invalid());
+  }
   listAudio(sessionID: string): Promise<ApiResult<AudioSource[]>> { return isUUID(sessionID) ? this.call(`/api/sessions/${sessionID}/audio`) : Promise.resolve(invalid()); }
   // Called only by the main process after a native selection. Never exposed in BatAPI.
   addSelectedAudio(sessionID: string, paths: string[], sourceMode: AudioSourceMode, channel: number): Promise<ApiResult<AudioSource[]>> {
@@ -832,6 +844,9 @@ export class BackendRuntime {
   saveSampleCheck(runID: string, gateID: string, input: SampleCheckInput): Promise<ApiResult<SampleCheck>> { return this.ready(client => client.saveSampleCheck(runID, gateID, input)); }
   saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>> { return this.ready(client => client.saveCountQA(runID, gateID, input)); }
   listCandidates(runID: string): Promise<ApiResult<Candidate[]>> { return this.ready(client => client.listCandidates(runID)); }
+  listLabels(runID: string): Promise<ApiResult<TrackLabels>> { return this.ready(client => client.listLabels(runID)); }
+  saveLabel(runID: string, input: TrackLabelInput): Promise<ApiResult<TrackLabels>> { return this.ready(client => client.saveLabel(runID, input)); }
+  undoLabel(runID: string, eventID: string, actor: string): Promise<ApiResult<TrackLabels>> { return this.ready(client => client.undoLabel(runID, eventID, actor)); }
   getFlightMap(runID: string, segmentID: string): Promise<ApiResult<FlightMap>> { return this.ready(client => client.getFlightMap(runID, segmentID)); }
   listAudio(sessionID: string): Promise<ApiResult<AudioSource[]>> { return this.ready(client => client.listAudio(sessionID)); }
   addSelectedAudio(sessionID: string, paths: string[], sourceMode: AudioSourceMode, channel: number): Promise<ApiResult<AudioSource[]>> { return this.ready(client => client.addSelectedAudio(sessionID, paths, sourceMode, channel)); }
