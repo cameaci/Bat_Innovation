@@ -10,6 +10,7 @@ import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Checkbox, Label, Select } from '../components/ui/input';
 import { RenderCard } from '../components/export/RenderCard';
+import { ReportCard } from '../components/export/ReportCard';
 
 const unavailable = 'The local backend is unavailable. No bundle was saved.';
 
@@ -107,6 +108,7 @@ export function ExportPage() {
           </>}
         </CardContent>
       </Card>
+      <ReportCard />
       <RenderCard />
     </PageBody>
   </>;

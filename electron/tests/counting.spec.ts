@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
@@ -113,6 +113,13 @@ test('a gate counts tracked bats live; a camera move pauses it for one reconfirm
     await rendered.getByRole('button', { name: 'Save video...', exact: true }).click();
     await expect(videos.getByRole('status')).toHaveText(`Saved ${target}`);
     expect((await stat(target)).size).toBeGreaterThan(1000);
+    // The PDF evidence report is printed from a script-free page and saved through the native dialog.
+    const pdf = join(directory, 'report.pdf');
+    await shell.application.evaluate(({ dialog }, file) => { dialog.showSaveDialog = (async () => ({ canceled: false, filePath: file })) as typeof dialog.showSaveDialog; }, pdf);
+    const reportCard = shell.page.getByRole('region', { name: 'Evidence report' });
+    await reportCard.getByRole('button', { name: 'Save PDF report...', exact: true }).click();
+    await expect(reportCard.getByRole('status')).toHaveText(`Saved ${pdf}`, { timeout: 30_000 });
+    expect((await readFile(pdf)).subarray(0, 5).toString()).toBe('%PDF-');
     await quit(shell); shell = undefined;
   } finally {
     await cleanupDraftShell(shell);

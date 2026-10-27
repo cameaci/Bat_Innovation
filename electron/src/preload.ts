@@ -57,6 +57,7 @@ const api: BatAPI = {
   startRender: (...args: [RenderInput]) => ipcRenderer.invoke('bat:start-render', ...args),
   cancelRender: (...args: [string]) => ipcRenderer.invoke('bat:cancel-render', ...args),
   saveRender: (...args: [string]) => ipcRenderer.invoke('bat:save-render', ...args),
+  saveReport: (...args: [string]) => ipcRenderer.invoke('bat:save-report', ...args),
   saveSunset: (...args: [string, SunsetInput]) => ipcRenderer.invoke('bat:save-sunset', ...args),
   saveCountReview: (...args: [string, string, CountReviewInput]) => ipcRenderer.invoke('bat:save-count-review', ...args),
   listSampleChecks: (...args: [string, string]) => ipcRenderer.invoke('bat:list-sample-checks', ...args),

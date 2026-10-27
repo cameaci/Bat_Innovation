@@ -2,13 +2,15 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, type IpcM
 import { existsSync, readFileSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { createReadStream } from 'node:fs';
 import { copyFile, rename, rm } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, isGateChange, isCountReviewInput, isCountQAInput, isSampleCheckInput, isTrackLabelInput, isSunsetInput, isRenderInput, isNewTemplateInput, isApplyTemplateInput, isCandidateDecision, isAudioMode, isAudioAnchor, isAudioDerive, isTrackingSettings, isTrackingTestInput, isReconfirmInput, isWatchedInput, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
 import { ExportSaver } from './export_saver';
 import type { NewSession } from './contracts';
 
 const UI_URL = 'app://bat/index.html';
+const MAX_REPORT_CHARS = 32 * 1024 * 1024;
 /** The UI document, ignoring only the in-page route fragment (#/...) used by the renderer's hash router. */
 const isUI = (url: string) => url === UI_URL || url.startsWith(`${UI_URL}#`);
 const repoRoot = resolve(__dirname, '../..');
@@ -260,6 +262,38 @@ async function open(): Promise<void> {
     } catch {
       await rm(partial, { force: true });
       return { ok: false, error: { code: 'render_save_failed', message: 'The video could not be saved there completely. Nothing was left behind.' } };
+    }
+    return { ok: true, value: selected.filePath };
+  });
+  handle('bat:save-report', 1, async ([html]) => {
+    if (typeof html !== 'string' || !html.startsWith('<!doctype html>') || html.length > MAX_REPORT_CHARS) return invalid('The report could not be prepared.');
+    const owner = window;
+    if (!owner || owner.isDestroyed()) return invalid('The application window is closed.');
+    const selected = await dialog.showSaveDialog(owner, { title: 'Save PROVISIONAL evidence report', defaultPath: 'bat-provisional-report.pdf',
+      filters: [{ name: 'PDF', extensions: ['pdf'] }] }).catch(() => null);
+    if (!selected) return { ok: false, error: { code: 'picker_failed', message: 'The native file dialog could not open.' } };
+    if (selected.canceled || !selected.filePath) return { ok: true, value: null };
+    if (resolve(selected.filePath).startsWith(resolve(dataDir))) return invalid('Save the report outside the application data folder.');
+    // The page is printed in its own in-memory session with scripts off; it may load nothing but itself.
+    const page = join(dataDir, `report-${randomUUID()}.html`);
+    const partial = `${selected.filePath}.partial`;
+    const printer = new BrowserWindow({ show: false, webPreferences: { javascript: false, sandbox: true, contextIsolation: true, nodeIntegration: false,
+      webSecurity: true, spellcheck: false, partition: `report-${randomUUID()}` } });
+    printer.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: details.url !== pathToFileURL(page).href }));
+    printer.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    printer.webContents.on('will-navigate', event => event.preventDefault());
+    try {
+      writeFileSync(page, html, { flag: 'wx' });
+      await printer.loadFile(page);
+      const pdf = await printer.webContents.printToPDF({ printBackground: true, pageSize: 'A4' });
+      writeFileSync(partial, pdf, { flag: 'w' });
+      await rename(partial, selected.filePath);
+    } catch {
+      await rm(partial, { force: true });
+      return { ok: false, error: { code: 'report_save_failed', message: 'The report could not be saved there completely. Nothing was left behind.' } };
+    } finally {
+      printer.destroy();
+      await rm(page, { force: true });
     }
     return { ok: true, value: selected.filePath };
   });

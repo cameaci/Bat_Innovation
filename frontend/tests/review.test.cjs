@@ -250,3 +250,26 @@ test('the emergence profile has a column per minute of each video and a running 
   assert.equal(profile.sunsetMinute('2026-08-11T00:10:00+01:00', '21:04'), -186, 'a clock after midnight refers to the evening before');
   assert.equal(profile.sunsetMinute('not a clock', '21:04'), null);
 });
+
+test('the evidence report has every section, the provisional banner and escapes every entry', async () => {
+  const report = await rendererModule('lib/report');
+  const segment = { id: 's1', position: 0, continuity: 'unknown', continuity_provenance: null, source_state: 'ready', modality: 'active_ir',
+    metadata: { filename: '<img src=x onerror=1>.mp4', sha256: 'a'.repeat(64), width: 128, height: 96, time_base: { num: '1', den: '1000' }, first_pts: '0',
+      elapsed_end: { num: '125', den: '1' }, elapsed_last_time: { num: '124', den: '1' } } };
+  const layer = { bins: [{ segment_id: 's1', minute: 0, entered: 1, exited: 3 }], first_exit: { segment_id: 's1', seconds: 12 }, last_exit: { segment_id: 's1', seconds: 50 },
+    peak_minute: { segment_id: 's1', minute: 0, exited: 3 }, peak_exits_per_second: 1 };
+  const counts = { gate: { id: 'g1', name: 'Gable <b>', kind: 'line', points: [[64, 0], [64, 96]], frame_w: 128, frame_h: 96, revision: 2, entry_direction: 'B_to_A', hysteresis_px: 3 },
+    algorithm_version: 'gate-hysteresis-v2-m2', invalid_spans: [], profile: { layers: { algorithm: layer, reviewer: layer, qa: null }, sunset: { sunset: '21:04', source: 'almanac', actor: 'R', revision: 1, utc: '' },
+      clock_segment_id: null, minutes_after_sunset: null, note: '' },
+    layers: { algorithm: { entered: 1, exited: 3, net: 2, coherent: 4, uncertain: 1 }, reviewer: { entered: 1, exited: 3, net: 2, state: 'accepted', unresolved: 0, accepted: { actor: 'R', current: true } }, qa: null } };
+  const html = report.reportHTML({ generatedUTC: '2026-10-28T00:00:00Z', session: { display_name: 'Survey "1"', camera_ref: 'cam' }, segments: [segment], anchor: null,
+    review: { total: 5, reviewed: 2, unreviewed: 3 }, windows: 5, tracking: { id: 't', algorithm_version: 'tracks-v3', parameter_hash: 'h', parameters: { settings: {} }, track_counts: { s1: 1 }, finished_at_utc: 'x' },
+    counts: [counts], sampleChecks: {}, labels: { events: [], custom: [], categories: [], tracks: { k: { category: 'exit', species: 'Myotis <i>', comment: '', actor: 'R', utc: '', event_id: 'e' } } },
+    tracks: [{ segmentID: 's1', shown: 1, total: 1, paths: [{ index: 0, uncertain: false, points: [[1, 2], [3, 4]] }] }] });
+  for (const name of report.REPORT_SECTIONS) assert.ok(html.includes(`<h2>${name}</h2>`), name);
+  assert.match(html, /PROVISIONAL - NOT ECOLOGICALLY FINALISED/);
+  assert.ok(!html.includes('<img') && !html.includes('Gable <b>') && html.includes('Gable &lt;b&gt;') && !html.includes('<i>') && !/<script/i.test(html), 'entries are escaped and the page has no script');
+  assert.match(html, /2 of 5 planned windows have a first review/);
+  assert.match(html, /Sunset 21:04/);
+  assert.match(html, /3 exits in minute 1 of video 1/);
+});

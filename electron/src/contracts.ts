@@ -575,6 +575,8 @@ export interface BatAPI {
   cancelRender(renderID: string): Promise<ApiResult<RenderJob>>;
   /** Copy a ready render to a file the user picks; the copy is checked against the recorded SHA-256. Null when cancelled. */
   saveRender(renderID: string): Promise<ApiResult<string | null>>;
+  /** Print a static, script-free report page to a PDF the user picks. Null when cancelled. */
+  saveReport(html: string): Promise<ApiResult<string | null>>;
   saveSunset(sessionID: string, input: SunsetInput): Promise<ApiResult<Sunset | null>>;
   saveCountReview(runID: string, gateID: string, input: CountReviewInput): Promise<ApiResult<GateCounts>>;
   listSampleChecks(runID: string, gateID: string): Promise<ApiResult<SampleCheck[]>>;
