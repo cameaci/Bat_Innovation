@@ -30,7 +30,6 @@ MESSAGES = {
     "tracking_integrity": "Stored track points failed their integrity check.",
     "tracking_settings": "The tracking settings leave no area to search. Check the detection area and exclusion zones.",
     "tracking_test_missing": "The test run does not exist or has been replaced by a newer one.",
-    "track_limit": "Too many tracks overlap this interval to return at once.",
     "missing_source": "The original recording is missing. Restore it before tracking.",
     "unreadable_source": "The original recording cannot be read.",
     "changed_source": "The original recording changed since it was summarised. Tracks are not computed on different bytes.",
@@ -289,12 +288,10 @@ def install_routes(app: FastAPI, jobs: TrackingJobs, authenticate, previews, pro
         return jobs.cancel(str(run_id))
 
     @app.get("/api/tracking/{run_id}/tracks", dependencies=[Depends(authenticate)])
-    def tracks(run_id: UUID, segment_id: UUID, start_pts: int, end_pts: int | None = None) -> list[dict]:
+    def tracks(run_id: UUID, segment_id: UUID, start_pts: int, end_pts: int | None = None, include_noise: bool = False) -> dict:
         jobs.get(str(run_id))
         try:
-            return tracking_store.tracks_between(jobs.db_path, str(run_id), str(segment_id), start_pts, end_pts)
-        except OverflowError:
-            raise TrackingError("track_limit") from None
+            return tracking_store.tracks_between(jobs.db_path, str(run_id), str(segment_id), start_pts, end_pts, include_noise)
         except ValueError:
             raise TrackingError("tracking_integrity") from None
 

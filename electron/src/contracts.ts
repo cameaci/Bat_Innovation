@@ -205,6 +205,8 @@ export interface TrackRecord {
   quality: TrackQuality;
   metrics: Record<string, number>;
 }
+/** Tracks for display: noise left out unless asked for; when the points budget is reached, shown < total. */
+export interface TrackPage { tracks: TrackRecord[]; shown: number; total: number; noise_hidden: number }
 
 export interface ClockAnchorInput { segment_id: string; utc: string; provenance: string }
 export interface ClockAnchor extends ClockAnchorInput { source_pts: string; time_base: Rational; source_time: Rational }
@@ -509,7 +511,7 @@ export interface BatAPI {
   trackingRun(runID: string): Promise<ApiResult<TrackingRun>>;
   listTracking(summaryRunID: string): Promise<ApiResult<TrackingRun[]>>;
   cancelTracking(runID: string): Promise<ApiResult<TrackingRun>>;
-  getTracks(runID: string, segmentID: string, startPTS: string, endPTS: string | null): Promise<ApiResult<TrackRecord[]>>;
+  getTracks(runID: string, segmentID: string, startPTS: string, endPTS: string | null, includeNoise: boolean): Promise<ApiResult<TrackPage>>;
   listGates(sessionID: string): Promise<ApiResult<Gate[]>>;
   saveGate(sessionID: string, gateID: string | null, change: GateChange): Promise<ApiResult<Gate>>;
   getCounts(runID: string, gateID: string): Promise<ApiResult<GateCounts>>;

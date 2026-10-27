@@ -252,11 +252,33 @@ def test_real_tracking_run_persists_tracks_for_a_summarised_video(tmp_path: Path
         segment_id = summary["windows"][0]["segment_id"]
         assert run["track_counts"] == {segment_id: 2} and run["window_counts"] == {summary["windows"][0]["id"]: 2}
         assert run["stats"][segment_id]["tracks"] == 2 and run["parameter_hash"] == tracks.parameter_hash(run["parameters"])
-        found = client.get(f"/api/tracking/{run['id']}/tracks", headers=HEADERS,
-                           params={"segment_id": segment_id, "start_pts": 0}).json()
+        page = client.get(f"/api/tracking/{run['id']}/tracks", headers=HEADERS,
+                          params={"segment_id": segment_id, "start_pts": 0}).json()
+        found = page["tracks"]
+        assert page["shown"] == page["total"] == 2 and page["noise_hidden"] == 0
         assert len(found) == 2 and all(len(item["points"]) >= 15 for item in found)
         assert {item["quality"] for item in found} == {"coherent"} and all("straightness" in item["metrics"] for item in found)
         assert run["parameters"]["algorithm_version"] == "tracks-v2" and run["parameters"]["settings"]["target_px"] == 12
+        # Many more stored tracks than fit: coherent first within the points budget, noise hidden, and the cut reported.
+        extra = []
+        for index in range(30):
+            track = tracks.Track(quality="noise" if index % 3 == 0 else "uncertain" if index % 3 == 1 else "coherent")
+            for step in range(10):
+                track.add(step * 40, tracks.Detection(10 + step, 10 + index, 9, (9, 9, 12, 12), 30.0))
+            extra.append(track)
+        db = tmp_path / "app-data" / "bat_innovation.sqlite3"
+        with sqlite3.connect(db) as connection:
+            for index, track in enumerate(extra, start=2):
+                blob = tracks.pack(track.points)
+                connection.execute("""INSERT INTO track (id, run_id, segment_id, track_index, first_pts, last_pts, point_count,
+                    bbox_json, points, points_sha256, quality, metrics_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (f"extra-{index}", run["id"], segment_id, index, "0", "360", 10, "[9,9,12,12]", blob, tracks.digest(blob), track.quality, "{}"))
+        real_points = sum(item["point_count"] for item in found)
+        page = tracking_store.tracks_between(db, run["id"], segment_id, 0, None, point_budget=real_points + 150)
+        assert page["total"] == 22 and page["shown"] == 17 and page["noise_hidden"] == 10
+        assert sum(item["quality"] == "coherent" for item in page["tracks"]) == 12
+        assert all(item["quality"] != "noise" for item in page["tracks"])
+        assert tracking_store.tracks_between(db, run["id"], segment_id, 0, None, include_noise=True)["total"] == 32
         assert client.get(f"/api/tracking/{run['id']}/events", headers=HEADERS).json() == []
         assert client.get(f"/api/summaries/{summary['id']}/tracking", headers=HEADERS).json()[0]["id"] == run["id"]
         # Changed bytes after summarising are refused rather than tracked.
@@ -339,7 +361,8 @@ def test_flight_map_bins_build_up_with_time_and_leave_out_noise(tmp_path: Path) 
         segment_id = summary["windows"][0]["segment_id"]
         bins = client.get(f"/api/tracking/{run['id']}/flight-map", headers=HEADERS, params={"segment_id": segment_id}).json()
         assert bins["bin_seconds"] == 10 and [item["index"] for item in bins["bins"]] == [0, 1]
-        found = client.get(f"/api/tracking/{run['id']}/tracks", headers=HEADERS, params={"segment_id": segment_id, "start_pts": 0}).json()
+        found = client.get(f"/api/tracking/{run['id']}/tracks", headers=HEADERS,
+                           params={"segment_id": segment_id, "start_pts": 0, "include_noise": True}).json()["tracks"]
         kept = sum(item["point_count"] for item in found if item["quality"] != "noise")
         assert sum(count for item in bins["bins"] for _, count in item["cells"]) == kept
         assert bins["bins"][0]["cells"][0][0] < bins["bins"][1]["cells"][-1][0], "The target moved right across the map"

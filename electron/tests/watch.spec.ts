@@ -26,6 +26,17 @@ test('Watch plays the prepared copy continuously and rings every tracked target 
     // Seek to the middle of the clip: both synthetic dots are tracked there.
     await video.evaluate(element => { (element as HTMLVideoElement).currentTime = 0.2; });
     await expect(shell.page.getByLabel('Tracks at this frame', { exact: true })).toHaveText('2', { timeout: 15_000 });
+    // Marker styles, hidden noise and the count board are one click or key away.
+    for (const name of ['Boxes', 'Dots', 'Rings']) {
+      await shell.page.getByRole('button', { name, exact: true }).click();
+      await expect(shell.page.getByRole('button', { name, exact: true })).toHaveAttribute('aria-pressed', 'true');
+      await expect(shell.page.getByLabel('Tracks at this frame', { exact: true })).toHaveText('2');
+    }
+    await expect(shell.page.getByRole('button', { name: 'Noise hidden', exact: true })).toBeVisible();
+    await expect(shell.page.getByRole('button', { name: 'Count board (C)', exact: true })).toHaveText('Board: band (C)');
+    await shell.page.keyboard.press('c');
+    await expect(shell.page.getByRole('button', { name: 'Count board (C)', exact: true })).toHaveText('Board: corner (C)');
+    await expect(shell.page.getByRole('status', { name: 'Display limit' })).toHaveCount(0);
     const frameLabel = shell.page.getByLabel('Frame number', { exact: true });
     await expect(frameLabel).toHaveText(/^frame \d+$/);
     const before = await frameLabel.textContent();

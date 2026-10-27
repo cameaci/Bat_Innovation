@@ -195,28 +195,41 @@ def list_runs(db_path: Path, summary_run_id: str) -> list[dict]:
     return [_run(row) for row in rows]
 
 
+DISPLAY_POINT_BUDGET = 60_000
+QUALITY_RANK = {"coherent": 0, "uncertain": 1, "noise": 2}
+
+
 def tracks_between(db_path: Path, run_id: str, segment_id: str, start_pts: int, end_pts: int | None,
-                   limit: int = 500) -> list[dict]:
-    """Tracks overlapping [start_pts, end_pts) with all their points, integrity-checked."""
+                   include_noise: bool = False, point_budget: int = DISPLAY_POINT_BUDGET) -> dict:
+    """Tracks overlapping [start_pts, end_pts) with all their points, integrity-checked, for display.
+
+    Noise tracks are left out unless asked for. When the points exceed the budget, coherent tracks come first and
+    the page says how many were shown out of how many: the cut is reported, never silent, and counts and exports
+    always use every track.
+    """
     with closing(store.connect(db_path)) as connection:
         rows = connection.execute("SELECT * FROM track WHERE run_id=? AND segment_id=? ORDER BY track_index",
                                   (run_id, segment_id)).fetchall()
-    result = []
-    for row in rows:
-        if int(row["last_pts"]) < start_pts or (end_pts is not None and int(row["first_pts"]) >= end_pts):
+    overlapping = [row for row in rows if not (int(row["last_pts"]) < start_pts or (end_pts is not None and int(row["first_pts"]) >= end_pts))]
+    noise = sum(1 for row in overlapping if row["quality"] == "noise")
+    candidates = [row for row in overlapping if include_noise or row["quality"] != "noise"]
+    candidates.sort(key=lambda row: (QUALITY_RANK.get(row["quality"], 3), row["track_index"]))
+    result, used = [], 0
+    for row in candidates:
+        if used + int(row["point_count"]) > point_budget:
             continue
         if tracks.digest(row["points"]) != row["points_sha256"]:
             raise ValueError("track_integrity")
         points = tracks.unpack(row["points"])
+        used += len(points)
         result.append({"id": row["id"], "segment_id": segment_id, "track_index": row["track_index"],
                        "quality": row["quality"], "metrics": json.loads(row["metrics_json"]),
                        "first_pts": row["first_pts"], "last_pts": row["last_pts"], "point_count": row["point_count"],
                        "bbox": json.loads(row["bbox_json"]),
                        "points": [[str(int(p["pts"])), round(float(p["x"]), 2), round(float(p["y"]), 2), int(p["area"])]
                                   for p in points]})
-        if len(result) > limit:
-            raise OverflowError("track_limit")
-    return result
+    result.sort(key=lambda item: item["track_index"])
+    return {"tracks": result, "shown": len(result), "total": len(candidates), "noise_hidden": 0 if include_noise else noise}
 
 
 HEATMAP_COLUMNS = 64

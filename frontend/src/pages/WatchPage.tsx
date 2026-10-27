@@ -13,14 +13,15 @@ import { Progress } from '../components/ui/progress';
 import { SourcePreview } from '../components/SourcePreview';
 import { Player, type DisplayedFrame, type PlayerHandle, type PlayerView } from '../components/watch/Player';
 import { drawFlightMap, gridAt, indexFlightMap, type FlightIndex } from '../components/watch/FlightMap';
-import { drawBats, type View } from '../components/watch/BatsLayer';
+import { drawBats, type MarkerStyle, type View } from '../components/watch/BatsLayer';
+import { drawClock, frameClock } from '../components/watch/Hud';
 import { CHUNK_MS, useTracks } from '../components/watch/useTracks';
 import { drawDetections, drawSetup } from '../components/watch/SetupLayer';
 import { SetupPanel, type DrawKind } from '../components/watch/SetupPanel';
 import { floorIndex, toTrackData } from '../components/watch/tracks';
 import { settingsOf } from '../lib/trackingSettings';
 import { savedReviewer } from '../lib/reviewer';
-import { drawCounts, soFar } from '../components/watch/CountLayer';
+import { drawCounts, soFar, type BoardMode } from '../components/watch/CountLayer';
 import { CountsPanel } from '../components/watch/CountsPanel';
 import { SurveyTimeline } from '../components/watch/SurveyTimeline';
 import { useCoverage, WATCH_MAX_RATE } from '../components/watch/useCoverage';
@@ -65,6 +66,9 @@ export function WatchPage() {
   const [gateDraft, setGateDraft] = useState<GateDraft | null>(null);
   const [redraw, setRedraw] = useState<InvalidSpan | null>(null);
   const [startAt, setStartAt] = useState<number | null>(null);
+  const [markerStyle, setMarkerStyle] = useState<MarkerStyle>('boxes');
+  const [showNoise, setShowNoise] = useState(false);
+  const [board, setBoard] = useState<BoardMode>('band');
   const order = useMemo(() => new Map(segments.map((item, index) => [item.id, index])), [segments]);
   const activeGates = survey.gates.filter(gate => gate.state === 'active');
   const chosenGate = activeGates.find(gate => gate.id === gateID) ?? activeGates[0] ?? null;
@@ -104,7 +108,7 @@ export function WatchPage() {
     return () => { active = false; };
   }, [trackingRun, chosenGate?.id, chosenGate?.revision]);
   const chunk = displayed ? Math.floor(displayed.ms / CHUNK_MS) : 0;
-  const { tracks, error: trackError } = useTracks(trackingRun, frames, chunk);
+  const { tracks, error: trackError, shown: tracksShown, total: tracksTotal, noiseHidden } = useTracks(trackingRun, frames, chunk, showNoise);
   const rate = segment ? ticksPerSecond(segment) : 1;
 
   const testTracks = useMemo(() => test?.result?.tracks.map(toTrackData) ?? null, [test]);
@@ -168,18 +172,23 @@ export function WatchPage() {
       if (testTracks && test?.result) {
         drawDetections(context, view, test.result, frame.pts);
         setLive(drawBats(context, view, testTracks, frame.pts, rate));
-      } else setLive(drawBats(context, view, tracks, frame.pts, rate, { highlight: reelItem?.trackID ?? null }));
+      } else {
+        setLive(drawBats(context, view, tracks, frame.pts, rate, { highlight: reelItem?.trackID ?? null, style: markerStyle, showRejected: showNoise }));
+        if (counts && segment && board !== 'off') drawCounts(context, view, counts, order, segment.id, frame.pts, rate, tracks, board);
+      }
+      if (segment) drawClock(context, view, frameClock(segment, survey.media?.clock_anchor ?? null, frame.pts), frame.index + 1);
     } },
     { key: 'flight', label: 'Flight map', draw: (context, view, frame) => {
       if (flight) drawFlightMap(context, view, flight, flightMode === 'whole' ? flight.total : gridAt(flight, tracks, frame.pts));
       extras(context, view);
     } },
     { key: 'count', label: 'Count', draw: (context, view, frame) => {
-      drawBats(context, view, tracks, frame.pts, rate);
-      if (counts && segment) drawCounts(context, view, counts, order, segment.id, frame.pts, rate);
+      drawBats(context, view, tracks, frame.pts, rate, { style: markerStyle, showRejected: showNoise });
+      if (counts && segment) drawCounts(context, view, counts, order, segment.id, frame.pts, rate, tracks, board === 'off' ? 'corner' : board);
       extras(context, view);
+      if (segment) drawClock(context, view, frameClock(segment, survey.media?.clock_anchor ?? null, frame.pts), frame.index + 1);
     } },
-  ], [extras, testTracks, test, tracks, rate, flight, flightMode, counts, segment, order, reelItem]);
+  ], [extras, testTracks, test, tracks, rate, flight, flightMode, counts, segment, order, reelItem, markerStyle, showNoise, board, survey.media?.clock_anchor]);
   useEffect(() => { player.current?.redraw(); }, [views, layout, viewKey]);
 
   const loadCandidates = useCallback(async () => {
@@ -360,6 +369,7 @@ export function WatchPage() {
       SPEEDS.forEach((_, index) => { actions[String(index + 1)] = () => setSpeed(index); });
       actions.v = () => setLayout(current => current === 'split' ? 'single' : 'split');
       actions.m = () => void markWatched();
+      actions.c = () => setBoard(current => current === 'band' ? 'corner' : current === 'corner' ? 'off' : 'band');
       const action = actions[event.key];
       if (action) { event.preventDefault(); action(); }
     }
@@ -435,6 +445,14 @@ export function WatchPage() {
               <button type="button" aria-pressed={smart} title={`Normal speed near tracks and crossings, the chosen speed elsewhere. Only ${WATCH_MAX_RATE}x or slower counts as watched.`}
                 onClick={() => { setSmart(!smart); rateRef.current = SPEEDS[speed]!; player.current?.setRate(SPEEDS[speed]!); }}
                 className={cn('rounded px-2 py-0.5 text-xs', smart ? 'bg-amber-500 text-slate-950' : 'text-slate-300 hover:bg-slate-800')}>Smart speed</button>
+              <div className="flex items-center gap-1" role="group" aria-label="Markers">
+                {(['boxes', 'dots', 'rings'] as const).map(value => <button key={value} type="button" aria-pressed={markerStyle === value} onClick={() => setMarkerStyle(value)}
+                  className={cn('rounded px-2 py-0.5 text-xs', markerStyle === value ? 'bg-slate-100 text-slate-900' : 'text-slate-300 hover:bg-slate-800')}>{value[0]!.toUpperCase() + value.slice(1)}</button>)}
+              </div>
+              <button type="button" aria-pressed={showNoise} onClick={() => setShowNoise(!showNoise)} title="Noise tracks are hidden by default; they never count."
+                className={cn('rounded px-2 py-0.5 text-xs', showNoise ? 'bg-slate-100 text-slate-900' : 'text-slate-300 hover:bg-slate-800')}>Noise {showNoise ? 'shown' : 'hidden'}</button>
+              <button type="button" aria-label="Count board (C)" onClick={() => setBoard(board === 'band' ? 'corner' : board === 'corner' ? 'off' : 'band')}
+                className="rounded px-2 py-0.5 text-xs text-slate-300 hover:bg-slate-800">Board: {board} (C)</button>
               <button type="button" aria-pressed={flightMode === 'whole'} title="Flight map: build up with playback or show the whole video"
                 onClick={() => setFlightMode(flightMode === 'whole' ? 'building' : 'whole')}
                 className="rounded px-2 py-0.5 text-xs text-slate-300 hover:bg-slate-800">Map: {flightMode === 'whole' ? 'whole video' : 'so far'}</button>
@@ -445,10 +463,13 @@ export function WatchPage() {
             <Button size="sm" variant="outline" className="border-slate-600 bg-transparent text-slate-100" disabled={!displayed}
               onClick={() => { player.current?.pause(); setVerify(displayed ? String(Math.round(displayed.pts)) : null); }}><ScanSearch />Verify original</Button>
           </div>
+          {trackingRun && tracksShown < tracksTotal && <p role="status" aria-label="Display limit" className="rounded-md bg-amber-500/15 px-3 py-1 text-xs text-amber-200">
+            Showing {tracksShown} of {tracksTotal} tracks in these 10 s (display limit, steadiest first); counts and exports include all.</p>}
+          {trackingRun && noiseHidden > 0 && !showNoise && <p className="text-[11px] text-slate-500" aria-label="Hidden noise">{noiseHidden} noise tracks hidden here; they never count.</p>}
           <SurveyTimeline segments={segments} windows={survey.run?.windows ?? []} windowCounts={survey.tracking?.window_counts ?? {}}
             counts={counts} events={events} current={displayed ? { segmentID: segment.id, pts: displayed.pts } : null} onSeek={goTo} />
           <p className="text-[11px] text-slate-500">Timeline: red bars tracks per window, cyan in, magenta out, amber undecided, violet crossings per minute, x camera moved, green reviewed windows, hatched gaps between videos not marked contiguous.</p>
-          <p className="text-xs text-slate-500">Space play/pause - , . frame step - arrows 5 s - 1-6 speed - V side by side. Playback copy: lossy VP9 for viewing; Verify opens the exact original frames.</p>
+          <p className="text-xs text-slate-500">Space play/pause - , . frame step - arrows 5 s - 1-6 speed - V side by side - C count board. Playback copy: lossy VP9 for viewing; Verify opens the exact original frames.</p>
         </section>
         <aside className={cn('space-y-3', layout === 'split' && 'grid gap-3 space-y-0 md:grid-cols-2 xl:grid-cols-3')}>
           <div className={cn('flex gap-1', layout === 'split' && 'md:col-span-2 xl:col-span-3')} role="tablist" aria-label="Side panel">

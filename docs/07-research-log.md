@@ -1,5 +1,13 @@
 # 07 - Research log
 
+## 2026-10-27 - Phase 3 X1: show what the tracker found
+
+**Problem:** with many tracks the Watch page went blank: a 30 s chunk over 500 tracks (noise included) raised `track_limit` and nothing was drawn.
+
+**Implementation (no schema change):** the tracks endpoint returns a page `{tracks, shown, total, noise_hidden}`: noise is left out unless asked for, a points budget replaces the track cap, coherent tracks come first, and a cut chunk shows "Showing x of y tracks (display limit); counts and exports include all". Chunks are 10 s. Markers come in three styles (boxes like O-GEO and TrackBats, dots with a dotted trail like ThruTracker, and the earlier rings), each track in its own Okabe-Ito colour, uncertain dashed, labels left out above 25 visible tracks. A filled circle marks where each crossing met the gate (hollow amber while undecided) for 1.5 s. The count board is a band along the bottom of the video (gate, Entered, Exited, Net, Inside for area gates as "tracks now", undecided, PROVISIONAL), a corner box or off (C). The declared recording clock (or elapsed time) and the frame number are drawn on the video.
+
+**Verified:** backend test for the budget, ordering, hidden noise and reported cut; Watch and counting end-to-end tests including style switching and the board key; checked by eye on a synthetic screenshot. **Not verified:** readability on real dense footage and on Windows.
+
 ## 2026-10-27 - Phase 3 research: reference tools and tracks-v2 on their clips
 
 **Question:** why do ThruTracker, TrackBats, O-GEO and DarkFlight UltraVision look and count better than this app on the owner's examples, and what should be built?

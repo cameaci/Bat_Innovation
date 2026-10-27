@@ -42,3 +42,17 @@ export function localDate(utc: string): string {
   const date = new Date(utc);
   return Number.isNaN(date.getTime()) ? utc : date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 }
+
+/**
+ * Wall-clock time `offsetSeconds` after a declared anchor ("2026-08-10T21:08:13.584+01:00"), shown in the anchor's
+ * own UTC offset as "21:08:13.584"; null when the anchor cannot be read.
+ */
+export function anchoredClock(utc: string, offsetSeconds: number): string | null {
+  const epoch = Date.parse(utc);
+  const zone = /(Z|[+-]\d{2}:\d{2})$/.exec(utc);
+  if (Number.isNaN(epoch) || !zone || !Number.isFinite(offsetSeconds)) return null;
+  const minutes = zone[1] === 'Z' ? 0 : (zone[1]!.startsWith('-') ? -1 : 1) * (Number(zone[1]!.slice(1, 3)) * 60 + Number(zone[1]!.slice(4, 6)));
+  const local = new Date(epoch + Math.round(offsetSeconds * 1000) + minutes * 60000);
+  const pad = (value: number, size = 2) => String(value).padStart(size, '0');
+  return `${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}:${pad(local.getUTCSeconds())}.${pad(local.getUTCMilliseconds(), 3)}`;
+}

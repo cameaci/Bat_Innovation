@@ -8,7 +8,7 @@ import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia, SummaryRequest, SummaryRun, SummaryDetail, ReviewChange, WindowReview, ReviewHistory } from './contracts';
-import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, PlaybackProof, WatchedInput, FlightMap, ReconfirmInput, PlaybackFrames, PlaybackStatus, SceneEvent, TrackingRun, TrackingSettings, TrackingTest, TrackingTestInput, TrackRecord, Gate, GateChange, GateCounts, CountReviewInput, CountQAInput, Candidate, CandidateDecisionInput, AudioSource, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, AudioDerived } from './contracts';
+import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, PlaybackProof, WatchedInput, FlightMap, ReconfirmInput, PlaybackFrames, PlaybackStatus, SceneEvent, TrackingRun, TrackingSettings, TrackingTest, TrackingTestInput, TrackPage, Gate, GateChange, GateCounts, CountReviewInput, CountQAInput, Candidate, CandidateDecisionInput, AudioSource, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, AudioDerived } from './contracts';
 
 export const isAudioMode = (value: unknown): value is AudioSourceMode =>
   ['full_spectrum', 'heterodyne', 'frequency_division', 'time_expansion', 'unknown'].includes(String(value));
@@ -206,7 +206,6 @@ const mediaErrors: Record<string, string> = {
   tracking_limits_unavailable: 'Hard process limits are unavailable on this platform. Only Linux and Windows are supported.',
   tracking_failed: 'Tracking failed. Completed segments remain; the run is marked failed.',
   tracking_integrity: 'Stored track points failed their integrity check.',
-  track_limit: 'Too many tracks overlap this interval to show at once.',
   count_upgrade_required: 'Upgrade storage before drawing gates.',
   count_invalid: 'Check the count action: a reason is needed when rejecting, flipping, changing a count or adding a crossing.',
   count_conflict: 'Counts or the gate changed since you loaded them. Refresh before saving.',
@@ -432,9 +431,9 @@ export class BackendClient {
     return isUUID(summaryRunID) ? this.call(`/api/summaries/${summaryRunID}/tracking`) : Promise.resolve(invalid());
   }
   cancelTracking(runID: string): Promise<ApiResult<TrackingRun>> { return isUUID(runID) ? this.call(`/api/tracking/${runID}/cancel`, 'POST') : Promise.resolve(invalid()); }
-  getTracks(runID: string, segmentID: string, startPTS: string, endPTS: string | null): Promise<ApiResult<TrackRecord[]>> {
-    if (!isUUID(runID) || !isUUID(segmentID) || !isPTS(startPTS) || (endPTS !== null && !isPTS(endPTS))) return Promise.resolve(invalid());
-    return this.call(`/api/tracking/${runID}/tracks?segment_id=${segmentID}&start_pts=${startPTS}${endPTS === null ? '' : `&end_pts=${endPTS}`}`);
+  getTracks(runID: string, segmentID: string, startPTS: string, endPTS: string | null, includeNoise: boolean): Promise<ApiResult<TrackPage>> {
+    if (!isUUID(runID) || !isUUID(segmentID) || !isPTS(startPTS) || (endPTS !== null && !isPTS(endPTS)) || typeof includeNoise !== 'boolean') return Promise.resolve(invalid());
+    return this.call(`/api/tracking/${runID}/tracks?segment_id=${segmentID}&start_pts=${startPTS}${endPTS === null ? '' : `&end_pts=${endPTS}`}&include_noise=${includeNoise}`);
   }
   listGates(sessionID: string): Promise<ApiResult<Gate[]>> { return isUUID(sessionID) ? this.call(`/api/sessions/${sessionID}/gates`) : Promise.resolve(invalid()); }
   saveGate(sessionID: string, gateID: string | null, change: GateChange): Promise<ApiResult<Gate>> {
@@ -773,8 +772,8 @@ export class BackendRuntime {
   }
   listTracking(summaryRunID: string): Promise<ApiResult<TrackingRun[]>> { return this.ready(client => client.listTracking(summaryRunID)); }
   cancelTracking(runID: string): Promise<ApiResult<TrackingRun>> { return this.ready(client => client.cancelTracking(runID)); }
-  getTracks(runID: string, segmentID: string, startPTS: string, endPTS: string | null): Promise<ApiResult<TrackRecord[]>> {
-    return this.ready(client => client.getTracks(runID, segmentID, startPTS, endPTS));
+  getTracks(runID: string, segmentID: string, startPTS: string, endPTS: string | null, includeNoise: boolean): Promise<ApiResult<TrackPage>> {
+    return this.ready(client => client.getTracks(runID, segmentID, startPTS, endPTS, includeNoise));
   }
   listGates(sessionID: string): Promise<ApiResult<Gate[]>> { return this.ready(client => client.listGates(sessionID)); }
   saveGate(sessionID: string, gateID: string | null, change: GateChange): Promise<ApiResult<Gate>> { return this.ready(client => client.saveGate(sessionID, gateID, change)); }

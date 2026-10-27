@@ -42,6 +42,7 @@ export function WindowDialog({ windows, initialID, onClose }: { windows: Summary
   const [reviewer, setReviewer] = useState(savedReviewer);
   const [tracks, setTracks] = useState<TrackRecord[]>([]);
   const [tracksError, setTracksError] = useState('');
+  const [tracksNote, setTracksNote] = useState('');
   const [gateDraft, setGateDraft] = useState<GateDraft | null>(null);
   const [clip, setClip] = useState<{ startPTS: string; durationMs: number } | null>(null);
   const review = useRef<ReviewPanelHandle>(null);
@@ -62,14 +63,16 @@ export function WindowDialog({ windows, initialID, onClose }: { windows: Summary
   const windowStart = selected ? (BigInt(selected.interval.start_pts.num) / BigInt(selected.interval.start_pts.den)).toString() : '0';
   const trackingID = survey.tracking?.state === 'complete' && survey.tracking.summary_run_id === selected?.run_id ? survey.tracking.id : null;
   useEffect(() => {
-    setTracks([]); setTracksError('');
+    setTracks([]); setTracksError(''); setTracksNote('');
     if (!trackingID || !selected) return;
     const end = selected.interval.end_pts;
     let current = true;
     void getAPI()?.getTracks(trackingID, selected.segment_id, windowStart,
-      end ? (BigInt(end.num) / BigInt(end.den)).toString() : null).then(result => {
+      end ? (BigInt(end.num) / BigInt(end.den)).toString() : null, false).then(result => {
       if (!current) return;
-      if (result.ok) setTracks(result.value); else setTracksError(result.error.message);
+      if (!result.ok) { setTracksError(result.error.message); return; }
+      setTracks(result.value.tracks);
+      if (result.value.shown < result.value.total) setTracksNote(`Showing ${result.value.shown} of ${result.value.total} tracks (display limit); counts and exports include all.`);
     }).catch(() => { if (current) setTracksError('Tracks could not be loaded.'); });
     return () => { current = false; };
   }, [trackingID, id]);
@@ -161,6 +164,7 @@ export function WindowDialog({ windows, initialID, onClose }: { windows: Summary
               : <ol aria-label="Tracks in this window" className="space-y-1 text-xs">{tracks.map(track => <li key={track.id}>
                 T{track.track_index + 1}: {clock(ptsSeconds(track.first_pts, windowStart, selected.time_base))} to {clock(ptsSeconds(track.last_pts, windowStart, selected.time_base))} into the window · {track.point_count} points
               </li>)}</ol>}
+            {tracksNote && <p role="status" className="mt-1 text-xs text-amber-800">{tracksNote}</p>}
             <p className="mt-1 text-[11px] text-muted-foreground">A track follows a moving object; it is not an animal and never counts bats.</p>
           </Card>}
           <Card>
