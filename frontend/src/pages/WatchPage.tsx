@@ -20,10 +20,12 @@ import { drawDetections, drawSetup } from '../components/watch/SetupLayer';
 import { SetupPanel, type DrawKind } from '../components/watch/SetupPanel';
 import { floorIndex, toTrackData } from '../components/watch/tracks';
 import { settingsOf } from '../lib/trackingSettings';
+import { applyMeasured, gateWarnings, measureAt } from '../lib/setupGuide';
 import { savedReviewer } from '../lib/reviewer';
 import { drawCounts, soFar, type BoardMode } from '../components/watch/CountLayer';
 import { CountsPanel } from '../components/watch/CountsPanel';
 import { SampleCheckPanel, type ActiveSample } from '../components/watch/SampleCheckPanel';
+import { SiteTemplatePanel } from '../components/watch/SiteTemplatePanel';
 import { SurveyTimeline } from '../components/watch/SurveyTimeline';
 import { useCoverage, WATCH_MAX_RATE } from '../components/watch/useCoverage';
 import { WatchReviewPanel, windowStates } from '../components/watch/WatchReviewPanel';
@@ -84,6 +86,9 @@ export function WatchPage() {
   const [test, setTest] = useState<TrackingTest | null>(null);
   const [testing, setTesting] = useState(false);
   const [testRange, setTestRange] = useState<{ startMs: number; endMs: number } | null>(null);
+  const [ignored, setIgnored] = useState<number[]>([]);
+  const [measured, setMeasured] = useState<ReturnType<typeof measureAt>>(null);
+  const suggestions = (test?.result?.suggested_exclusions ?? []).filter((_, index) => !ignored.includes(index));
   const settingsRun = useRef<string | null>(null);
   useEffect(() => {
     // Adopt the latest run's settings once per run, never over the user's unsaved changes to another run's values.
@@ -164,7 +169,8 @@ export function WatchPage() {
   const extras = useCallback((context: CanvasRenderingContext2D, view: View) => {
     if (panel === 'setup' && segment) {
       drawSetup(context, view, { area: settings.detection_area, exclusions: settings.exclusions, draft, draftKind: drawing,
-        reference: reference ?? [segment.metadata.width / 2, segment.metadata.height / 2], targetPx: settings.target_px });
+        reference: reference ?? [segment.metadata.width / 2, segment.metadata.height / 2], targetPx: settings.target_px,
+        suggestions: suggestions.map(item => item.points) });
     }
     if (gateDraft && gateDraft.points.length > 0) {
       context.strokeStyle = '#fde047';
@@ -175,7 +181,7 @@ export function WatchPage() {
       context.stroke();
       context.setLineDash([]);
     }
-  }, [panel, segment, settings, draft, drawing, reference, gateDraft]);
+  }, [panel, segment, settings, draft, drawing, reference, gateDraft, suggestions]);
 
   const views = useMemo<PlayerView[]>(() => [
     { key: 'bats', label: 'Bats', draw: (context, view, frame) => {
@@ -335,7 +341,7 @@ export function WatchPage() {
     } else { setAutoPlay(play); setStartAt(target); setPosition(index); }
   }
 
-  function clearTest() { setTest(null); setTestRange(null); }
+  function clearTest() { setTest(null); setTestRange(null); setIgnored([]); setMeasured(null); }
 
   function startSample() {
     const frame = lastFrame.current;
@@ -369,7 +375,11 @@ export function WatchPage() {
   function pick(point: [number, number]) {
     if (gateDraft) setGateDraft(addPoint(gateDraft, point));
     else if (drawing) setDraft(previous => previous.length < 32 ? [...previous, point] : previous);
-    else setReference(point);
+    else {
+      setReference(point);
+      const frame = lastFrame.current;
+      setMeasured(frame ? measureAt(test?.result, frame.pts, point, settings.target_px) : null);
+    }
   }
 
   function finishShape() {
@@ -529,13 +539,20 @@ export function WatchPage() {
             test={test} testing={testing} onTest={() => void runTest()} onClearTest={clearTest}
             onApply={() => { clearTest(); void survey.startTracking(settings); }}
             canTest={Boolean(displayed && frames)} canApply={Boolean(survey.run) && !activeRun(survey.run) && !activeTracking(survey.tracking) && !survey.busy}
-            applyReason={activeTracking(survey.tracking) ? 'Tracking is running.' : 'Wait for motion summaries and other processing to finish.'} />}
+            applyReason={activeTracking(survey.tracking) ? 'Tracking is running.' : 'Wait for motion summaries and other processing to finish.'}
+            measured={measured} onUseMeasured={() => { if (measured) setSettings(previous => applyMeasured(previous, measured)); setMeasured(null); }}
+            suggestions={suggestions} onExclude={points => { setSettings(previous => ({ ...previous, exclusions: [...previous.exclusions, points].slice(0, 8) }));
+              setIgnored(current => [...current, (test?.result?.suggested_exclusions ?? []).findIndex(item => item.points === points)]); }}
+            onIgnore={index => setIgnored(current => [...current, (test?.result?.suggested_exclusions ?? []).indexOf(suggestions[index]!)])} />}
+          {panel === 'setup' && segment && <SiteTemplatePanel settings={settings} segment={segment} actor={actor} onSettings={setSettings} />}
           {panel === 'review' && <WatchReviewPanel states={windowList} segments={segments} reelSize={reelItems.length}
             reel={reelItem && reel !== null ? { position: Math.min(reel, reelItems.length - 1), total: reelItems.length, label: reelItem.label } : null}
             onStartReel={() => playReel(0)} onStopReel={() => { setReel(null); player.current?.pause(); }} onMark={() => void markWatched()} marking={marking} actor={actor} />}
           {panel === 'counts' && segment && <CountsPanel counts={counts} setCounts={setCounts} gateID={chosenGate?.id ?? null} setGateID={setGateID}
             actor={actor} setActor={setActor} segment={segment} segments={segments}
             live={counts && displayed ? soFar(counts, order, segment.id, displayed.pts) : null}
+            warnings={chosenGate ? gateWarnings(chosenGate, settings.exclusions,
+              tracks.filter(track => track.quality !== 'noise' && track.x.length > 1).map(track => [track.x[track.x.length - 1]! - track.x[0]!, track.y[track.y.length - 1]! - track.y[0]!] as [number, number])) : []}
             gateDraft={gateDraft} setGateDraft={draft => { setGateDraft(draft); if (draft) player.current?.pause(); }} redraw={redraw} setRedraw={setRedraw} onGo={goTo} />}
           {panel === 'counts' && counts && <SampleCheckPanel checks={sampleChecks} active={sample} segments={segments} actor={actor} busy={sampleBusy}
             canStart={Boolean(displayed) && (survey.media?.schema_version ?? 0) >= 14} onStart={startSample} onFinish={() => void finishSample()}

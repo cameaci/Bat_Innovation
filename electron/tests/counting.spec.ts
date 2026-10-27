@@ -69,6 +69,16 @@ test('a gate counts tracked bats live; a camera move pauses it for one reconfirm
     await expect(check).toHaveCount(1, { timeout: 15_000 });
     await expect(check).toContainText('by QA Two');
     await expect(check).toContainText(/You: 0 in, 1 out - algorithm: \d+ in, \d+ out/);
+    // Site template: save this setup with its gate, apply it again, and the placed gate waits for one reconfirmation.
+    await shell.page.getByRole('tab', { name: 'Setup', exact: true }).click();
+    await shell.page.getByLabel('Template name', { exact: true }).fill('Synthetic roost');
+    await shell.page.getByRole('button', { name: 'Save current setup', exact: true }).click();
+    await expect(shell.page.getByRole('status', { name: 'Template message' })).toContainText('Saved "Synthetic roost" with 1 gate');
+    await shell.page.getByRole('button', { name: 'Apply to this survey', exact: true }).click();
+    await expect(shell.page.getByRole('status', { name: 'Template message' })).toContainText('1 gate placed');
+    await shell.page.getByRole('tab', { name: 'Counts', exact: true }).click();
+    await shell.page.getByLabel('Gate', { exact: true }).selectOption({ index: 1 });
+    await expect(shell.page.getByRole('list', { name: 'Paused gate spans' })).toContainText('comes from a site template', { timeout: 15_000 });
     await quit(shell); shell = undefined;
   } finally {
     await cleanupDraftShell(shell);

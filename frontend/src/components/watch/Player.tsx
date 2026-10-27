@@ -132,12 +132,17 @@ export const Player = forwardRef<PlayerHandle, {
       callback = player.requestVideoFrameCallback(frame);
     }
     let pending: DisplayedFrame | null = null;
-    const seeking = () => publish(null);
+    let held: DisplayedFrame | null = null;
+    const seeking = () => { held = current.current ?? held; publish(null); };
+    const contains = (frame: DisplayedFrame | null, position: number) =>
+      !!frame && frame.ms <= position + 0.5001 && position < (frames.proxy_ms[frame.index + 1] ?? frames.duration_ms);
     const seeked = () => {
       const position = player.currentTime * 1000;
-      const end = frames.proxy_ms[(pending?.index ?? -2) + 1] ?? frames.duration_ms;
-      if (pending && pending.ms <= position + 0.5001 && position < end) publish(pending);
+      // A seek within the frame on screen presents no new frame; the held one is still the frame shown.
+      if (contains(pending, position)) publish(pending);
+      else if (!pending && contains(held, position)) publish(held);
       pending = null;
+      held = null;
     };
     const playing = () => onPlaying(true);
     const paused = () => onPlaying(false);

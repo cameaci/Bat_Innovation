@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, type IpcMainInvokeEvent } from 'electron';
-import { existsSync, readFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, isGateChange, isCountReviewInput, isCountQAInput, isSampleCheckInput, isCandidateDecision, isAudioMode, isAudioAnchor, isAudioDerive, isTrackingSettings, isTrackingTestInput, isReconfirmInput, isWatchedInput, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
+import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, isGateChange, isCountReviewInput, isCountQAInput, isSampleCheckInput, isNewTemplateInput, isApplyTemplateInput, isCandidateDecision, isAudioMode, isAudioAnchor, isAudioDerive, isTrackingSettings, isTrackingTestInput, isReconfirmInput, isWatchedInput, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
 import { ExportSaver } from './export_saver';
 import type { NewSession } from './contracts';
 
@@ -208,6 +208,39 @@ async function open(): Promise<void> {
     ? backend.saveGate(session, gate, change) : invalid('Use a valid gate: name, kind, 2 to 32 points, labels, direction and hysteresis.'));
   handle('bat:reconfirm-gate', 3, ([run, gate, input]) => isUUID(run) && isUUID(gate) && isReconfirmInput(input) ? backend.reconfirmGate(run, gate, input) : invalid('Check the gate reconfirmation.'));
   handle('bat:get-counts', 2, ([run, gate]) => isUUID(run) && isUUID(gate) ? backend.getCounts(run, gate) : invalid());
+  handle('bat:list-templates', 0, () => backend.listTemplates());
+  handle('bat:save-template', 1, ([input]) => isNewTemplateInput(input) ? backend.saveTemplate(input) : invalid('Check the template name, settings and gates.'));
+  handle('bat:apply-template', 2, ([id, input]) => isUUID(id) && isApplyTemplateInput(input) ? backend.applyTemplate(id, input) : invalid('Choose a template and a survey.'));
+  handle('bat:retire-template', 1, ([id]) => isUUID(id) ? backend.retireTemplate(id) : invalid('Choose a template.'));
+  handle('bat:export-template', 1, async ([id]) => {
+    if (!isUUID(id)) return invalid('Choose a template.');
+    const owner = window;
+    if (!owner || owner.isDestroyed()) return invalid('The application window is closed.');
+    const template = await backend.getTemplate(id);
+    if (!template.ok) return template;
+    const selected = await dialog.showSaveDialog(owner, { title: 'Save site template', defaultPath: `${template.value.name.replace(/[^\w -]/g, '_')}.json`,
+      filters: [{ name: 'Site template', extensions: ['json'] }] }).catch(() => null);
+    if (!selected) return { ok: false, error: { code: 'picker_failed', message: 'The native file dialog could not open.' } };
+    if (selected.canceled || !selected.filePath) return { ok: true, value: null };
+    const { id: _id, actor: _actor, utc: _utc, retired: _retired, ...portable } = template.value;
+    try { writeFileSync(selected.filePath, JSON.stringify(portable, null, 2), { flag: 'w' }); }
+    catch { return { ok: false, error: { code: 'template_write_failed', message: 'The template file could not be written there.' } }; }
+    return { ok: true, value: template.value.name };
+  });
+  handle('bat:import-template', 1, async ([actor]) => {
+    if (typeof actor !== 'string' || !actor.trim() || actor.length > 120) return invalid('Enter your name first.');
+    const owner = window;
+    if (!owner || owner.isDestroyed()) return invalid('The application window is closed.');
+    const selected = await dialog.showOpenDialog(owner, { properties: ['openFile'], filters: [{ name: 'Site template', extensions: ['json'] }] }).catch(() => null);
+    if (!selected) return { ok: false, error: { code: 'picker_failed', message: 'The native file dialog could not open.' } };
+    if (selected.canceled || selected.filePaths.length !== 1) return { ok: true, value: null };
+    let data: unknown;
+    try {
+      if (statSync(selected.filePaths[0]!).size > 256 * 1024) return invalid('A site template file is at most 256 KB.');
+      data = JSON.parse(readFileSync(selected.filePaths[0]!, 'utf8'));
+    } catch { return invalid('This is not a site template file.'); }
+    return backend.importTemplateData(actor, data);
+  });
   handle('bat:list-sample-checks', 2, ([run, gate]) => isUUID(run) && isUUID(gate) ? backend.listSampleChecks(run, gate) : invalid('Use a tracking run and gate.'));
   handle('bat:save-sample-check', 3, ([run, gate, input]) => isUUID(run) && isUUID(gate) && isSampleCheckInput(input) ? backend.saveSampleCheck(run, gate, input) : invalid('Use a valid sample check.'));
   handle('bat:save-count-review', 3, ([run, gate, input]) => isUUID(run) && isUUID(gate) && isCountReviewInput(input) ? backend.saveCountReview(run, gate, input) : invalid('Use a valid count review action.'));
@@ -229,6 +262,7 @@ async function open(): Promise<void> {
   handle('bat:list-candidates', 1, ([id]) => isUUID(id) ? backend.listCandidates(id) : invalid());
   handle('bat:mark-watched', 1, ([input]) => isWatchedInput(input) ? backend.markWatched(input) : invalid('Check the watched windows.'));
   handle('bat:decide-candidate', 3, ([run, track, input]) => isUUID(run) && isUUID(track) && isCandidateDecision(input) ? backend.decideCandidate(run, track, input) : invalid('Use a valid candidate decision.'));
+  handle('bat:start-enhanced', 2, ([id, segment]) => isUUID(id) && isUUID(segment) ? backend.startEnhanced(id, segment) : invalid('Select a valid survey and video.'));
   handle('bat:start-playback', 1, ([id]) => isUUID(id) ? backend.startPlayback(id) : invalid('Select a valid survey.'));
   handle('bat:playback-status', 1, ([id]) => isUUID(id) ? backend.playbackStatus(id) : invalid('Select a valid survey.'));
   handle('bat:cancel-playback', 1, ([id]) => isUUID(id) ? backend.cancelPlayback(id) : invalid('Select a valid survey.'));

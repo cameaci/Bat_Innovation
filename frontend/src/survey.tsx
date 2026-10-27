@@ -6,7 +6,7 @@ import { settingsOf } from './lib/trackingSettings';
 
 const unavailable = 'The local backend is unavailable. Retry, or close and reopen the app.';
 export const activeRun = (run: SummaryRun | null | undefined) => run?.state === 'queued' || run?.state === 'running';
-export const CURRENT_SCHEMA = 14;
+export const CURRENT_SCHEMA = 15;
 export const activeTracking = (run: TrackingRun | null | undefined) => run?.state === 'queued' || run?.state === 'running';
 export const THERMAL_LABEL = 'Rendered thermal - no radiometric temperature analysis';
 
@@ -46,12 +46,15 @@ export interface Survey {
   /** Counting gates drawn on this survey's scene (all revisions' current state, including retired). */
   gates: Gate[];
   saveGate: (gateID: string | null, change: GateChange) => Promise<Gate | undefined>;
+  /** Gates created elsewhere (a site template) join the list. */
+  addGates: (gates: Gate[]) => void;
   /** Full-spectrum or other WAV recordings of this survey, with their sync anchors. */
   audio: AudioSource[];
   reloadAudio: () => Promise<void>;
   /** Playback copies per segment (Phase 2); prepared automatically once a summary run completes. */
   playback: PlaybackStatus | null;
   startPlayback: () => Promise<void>;
+  startEnhanced: (segmentID: string) => Promise<void>;
 }
 
 const SurveyContext = createContext<Survey | null>(null);
@@ -276,6 +279,11 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
     if (value) { setPlayback(value); setPlaybackRefresh(current => current + 1); }
   }, [request, session.id]);
 
+  const startEnhanced = useCallback(async (segmentID: string) => {
+    const value = await request(api => api.startEnhanced(session.id, segmentID));
+    if (value) { setPlayback(value); setPlaybackRefresh(current => current + 1); }
+  }, [request, session.id]);
+
   // Once per opened survey: after a summary run completes, copy any video that has no playback copy yet.
   useEffect(() => {
     if (autoPlayback.current || !playback || playback.active || run?.state !== 'complete' || !media) return;
@@ -284,6 +292,10 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
     autoPlayback.current = true;
     void startPlayback();
   }, [playback, run?.state, media, startPlayback]);
+
+  function addGates(added: Gate[]) {
+    setGates(previous => [...previous.filter(item => !added.some(gate => gate.id === item.id)), ...added]);
+  }
 
   async function saveGate(gateID: string | null, change: GateChange) {
     setError(''); setNotice('');
@@ -327,8 +339,8 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
     refreshMedia, upgradeStorage, importJob, chooseVideos, cancelImport, saveTimeline,
     runs, runID, selectRun: id => { setRunID(id); setRefresh(current => current + 1); }, run, verified,
     startRun, cancelRun, cancelling, reloadRun: () => setRefresh(current => current + 1),
-    setDraft, dirty, busy, setExportBusy, tracking, startTracking, cancelTracking, gates, saveGate, audio, reloadAudio,
-    playback, startPlayback,
+    setDraft, dirty, busy, setExportBusy, tracking, startTracking, cancelTracking, gates, saveGate, addGates, audio, reloadAudio,
+    playback, startPlayback, startEnhanced,
   };
   return <SurveyContext.Provider value={value}>{children}</SurveyContext.Provider>;
 }

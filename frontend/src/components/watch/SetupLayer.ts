@@ -15,12 +15,20 @@ function polygon(context: CanvasRenderingContext2D, view: View, points: Point[],
 /** Detection area (green outline), exclusion zones (hatched grey), the polygon being drawn and the size reference. */
 export function drawSetup(context: CanvasRenderingContext2D, view: View, setup: {
   area: Point[][]; exclusions: Point[][]; draft: Point[]; draftKind: 'area' | 'exclusion' | null; reference: Point; targetPx: number;
+  suggestions?: Point[][];
 }) {
   context.lineWidth = 2 * view.dpr;
   for (const shape of setup.area) {
     polygon(context, view, shape, true);
     context.strokeStyle = '#22c55e';
     context.setLineDash([]);
+    context.stroke();
+  }
+  for (const shape of setup.suggestions ?? []) {
+    // Proposed exclusions from a test run, not yet accepted.
+    polygon(context, view, shape, true);
+    context.strokeStyle = '#f59e0b';
+    context.setLineDash([3 * view.dpr, 3 * view.dpr]);
     context.stroke();
   }
   for (const shape of setup.exclusions) {

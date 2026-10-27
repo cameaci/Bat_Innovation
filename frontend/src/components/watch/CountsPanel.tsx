@@ -18,7 +18,7 @@ export type Decision = 'bat' | 'not_bat' | 'opposite';
  * Counts per gate beside the video: the live tally, what still needs a person (uncertain crossings and paused
  * spans after a camera move) and the one-action acceptance of the proposal, then an independent QA decision.
  */
-export function CountsPanel({ counts, setCounts, gateID, setGateID, actor, setActor, segment, segments, live, gateDraft, setGateDraft, redraw, setRedraw, onGo }: {
+export function CountsPanel({ counts, setCounts, gateID, setGateID, actor, setActor, segment, segments, live, gateDraft, setGateDraft, redraw, setRedraw, onGo, warnings = [] }: {
   counts: GateCounts | null;
   setCounts: (counts: GateCounts) => void;
   gateID: string | null;
@@ -33,6 +33,7 @@ export function CountsPanel({ counts, setCounts, gateID, setGateID, actor, setAc
   redraw: InvalidSpan | null;
   setRedraw: (span: InvalidSpan | null) => void;
   onGo: (segmentID: string, pts: string) => void;
+  warnings?: string[];
 }) {
   const survey = useSurvey();
   const [error, setError] = useState('');
@@ -86,6 +87,8 @@ export function CountsPanel({ counts, setCounts, gateID, setGateID, actor, setAc
         {active.length === 1 && <p className="text-sm font-semibold">{active[0]!.name}</p>}
         <Button size="sm" variant="ghost" className="ml-auto h-7 text-slate-300" onClick={() => setGateDraft({ kind: 'line', points: [] })}><PenLine />New gate</Button>
       </div>}
+    {warnings.length > 0 && <ul aria-label="Gate placement warnings" className="list-disc space-y-1 pl-4 text-[11px] text-amber-200">
+      {warnings.map(text => <li key={text}>{text}</li>)}</ul>}
     {!runID && <p className="text-xs text-slate-400">Track the survey first (Setup tab); counts use the latest complete tracking run.</p>}
     {counts && live && <div role="group" aria-label="Count so far" className="grid grid-cols-3 gap-2 text-center">
       <div><p className="text-[11px] uppercase text-slate-400">In</p><p className="text-3xl font-bold tabular-nums" style={{ color: IN_COLOUR }} aria-label="Entered so far">{live.entered}</p></div>
@@ -101,7 +104,9 @@ export function CountsPanel({ counts, setCounts, gateID, setGateID, actor, setAc
       {counts.invalid_spans.length > 0 && <ul aria-label="Paused gate spans" className="space-y-2">
         {counts.invalid_spans.map(span => <li key={span.anchor_id} className="space-y-1 rounded border border-slate-700 p-2 text-xs">
           <p className="flex items-center gap-1"><AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
-            {span.reason === 'camera_moved' ? `Camera moved at ${seconds(span.segment_id, span.from_pts)} in ${name(span.segment_id)}` : `${name(span.segment_id)} is not marked contiguous with the one before`}. Counting is paused.</p>
+            {span.reason === 'camera_moved' ? `Camera moved at ${seconds(span.segment_id, span.from_pts)} in ${name(span.segment_id)}`
+              : span.reason === 'template' ? 'This gate comes from a site template: check that it still sits on the roost in this view'
+              : `${name(span.segment_id)} is not marked contiguous with the one before`}. Counting is paused.</p>
           <div className="flex flex-wrap gap-1">
             <Button size="sm" variant="ghost" className="h-7 text-slate-200" onClick={() => onGo(span.segment_id, span.resume_pts ?? segments.find(item => item.id === span.segment_id)?.metadata.first_pts ?? '0')}><Crosshair />Show</Button>
             <Button size="sm" className="h-7" onClick={() => void reconfirm(span, null)}>Reconfirm gate</Button>

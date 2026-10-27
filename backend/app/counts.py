@@ -9,7 +9,7 @@ from uuid import UUID
 from fastapi import Depends, FastAPI
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from . import count_store, sample_store, store
+from . import count_store, sample_store, store, template_store
 
 Text = Field(min_length=1, max_length=60)
 
@@ -28,6 +28,7 @@ class GateValue(Strict):
     label_b: str = Text
     entry_direction: Literal["A_to_B", "B_to_A", "out_to_in"]
     hysteresis_px: float = Field(ge=0, le=200)
+    template_id: UUID | None = None
 
     @model_validator(mode="after")
     def entry_matches_kind(self) -> GateValue:
@@ -95,6 +96,27 @@ class SampleCheck(Strict):
     max_rate: float = Field(gt=0, le=16)
 
 
+class NewTemplate(Strict):
+    name: str = Text
+    actor: str = Field(min_length=1, max_length=120)
+    frame_w: int = Field(ge=1, le=8192)
+    frame_h: int = Field(ge=1, le=8192)
+    settings: dict
+    gates: list[GateValue] = Field(max_length=16)
+
+
+class ApplyTemplate(Strict):
+    actor: str = Field(min_length=1, max_length=120)
+    session_id: UUID
+    frame_w: int = Field(ge=1, le=8192)
+    frame_h: int = Field(ge=1, le=8192)
+
+
+class ImportTemplate(Strict):
+    actor: str = Field(min_length=1, max_length=120)
+    data: dict
+
+
 def install_routes(app: FastAPI, db_path: Path, authenticate, proxies=None) -> None:
     @app.get("/api/sessions/{session_id}/gates", dependencies=[Depends(authenticate)])
     def list_gates(session_id: UUID) -> list[dict]:
@@ -103,12 +125,12 @@ def install_routes(app: FastAPI, db_path: Path, authenticate, proxies=None) -> N
     @app.post("/api/sessions/{session_id}/gates", dependencies=[Depends(authenticate)])
     def create_gate(session_id: UUID, change: GateChange) -> dict:
         return count_store.save_gate(db_path, str(session_id), None, change.expected_revision, change.actor,
-                                     change.value.model_dump() if change.value else None)
+                                     change.value.model_dump(mode="json") if change.value else None)
 
     @app.put("/api/sessions/{session_id}/gates/{gate_id}", dependencies=[Depends(authenticate)])
     def change_gate(session_id: UUID, gate_id: UUID, change: GateChange) -> dict:
         return count_store.save_gate(db_path, str(session_id), str(gate_id), change.expected_revision, change.actor,
-                                     change.value.model_dump() if change.value else None)
+                                     change.value.model_dump(mode="json") if change.value else None)
 
     @app.get("/api/gates/{gate_id}/history", dependencies=[Depends(authenticate)])
     def gate_history(gate_id: UUID) -> list[dict]:
@@ -163,3 +185,28 @@ def install_routes(app: FastAPI, db_path: Path, authenticate, proxies=None) -> N
         receipt = proxies.receipt(str(payload.proxy_id), segment, [list(span) for span in payload.intervals], payload.max_rate)
         return sample_store.record(db_path, str(run_id), str(gate_id), segment, payload.start_pts, payload.end_pts, payload.actor,
                                    [(press.pts, press.kind) for press in payload.presses], receipt)
+
+    @app.get("/api/site-templates", dependencies=[Depends(authenticate)])
+    def templates() -> list[dict]:
+        return template_store.list_templates(db_path)
+
+    @app.post("/api/site-templates", dependencies=[Depends(authenticate)])
+    def save_template(payload: NewTemplate) -> dict:
+        return template_store.save(db_path, payload.name, payload.actor, payload.frame_w, payload.frame_h, payload.settings,
+                                   [gate.model_dump(mode="json") for gate in payload.gates])
+
+    @app.post("/api/site-templates/import", dependencies=[Depends(authenticate)])
+    def import_template(payload: ImportTemplate) -> dict:
+        return template_store.from_file(db_path, payload.data, payload.actor)
+
+    @app.get("/api/site-templates/{template_id}", dependencies=[Depends(authenticate)])
+    def get_template(template_id: UUID) -> dict:
+        return template_store.get(db_path, str(template_id))
+
+    @app.post("/api/site-templates/{template_id}/retire", dependencies=[Depends(authenticate)])
+    def retire_template(template_id: UUID) -> dict:
+        return template_store.retire(db_path, str(template_id))
+
+    @app.post("/api/site-templates/{template_id}/apply", dependencies=[Depends(authenticate)])
+    def apply_template(template_id: UUID, payload: ApplyTemplate) -> dict:
+        return template_store.apply(db_path, str(template_id), str(payload.session_id), payload.actor, payload.frame_w, payload.frame_h)

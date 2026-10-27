@@ -184,3 +184,30 @@ test('malformed or out-of-range displayed source evidence is ineligible', async 
   assert.equal(displayedPTSFor({ ...frame, timeBase: { num: '1', den: '0' } }, selected, binding, 'preview-a', 'start'), null);
   assert.equal(displayedPTSFor(frame, selected, { ...binding, interval: { ...binding.interval, start_pts: { num: '0', den: '1' } } }, 'preview-a', 'start'), null);
 });
+
+test('setup guide measures a clicked detection and warns about badly placed gates', async () => {
+  const guide = await rendererModule('lib/setupGuide');
+  const result = { detections: [{ pts: '400', accepted: [[100, 100, 110, 110], [300, 50, 304, 54]], rejected: [], measures: [[78, 14.2, 1], [12, 30, -1]] }] };
+  const measured = guide.measureAt(result, 400, [104, 106], 12);
+  assert.deepEqual(measured, { area: 78, contrast: 14.2, polarity: 'light', targetPx: 10 });
+  assert.equal(guide.measureAt(result, 440, [104, 106], 12), null, 'only the displayed frame is measured');
+  assert.equal(guide.measureAt(result, 400, [600, 600], 12), null, 'a click far from any detection measures nothing');
+  const settings = { target_px: 12, polarity: 'both', threshold: 7, target_speed: 4 };
+  assert.deepEqual(guide.applyMeasured(settings, measured), { ...settings, target_px: 10, polarity: 'light', threshold: 7 });
+  assert.equal(guide.applyMeasured(settings, { ...measured, contrast: 6.4 }).threshold, 3);
+  const frame = { frame_w: 640, frame_h: 360 };
+  const across = { ...frame, kind: 'line', points: [[320, 20], [320, 340]] };
+  const rightwards = Array.from({ length: 10 }, () => [100, 3]);
+  assert.deepEqual(guide.gateWarnings(across, [], rightwards), []);
+  assert.match(guide.gateWarnings({ ...frame, kind: 'line', points: [[20, 180], [600, 180]] }, [], rightwards).join(' '), /along this line/);
+  assert.match(guide.gateWarnings({ ...frame, kind: 'rect', points: [[2, 2], [200, 2], [200, 200], [2, 200]] }, [], []).join(' '), /frame edge/);
+  assert.match(guide.gateWarnings(across, [[[300, 150], [340, 150], [340, 190], [300, 190]]], []).join(' '), /excluded zone/);
+  assert.equal(guide.testWarnings({ frames: 100, repeated_frames: 32, gain_jumps: 1, limit_frames: 0, static_detections: 0 }).length, 2);
+});
+
+test('the declared recording clock is shown in its own offset', async () => {
+  const time = await rendererModule('lib/time');
+  assert.equal(time.anchoredClock('2026-08-10T21:08:13.584+01:00', 1.5), '21:08:15.084');
+  assert.equal(time.anchoredClock('2026-08-10T23:59:59.900Z', 0.2), '00:00:00.100');
+  assert.equal(time.anchoredClock('not a time', 1), null);
+});

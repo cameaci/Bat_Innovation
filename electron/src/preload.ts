@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { Modality, WatchedInput, ReconfirmInput, TrackingSettings, TrackingTestInput, CandidateDecisionInput, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, GateChange, CountReviewInput, CountQAInput, SampleCheckInput, BatAPI, NewSession, PreviewRequest, SaveMedia, SummaryRequest, ReviewChange, QAChange } from './contracts';
+import type { Modality, WatchedInput, ReconfirmInput, TrackingSettings, TrackingTestInput, CandidateDecisionInput, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, GateChange, CountReviewInput, CountQAInput, SampleCheckInput, NewTemplateInput, ApplyTemplateInput, BatAPI, NewSession, PreviewRequest, SaveMedia, SummaryRequest, ReviewChange, QAChange } from './contracts';
 
 const api: BatAPI = {
   startExport: (...args: [string]) => ipcRenderer.invoke('bat:start-export', ...args),
@@ -33,6 +33,7 @@ const api: BatAPI = {
   trackingTest: (...args: [string]) => ipcRenderer.invoke('bat:tracking-test', ...args),
   trackingEvents: (...args: [string]) => ipcRenderer.invoke('bat:tracking-events', ...args),
   startPlayback: (...args: [string]) => ipcRenderer.invoke('bat:start-playback', ...args),
+  startEnhanced: (...args: [string, string]) => ipcRenderer.invoke('bat:start-enhanced', ...args),
   playbackStatus: (...args: [string]) => ipcRenderer.invoke('bat:playback-status', ...args),
   cancelPlayback: (...args: [string]) => ipcRenderer.invoke('bat:cancel-playback', ...args),
   playbackFrames: (...args: [string]) => ipcRenderer.invoke('bat:playback-frames', ...args),
@@ -50,6 +51,12 @@ const api: BatAPI = {
   getCounts: (...args: [string, string]) => ipcRenderer.invoke('bat:get-counts', ...args),
   saveCountReview: (...args: [string, string, CountReviewInput]) => ipcRenderer.invoke('bat:save-count-review', ...args),
   listSampleChecks: (...args: [string, string]) => ipcRenderer.invoke('bat:list-sample-checks', ...args),
+  listTemplates: (...args: []) => ipcRenderer.invoke('bat:list-templates', ...args),
+  saveTemplate: (...args: [NewTemplateInput]) => ipcRenderer.invoke('bat:save-template', ...args),
+  applyTemplate: (...args: [string, ApplyTemplateInput]) => ipcRenderer.invoke('bat:apply-template', ...args),
+  retireTemplate: (...args: [string]) => ipcRenderer.invoke('bat:retire-template', ...args),
+  exportTemplate: (...args: [string]) => ipcRenderer.invoke('bat:export-template', ...args),
+  importTemplate: (...args: [string]) => ipcRenderer.invoke('bat:import-template', ...args),
   saveSampleCheck: (...args: [string, string, SampleCheckInput]) => ipcRenderer.invoke('bat:save-sample-check', ...args),
   saveCountQA: (...args: [string, string, CountQAInput]) => ipcRenderer.invoke('bat:save-count-qa', ...args),
   reconfirmGate: (...args: [string, string, ReconfirmInput]) => ipcRenderer.invoke('bat:reconfirm-gate', ...args),

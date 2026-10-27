@@ -809,8 +809,8 @@ Separate from the 22/27 expansion tracker and the 7/7 Phase 2 tracker. Each box 
 - [x] X2: sample check (schema v14) with receipt, comparison and export.
 - [x] X3: tracks-v3 detection (repeated frames, gain compensation, noise-adaptive threshold, matched filter, hysteresis, persistent spots).
 - [x] X3: tracks-v3 association (speed limit, two-stage, flow prior, KD-tree) and the m-points crossing rule, with a v2/v3 benchmark.
-- [ ] X4: guided setup (click to measure, noise map and suggested exclusions, presets, gate checks).
-- [ ] X4: site templates (schema v15).
+- [x] X4: guided setup (click to measure, noise map and suggested exclusions, presets, gate checks).
+- [x] X4: site templates (schema v15).
 - [ ] X5: enhanced view.
 - [ ] X6: track table, all-tracks map and group labels (schema v16).
 - [ ] X7: multiple gates at once, polyline gate, emergence profile and sunset (schema v17).

@@ -316,7 +316,8 @@ def test_calibration_test_tracks_a_range_without_storing_anything(tmp_path: Path
         assert result["state"] == "complete", result
         value = result["result"]
         assert len([track for track in value["tracks"] if track["quality"] != "noise"]) >= 1
-        assert value["detections"] and all(set(item) == {"pts", "accepted", "rejected"} for item in value["detections"])
+        assert value["detections"] and all(set(item) == {"pts", "accepted", "rejected", "measures"} for item in value["detections"])
+        assert isinstance(value["suggested_exclusions"], list)
         assert value["stats"]["analysis_step"] == 1
         db = tmp_path / "app-data" / "bat_innovation.sqlite3"
         with sqlite3.connect(db) as connection:
@@ -371,3 +372,25 @@ def test_flight_map_bins_build_up_with_time_and_leave_out_noise(tmp_path: Path) 
         kept = sum(item["point_count"] for item in found if item["quality"] != "noise")
         assert sum(count for item in bins["bins"] for _, count in item["cells"]) == kept
         assert bins["bins"][0]["cells"][0][0] < bins["bins"][1]["cells"][-1][0], "The target moved right across the map"
+
+
+def test_test_run_detections_carry_measures_and_noise_clusters_become_suggestions() -> None:
+    target = path((4, 70), (4, 0), 25)
+    images = []
+    for index in range(25):
+        image = frame([target[index]])
+        # A lamp that blinks every other frame: too regular for the noise model to absorb, never a moving target.
+        if index % 2:
+            image[10:16, 100:106] = 230
+        images.append(image)
+    analyzer = tracks.Analyzer(W, H, 25.0, 0.001, {"target_px": 4, "threshold": 5}, (0, 10 ** 9))
+    for index, image in enumerate(images):
+        analyzer.feed(index * 40, image)
+    found, _, _ = analyzer.finish()
+    measured = [measure for item in analyzer.detections for measure in item["measures"]]
+    assert measured and all(len(measure) == 3 and measure[2] in (1, -1) for measure in measured)
+    assert all(len(item["measures"]) == len(item["accepted"]) for item in analyzer.detections)
+    suggestions = tracks.noise_clusters(analyzer.detections, found, W, H, 4)
+    assert suggestions, "The blinking lamp is proposed for exclusion"
+    (x0, y0), _, (x1, y1), _ = suggestions[0]["points"]
+    assert x0 <= 100 and x1 >= 106 and y0 <= 10 and y1 >= 16 and y1 < 60, "The suggestion covers the lamp, not the moving target"

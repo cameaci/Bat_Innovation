@@ -22,6 +22,9 @@ test('tracking is set up on the footage: draw an excluded zone, test 10 s, then 
     const video = shell.page.getByLabel('Playback copy', { exact: true });
     await expect.poll(() => video.evaluate(element => (element as HTMLVideoElement).readyState), { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
     await shell.page.getByRole('tab', { name: 'Setup', exact: true }).click();
+    // A roost type loads starting values and a gate tip.
+    await shell.page.getByLabel('Roost type', { exact: true }).selectOption('bat_box');
+    await expect(shell.page.getByLabel('Gate tip', { exact: true })).toContainText('below the opening');
     // Exclude the lower half of the frame, where the second dot flies.
     await shell.page.getByRole('button', { name: 'Exclude a zone', exact: true }).click();
     const area = shell.page.getByLabel('Video drawing area', { exact: true });
@@ -34,6 +37,17 @@ test('tracking is set up on the footage: draw an excluded zone, test 10 s, then 
     await video.evaluate(element => { (element as HTMLVideoElement).currentTime = 0; });
     await shell.page.getByRole('button', { name: 'Test 10 s from here', exact: true }).click();
     await expect(shell.page.getByRole('status', { name: 'Test result' })).toContainText('1 stable track', { timeout: 60_000 });
+    // After the test, clicking the bat on a paused frame measures it and offers its size, polarity and threshold.
+    await video.evaluate(element => { const player = element as HTMLVideoElement; player.pause(); player.currentTime = 0.2; });
+    await expect(shell.page.getByLabel('Frame number', { exact: true })).toHaveText('frame 6', { timeout: 15_000 });
+    await area.scrollIntoViewIfNeeded();
+    const now = (await area.boundingBox())!;
+    const factor = Math.min(now.width / 128, now.height / 96);
+    await shell.page.mouse.click(now.x + (now.width - 128 * factor) / 2 + 30.5 * factor, now.y + (now.height - 96 * factor) / 2 + 21.5 * factor);
+    const measured = shell.page.getByRole('status', { name: 'Measured target' });
+    await expect(measured).toContainText('lighter than the scene');
+    await measured.getByRole('button', { name: 'Use for size, polarity and threshold', exact: true }).click();
+    await expect(shell.page.getByRole('button', { name: 'Lighter', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await shell.page.getByRole('button', { name: 'Looks good - track whole survey', exact: true }).click();
     await expect.poll(async () => {
       const runs = await shell!.page.evaluate(async id => {

@@ -104,8 +104,10 @@ def test(payload: dict) -> dict:
             analyzer.feed(int(frame.pts), frame.to_ndarray(format="gray"))
         found, events, stats = analyzer.finish()
     shown = [track for track in found if int(track.points[-1][0]) >= start and int(track.points[0][0]) <= end]
+    suggestions = tracks.noise_clusters(analyzer.detections, found, int(metadata["width"]), int(metadata["height"]),
+                                        float(analyzer.settings["target_px"]))
     return {"segment_id": segment["id"], "start_pts": str(start), "end_pts": str(end), "stats": stats,
-            "detections": analyzer.detections,
+            "detections": analyzer.detections, "suggested_exclusions": suggestions,
             "tracks": [{"id": f"test-{index}", "segment_id": segment["id"], "track_index": index, "quality": track.quality,
                         "metrics": track.metrics, "first_pts": str(track.points[0][0]), "last_pts": str(track.points[-1][0]),
                         "point_count": len(track.points), "bbox": track.box,

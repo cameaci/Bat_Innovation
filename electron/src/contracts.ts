@@ -67,6 +67,8 @@ export type Modality = 'active_ir' | 'rendered_thermal';
 /** A derived tracking run over one summary run (feature expansion E2). Tracks are review aids, not animals. */
 export interface PlaybackCopy {
   id: string;
+  /** standard: the scene as recorded; enhanced: the motion-boost display (Phase 3 X5), a display aid only. */
+  kind: 'standard' | 'enhanced';
   segment_id: string;
   state: 'queued' | 'running' | 'ready' | 'failed' | 'cancelled' | 'interrupted';
   width: number | null;
@@ -79,7 +81,7 @@ export interface PlaybackCopy {
   error: string | null;
 }
 
-export interface PlaybackStatus { session_id: string; active: boolean; proxies: PlaybackCopy[] }
+export interface PlaybackStatus { session_id: string; active: boolean; proxies: PlaybackCopy[]; enhanced: PlaybackCopy[] }
 
 /** Every playback-copy frame mapped to its exact source PTS (Phase 2 W1). */
 export interface PlaybackFrames {
@@ -110,8 +112,12 @@ export interface SceneEvent { id?: string; segment_id?: string; kind: 'camera_mo
 export interface TrackingTestInput { segment_id: string; start_pts: string; end_pts: string; settings: TrackingSettings }
 export interface TrackingTestResult {
   segment_id: string; start_pts: string; end_pts: string;
-  stats: Record<string, unknown> & { detections: number; rejected_size: number; tracks: number; coherent: number; uncertain: number; noise: number; joins: number };
-  detections: { pts: string; accepted: [number, number, number, number][]; rejected: [number, number, number, number, string][] }[];
+  stats: Record<string, unknown> & { detections: number; rejected_size: number; tracks: number; coherent: number; uncertain: number; noise: number; joins: number;
+    repeated_frames: number; gain_jumps: number; limit_frames: number; static_detections: number; frames: number };
+  /** measures: [area in source px, peak contrast in noise units, +1 lighter / -1 darker], one per accepted box. */
+  detections: { pts: string; accepted: [number, number, number, number][]; rejected: [number, number, number, number, string][]; measures: [number, number, 1 | -1][] }[];
+  /** Places where detections kept appearing without a track (flicker, foliage): proposals, never applied by themselves. */
+  suggested_exclusions: { points: [number, number][]; detections: number }[];
   tracks: TrackRecord[];
   events: SceneEvent[];
 }
@@ -144,6 +150,8 @@ export type GateDirection = 'A_to_B' | 'B_to_A' | 'out_to_in' | 'in_to_out';
 export interface GateValue {
   name: string; kind: 'line' | 'rect' | 'polygon'; points: [number, number][]; frame_w: number; frame_h: number;
   label_a: string; label_b: string; entry_direction: 'A_to_B' | 'B_to_A' | 'out_to_in'; hysteresis_px: number;
+  /** Set on gates placed from a site template: counting waits for one reconfirmation that the view still matches. */
+  template_id?: string | null;
 }
 export interface Gate extends GateValue { id: string; session_id: string; revision: number; state: 'active' | 'retired' }
 export interface GateChange { actor: string; expected_revision: number; value: GateValue | null }
@@ -152,7 +160,7 @@ export interface CountReview { action: 'confirm' | 'reject' | 'clear' | 'add_mis
 /** A derived crossing inside a valid gate span; only coherent tracks feed the algorithm proposal. */
 export interface Crossing { key: string; track_id: string; track_index: number; segment_id: string; pts: string; direction: GateDirection; window_id: string | null; quality: 'coherent' | 'uncertain'; review: CountReview | null }
 /** A camera move or a new video not marked contiguous: counting is paused until one reconfirmation. */
-export interface InvalidSpan { segment_id: string; anchor_kind: 'camera_moved' | 'segment_start'; anchor_id: string; reason: 'camera_moved' | 'new_video'; from_pts: string | null; resume_pts: string | null }
+export interface InvalidSpan { segment_id: string; anchor_kind: 'camera_moved' | 'segment_start'; anchor_id: string; reason: 'camera_moved' | 'new_video' | 'template'; from_pts: string | null; resume_pts: string | null }
 export interface ValidSpan { from_pts: number | null; to_pts: number | null; points: [number, number][] }
 /** A reviewer's manual count of one span at normal speed or slower, compared with the gate's proposal; never changes a count. */
 export interface SampleCheckInput extends PlaybackProof { actor: string; segment_id: string; start_pts: string; end_pts: string; presses: { pts: string; kind: 'entry' | 'exit' }[] }
@@ -165,6 +173,10 @@ export interface SampleCheck {
     missed_by_algorithm: { pts: string; kind: 'entry' | 'exit' }[];
     extra_in_algorithm: { key: string; pts: string; kind: 'entry' | 'exit'; track_index: number }[] };
 }
+/** A camera view's search areas, exclusions, gates and settings for reuse next season; geometry only, never media. */
+export interface SiteTemplate { format: 'bat-site-template-v1'; id: string; name: string; actor: string; utc: string; retired: boolean; frame_w: number; frame_h: number; settings: TrackingSettings; gates: GateValue[] }
+export interface NewTemplateInput { name: string; actor: string; frame_w: number; frame_h: number; settings: TrackingSettings; gates: GateValue[] }
+export interface ApplyTemplateInput { actor: string; session_id: string; frame_w: number; frame_h: number }
 export interface ReconfirmInput { actor: string; anchor_kind: InvalidSpan['anchor_kind']; anchor_id: string; points: [number, number][] | null; note: string }
 export interface GateCounts {
   gate: Gate; tracking_run_id: string; algorithm_version: string; revision: number; review_revision: number; reviewers: string[];
@@ -517,6 +529,8 @@ export interface BatAPI {
   trackingTest(testID: string): Promise<ApiResult<TrackingTest>>;
   trackingEvents(runID: string): Promise<ApiResult<SceneEvent[]>>;
   startPlayback(sessionID: string): Promise<ApiResult<PlaybackStatus>>;
+  /** Prepare the enhanced display copy of one video, on demand. */
+  startEnhanced(sessionID: string, segmentID: string): Promise<ApiResult<PlaybackStatus>>;
   playbackStatus(sessionID: string): Promise<ApiResult<PlaybackStatus>>;
   cancelPlayback(sessionID: string): Promise<ApiResult<PlaybackStatus>>;
   playbackFrames(proxyID: string): Promise<ApiResult<PlaybackFrames>>;
@@ -529,6 +543,14 @@ export interface BatAPI {
   getCounts(runID: string, gateID: string): Promise<ApiResult<GateCounts>>;
   saveCountReview(runID: string, gateID: string, input: CountReviewInput): Promise<ApiResult<GateCounts>>;
   listSampleChecks(runID: string, gateID: string): Promise<ApiResult<SampleCheck[]>>;
+  listTemplates(): Promise<ApiResult<SiteTemplate[]>>;
+  saveTemplate(input: NewTemplateInput): Promise<ApiResult<SiteTemplate>>;
+  applyTemplate(templateID: string, input: ApplyTemplateInput): Promise<ApiResult<{ template: SiteTemplate; gates: Gate[] }>>;
+  retireTemplate(templateID: string): Promise<ApiResult<SiteTemplate>>;
+  /** Save a template as a JSON file chosen with the native dialog; null when cancelled. */
+  exportTemplate(templateID: string): Promise<ApiResult<string | null>>;
+  /** Read a template JSON file chosen with the native dialog and store it; null when cancelled. */
+  importTemplate(actor: string): Promise<ApiResult<SiteTemplate | null>>;
   saveSampleCheck(runID: string, gateID: string, input: SampleCheckInput): Promise<ApiResult<SampleCheck>>;
   saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>>;
   reconfirmGate(runID: string, gateID: string, input: ReconfirmInput): Promise<ApiResult<GateCounts>>;

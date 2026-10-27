@@ -221,6 +221,7 @@ class Analyzer:
         self.last_pts: int | None = None
         self.first_pts: int | None = None
         self.persist = np.zeros(self.grid, dtype=np.float32)
+        self.signed = np.zeros(self.grid, dtype=np.float32)
         columns, rows = CONSTANTS["flow_grid"]
         self.flow = np.zeros((rows, columns, 3))  # vx, vy, weight per coarse cell
         self.gain = (1.0, 0.0)
@@ -327,6 +328,7 @@ class Analyzer:
         (for the target's own size and position), both in the chosen polarity."""
         noise = self.noise if self.noise is not None else np.ones(self.grid, np.float32)
         difference = image - background
+        self.signed = difference
         z = ndimage.gaussian_filter(difference, self.sigma) / noise
         polarity = self.settings["polarity"]
         if polarity == "light":
@@ -443,6 +445,7 @@ class Analyzer:
         static_frames = CONSTANTS["static_seconds"] * self.fps
         found: list[Detection] = []
         rejected: list[list] = []
+        measures: list[list] = []
         cell = self.step * self.step
         rows, columns = self.grid
         reach = 2 * radius
@@ -484,11 +487,14 @@ class Analyzer:
             cy = (float((by * w).sum() / w.sum()) + y0 + 0.5) * self.step
             peak = float(score[y, x])
             static = bool(self.persist[y, x] >= static_frames)
+            measures.append([area, round(peak, 1), 1 if float(self.signed[y, x]) >= 0 else -1])
             self.stats["static_detections"] += int(static)
             found.append(Detection(cx, cy, area, box, round(peak, 2), strong=peak >= self.threshold, static=static))
         self.stats["detections"] += len(found)
         if self.record is not None and self.record[0] <= pts <= self.record[1]:
-            self.detections.append({"pts": str(pts), "accepted": [list(item.box) for item in found], "rejected": rejected[:64]})
+            # measures: [area in source pixels, peak contrast in noise units, +1 lighter / -1 darker] per accepted box.
+            self.detections.append({"pts": str(pts), "accepted": [list(item.box) for item in found], "rejected": rejected[:64],
+                                    "measures": measures})
         return found
 
     # -- association --------------------------------------------------------------------------------------------
@@ -615,6 +621,42 @@ def analyzer(version: str, width: int, height: int, fps: float, tick_seconds: fl
     if version != ALGORITHM_VERSION:
         raise ValueError("tracking_settings")
     return Analyzer(width, height, fps, tick_seconds, settings, record_detections)
+
+
+def noise_clusters(detections: list[dict], found: list[Track], width: int, height: int, target: float) -> list[dict]:
+    """Places where detections of a test run kept appearing without belonging to any non-noise track (flicker,
+    foliage, a lamp): proposed exclusion rectangles for the user to accept or ignore, never applied by themselves."""
+    if not detections:
+        return []
+    size = max(2 * target, width / 32)
+    columns, rows = ceil(width / size), ceil(height / size)
+    counts = np.zeros((rows, columns), dtype=np.int64)
+    points: dict[int, list[tuple[float, float]]] = {}
+    for track in found:
+        if track.quality == "noise":
+            continue
+        for pts, x, y, _area in track.points:
+            points.setdefault(int(pts), []).append((x, y))
+    for item in detections:
+        near = points.get(int(item["pts"]), [])
+        for x0, y0, x1, y1 in item["accepted"]:
+            cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+            if any(abs(cx - x) <= 1.5 * target and abs(cy - y) <= 1.5 * target for x, y in near):
+                continue
+            counts[min(rows - 1, int(cy / size)), min(columns - 1, int(cx / size))] += 1
+    busy = counts >= max(5, 0.2 * len(detections))
+    labels, count = ndimage.label(busy, structure=np.ones((3, 3), dtype=bool))
+    result = []
+    for index, region in enumerate(ndimage.find_objects(labels), start=1):
+        if region is None:
+            continue
+        x0 = max(0.0, region[1].start * size - target)
+        y0 = max(0.0, region[0].start * size - target)
+        x1 = min(float(width), region[1].stop * size + target)
+        y1 = min(float(height), region[0].stop * size + target)
+        result.append({"points": [[round(x0, 1), round(y0, 1)], [round(x1, 1), round(y0, 1)], [round(x1, 1), round(y1, 1)], [round(x0, 1), round(y1, 1)]],
+                       "detections": int(counts[region][labels[region] == index].sum())})
+    return sorted(result, key=lambda item: -item["detections"])[:8]
 
 
 def _ends(track: Track) -> tuple[float, float, float, float, float]:

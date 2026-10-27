@@ -8,7 +8,7 @@ import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia, SummaryRequest, SummaryRun, SummaryDetail, ReviewChange, WindowReview, ReviewHistory } from './contracts';
-import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, PlaybackProof, WatchedInput, FlightMap, ReconfirmInput, PlaybackFrames, PlaybackStatus, SceneEvent, TrackingRun, TrackingSettings, TrackingTest, TrackingTestInput, TrackPage, Gate, GateChange, GateCounts, CountReviewInput, CountQAInput, SampleCheck, SampleCheckInput, Candidate, CandidateDecisionInput, AudioSource, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, AudioDerived } from './contracts';
+import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, PlaybackProof, WatchedInput, FlightMap, ReconfirmInput, PlaybackFrames, PlaybackStatus, SceneEvent, TrackingRun, TrackingSettings, TrackingTest, TrackingTestInput, TrackPage, Gate, GateChange, GateValue, GateCounts, CountReviewInput, CountQAInput, SampleCheck, SampleCheckInput, SiteTemplate, NewTemplateInput, ApplyTemplateInput, Candidate, CandidateDecisionInput, AudioSource, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, AudioDerived } from './contracts';
 
 export const isAudioMode = (value: unknown): value is AudioSourceMode =>
   ['full_spectrum', 'heterodyne', 'frequency_division', 'time_expansion', 'unknown'].includes(String(value));
@@ -44,7 +44,12 @@ export function isGateChange(input: unknown): input is GateChange {
   if (!object(input) || !exactKeys(input, ['actor', 'expected_revision', 'value']) || !text(input.actor, 120) || !isReviewCursor(input.expected_revision)) return false;
   const value = input.value;
   if (value === null) return true;
-  return object(value) && exactKeys(value, ['name', 'kind', 'points', 'frame_w', 'frame_h', 'label_a', 'label_b', 'entry_direction', 'hysteresis_px']) &&
+  return isGateValue(value);
+}
+/** A gate value; template_id is present only on gates placed from a site template. */
+export function isGateValue(value: unknown): value is GateValue {
+  const keys = ['name', 'kind', 'points', 'frame_w', 'frame_h', 'label_a', 'label_b', 'entry_direction', 'hysteresis_px'];
+  return object(value) && (exactKeys(value, keys) || (exactKeys(value, [...keys, 'template_id']) && (value.template_id === null || isUUID(value.template_id)))) &&
     text(value.name, 60) && text(value.label_a, 60) && text(value.label_b, 60) && ['line', 'rect', 'polygon'].includes(String(value.kind)) &&
     ['A_to_B', 'B_to_A', 'out_to_in'].includes(String(value.entry_direction)) && count(value.frame_w, 8192) && count(value.frame_h, 8192) &&
     typeof value.hysteresis_px === 'number' && value.hysteresis_px >= 0 && value.hysteresis_px <= 200 &&
@@ -69,6 +74,15 @@ export function isSampleCheckInput(input: unknown): input is SampleCheckInput {
     text(input.actor, 120) && isUUID(input.segment_id) && safePTS(input.start_pts) && safePTS(input.end_pts) && Array.isArray(input.presses) &&
     input.presses.length <= 5000 && input.presses.every(press => object(press) && exactKeys(press, ['pts', 'kind']) && safePTS(press.pts) &&
       (press.kind === 'entry' || press.kind === 'exit'));
+}
+export function isNewTemplateInput(input: unknown): input is NewTemplateInput {
+  return object(input) && exactKeys(input, ['name', 'actor', 'frame_w', 'frame_h', 'settings', 'gates']) && text(input.name, 60) && text(input.actor, 120) &&
+    count(input.frame_w, 8192) && count(input.frame_h, 8192) && isTrackingSettings(input.settings) && Array.isArray(input.gates) && input.gates.length <= 16 &&
+    input.gates.every(isGateValue);
+}
+export function isApplyTemplateInput(input: unknown): input is ApplyTemplateInput {
+  return object(input) && exactKeys(input, ['actor', 'session_id', 'frame_w', 'frame_h']) && text(input.actor, 120) && isUUID(input.session_id) &&
+    count(input.frame_w, 8192) && count(input.frame_h, 8192);
 }
 export function isCountQAInput(input: unknown): input is CountQAInput {
   return object(input) && exactKeys(input, ['actor', 'expected_revision', 'review_revision', 'decision', 'note']) && text(input.actor, 120) &&
@@ -312,7 +326,7 @@ function mediaFailure(code: unknown) {
 type ApiRoute = '/api/exports' | `/api/exports/${string}` | `/api/exports/${string}/cancel` | '/api/qa/upgrade' | `/api/summary-windows/${string}/qa` | `/api/summary-windows/${string}/qa-actions` | `/api/summary-windows/${string}/qa-history?after_revision=${number}` | '/api/reviews/upgrade' | `/api/summary-windows/${string}/review` | `/api/summary-windows/${string}/review-actions` | `/api/summary-windows/${string}/review-history?after_revision=${number}` | '/api/health' | '/api/sessions' | '/api/media/upgrade' | '/api/media/import' |
   `/api/sessions/${string}/media` | `/api/media/import/${string}` | `/api/media/import/${string}/cancel` |
   '/api/summaries/upgrade' | '/api/summaries' | `/api/summaries/${string}` | `/api/summaries/${string}/cancel` | `/api/sessions/${string}/summary-runs` |
-  '/api/storage/upgrade' | '/api/reviews/watched' | '/api/tracking-tests' | `/api/tracking-tests/${string}` | '/api/proxy' | `/api/proxy?session_id=${string}` | '/api/proxy/cancel' | `/api/proxy/${string}/frames` | `/api/sessions/${string}/audio` | `/api/audio/${string}` | `/api/sessions/${string}/gates` | `/api/sessions/${string}/gates/${string}` | '/api/tracking' | `/api/tracking/${string}` | `/api/summaries/${string}/tracking` | '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
+  '/api/storage/upgrade' | '/api/site-templates' | '/api/site-templates/import' | `/api/site-templates/${string}` | '/api/reviews/watched' | '/api/tracking-tests' | `/api/tracking-tests/${string}` | '/api/proxy' | `/api/proxy?session_id=${string}` | '/api/proxy/cancel' | `/api/proxy/${string}/frames` | `/api/sessions/${string}/audio` | `/api/audio/${string}` | `/api/sessions/${string}/gates` | `/api/sessions/${string}/gates/${string}` | '/api/tracking' | `/api/tracking/${string}` | `/api/summaries/${string}/tracking` | '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
 
 /** Read only known, redacted startup codes from the Python process. */
 function safeStartupFailure(output: string): string | undefined {
@@ -408,6 +422,9 @@ export class BackendClient {
   startPlayback(sessionID: string): Promise<ApiResult<PlaybackStatus>> {
     return isUUID(sessionID) ? this.call('/api/proxy', 'POST', { session_id: sessionID }) : Promise.resolve(invalid());
   }
+  startEnhanced(sessionID: string, segmentID: string): Promise<ApiResult<PlaybackStatus>> {
+    return isUUID(sessionID) && isUUID(segmentID) ? this.call('/api/proxy', 'POST', { session_id: sessionID, kind: 'enhanced', segment_id: segmentID }) : Promise.resolve(invalid());
+  }
   playbackStatus(sessionID: string): Promise<ApiResult<PlaybackStatus>> {
     return isUUID(sessionID) ? this.call(`/api/proxy?session_id=${sessionID}`) : Promise.resolve(invalid());
   }
@@ -449,6 +466,16 @@ export class BackendClient {
   getCounts(runID: string, gateID: string): Promise<ApiResult<GateCounts>> {
     return isUUID(runID) && isUUID(gateID) ? this.call(`/api/tracking/${runID}/gates/${gateID}/counts`) : Promise.resolve(invalid());
   }
+  listTemplates(): Promise<ApiResult<SiteTemplate[]>> { return this.call('/api/site-templates'); }
+  getTemplate(templateID: string): Promise<ApiResult<SiteTemplate>> { return isUUID(templateID) ? this.call(`/api/site-templates/${templateID}`) : Promise.resolve(invalid()); }
+  saveTemplate(input: NewTemplateInput): Promise<ApiResult<SiteTemplate>> { return isNewTemplateInput(input) ? this.call('/api/site-templates', 'POST', input) : Promise.resolve(invalid()); }
+  importTemplateData(actor: string, data: unknown): Promise<ApiResult<SiteTemplate>> {
+    return text(actor, 120) && object(data) ? this.call('/api/site-templates/import', 'POST', { actor, data }) : Promise.resolve(invalid('This is not a site template file.'));
+  }
+  applyTemplate(templateID: string, input: ApplyTemplateInput): Promise<ApiResult<{ template: SiteTemplate; gates: Gate[] }>> {
+    return isUUID(templateID) && isApplyTemplateInput(input) ? this.call(`/api/site-templates/${templateID}/apply`, 'POST', input) : Promise.resolve(invalid());
+  }
+  retireTemplate(templateID: string): Promise<ApiResult<SiteTemplate>> { return isUUID(templateID) ? this.call(`/api/site-templates/${templateID}/retire`, 'POST') : Promise.resolve(invalid()); }
   listSampleChecks(runID: string, gateID: string): Promise<ApiResult<SampleCheck[]>> {
     return isUUID(runID) && isUUID(gateID) ? this.call(`/api/tracking/${runID}/gates/${gateID}/sample-checks`) : Promise.resolve(invalid());
   }
@@ -778,6 +805,7 @@ export class BackendRuntime {
   trackingEvents(runID: string): Promise<ApiResult<SceneEvent[]>> { return this.ready(client => client.trackingEvents(runID)); }
   trackingRun(runID: string): Promise<ApiResult<TrackingRun>> { return this.ready(client => client.trackingRun(runID)); }
   startPlayback(sessionID: string): Promise<ApiResult<PlaybackStatus>> { return this.ready(client => client.startPlayback(sessionID)); }
+  startEnhanced(sessionID: string, segmentID: string): Promise<ApiResult<PlaybackStatus>> { return this.ready(client => client.startEnhanced(sessionID, segmentID)); }
   playbackStatus(sessionID: string): Promise<ApiResult<PlaybackStatus>> { return this.ready(client => client.playbackStatus(sessionID)); }
   cancelPlayback(sessionID: string): Promise<ApiResult<PlaybackStatus>> { return this.ready(client => client.cancelPlayback(sessionID)); }
   playbackFrames(proxyID: string): Promise<ApiResult<PlaybackFrames>> { return this.ready(client => client.playbackFrames(proxyID)); }
@@ -795,6 +823,12 @@ export class BackendRuntime {
   reconfirmGate(runID: string, gateID: string, input: ReconfirmInput): Promise<ApiResult<GateCounts>> { return this.ready(client => client.reconfirmGate(runID, gateID, input)); }
   saveCountReview(runID: string, gateID: string, input: CountReviewInput): Promise<ApiResult<GateCounts>> { return this.ready(client => client.saveCountReview(runID, gateID, input)); }
   listSampleChecks(runID: string, gateID: string): Promise<ApiResult<SampleCheck[]>> { return this.ready(client => client.listSampleChecks(runID, gateID)); }
+  listTemplates(): Promise<ApiResult<SiteTemplate[]>> { return this.ready(client => client.listTemplates()); }
+  getTemplate(templateID: string): Promise<ApiResult<SiteTemplate>> { return this.ready(client => client.getTemplate(templateID)); }
+  saveTemplate(input: NewTemplateInput): Promise<ApiResult<SiteTemplate>> { return this.ready(client => client.saveTemplate(input)); }
+  importTemplateData(actor: string, data: unknown): Promise<ApiResult<SiteTemplate>> { return this.ready(client => client.importTemplateData(actor, data)); }
+  applyTemplate(templateID: string, input: ApplyTemplateInput): Promise<ApiResult<{ template: SiteTemplate; gates: Gate[] }>> { return this.ready(client => client.applyTemplate(templateID, input)); }
+  retireTemplate(templateID: string): Promise<ApiResult<SiteTemplate>> { return this.ready(client => client.retireTemplate(templateID)); }
   saveSampleCheck(runID: string, gateID: string, input: SampleCheckInput): Promise<ApiResult<SampleCheck>> { return this.ready(client => client.saveSampleCheck(runID, gateID, input)); }
   saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>> { return this.ready(client => client.saveCountQA(runID, gateID, input)); }
   listCandidates(runID: string): Promise<ApiResult<Candidate[]>> { return this.ready(client => client.listCandidates(runID)); }

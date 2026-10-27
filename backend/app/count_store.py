@@ -225,6 +225,9 @@ def spans(db_path: Path, run_id: str, gate: dict) -> tuple[dict[str, list[dict]]
         if position > 0 and (segment is None or segment["continuity"] != "known_contiguous"):
             # A new video not marked contiguous may come from a moved or re-aimed camera.
             current = _resume(confirmed, ("segment_start", source["id"]), gate, invalid, source["id"], None, "new_video")
+        elif position == 0 and gate.get("template_id"):
+            # A gate placed from a site template was drawn on another survey's view: confirm it still fits.
+            current = _resume(confirmed, ("segment_start", source["id"]), gate, invalid, source["id"], None, "template")
         for move in [item for item in moves if item["segment_id"] == source["id"]]:
             if current is not None:
                 intervals.append({"from_pts": start, "to_pts": int(move["start_pts"]), "points": current})
