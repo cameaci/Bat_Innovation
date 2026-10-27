@@ -178,11 +178,25 @@ export interface SiteTemplate { format: 'bat-site-template-v1'; id: string; name
 export interface NewTemplateInput { name: string; actor: string; frame_w: number; frame_h: number; settings: TrackingSettings; gates: GateValue[] }
 export interface ApplyTemplateInput { actor: string; session_id: string; frame_w: number; frame_h: number }
 export interface ReconfirmInput { actor: string; anchor_kind: InvalidSpan['anchor_kind']; anchor_id: string; points: [number, number][] | null; note: string }
+/** Emergence profile of one gate (Phase 3 X7): per-minute bins of each video and flow metrics per count layer. */
+export interface FlowLayer {
+  bins: { segment_id: string; minute: number; entered: number; exited: number }[];
+  first_exit: { segment_id: string; seconds: number } | null; last_exit: { segment_id: string; seconds: number } | null;
+  peak_minute: { segment_id: string; minute: number; exited: number } | null; peak_exits_per_second: number;
+}
+export interface Sunset { sunset: string; source: string; actor: string; revision: number; utc: string }
+export interface SunsetInput { actor: string; sunset: string; source: string }
+export interface FlowProfile {
+  layers: { algorithm: FlowLayer; reviewer: FlowLayer; qa: FlowLayer | null };
+  sunset: Sunset | null; clock_segment_id: string | null;
+  minutes_after_sunset: Record<string, { first_exit: number | null; peak_minute: number | null }> | null; note: string;
+}
 export interface GateCounts {
   gate: Gate; tracking_run_id: string; algorithm_version: string; revision: number; review_revision: number; reviewers: string[];
   crossings: Crossing[]; missed: CountReview[]; skipped_segments: string[];
   invalid_spans: InvalidSpan[];
   valid_spans: Record<string, ValidSpan[]>;
+  profile: FlowProfile;
   layers: {
     algorithm: CountTotals & { coherent: number; uncertain: number; noise_crossings: number; invalid_spans: number };
     reviewer: CountTotals & { state: 'ready' | 'unresolved' | 'accepted'; unresolved: number; rejected: number; reviewed: number; crossings: number; added: number;
@@ -546,6 +560,8 @@ export interface BatAPI {
   listGates(sessionID: string): Promise<ApiResult<Gate[]>>;
   saveGate(sessionID: string, gateID: string | null, change: GateChange): Promise<ApiResult<Gate>>;
   getCounts(runID: string, gateID: string): Promise<ApiResult<GateCounts>>;
+  getSunset(sessionID: string): Promise<ApiResult<Sunset | null>>;
+  saveSunset(sessionID: string, input: SunsetInput): Promise<ApiResult<Sunset | null>>;
   saveCountReview(runID: string, gateID: string, input: CountReviewInput): Promise<ApiResult<GateCounts>>;
   listSampleChecks(runID: string, gateID: string): Promise<ApiResult<SampleCheck[]>>;
   listTemplates(): Promise<ApiResult<SiteTemplate[]>>;

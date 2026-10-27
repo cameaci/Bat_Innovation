@@ -93,6 +93,9 @@ export function insideNow(tracks: TrackData[], now: number, kind: Gate['kind'], 
 }
 
 export type BoardMode = 'band' | 'corner' | 'off';
+/** One colour per active gate, in creation order (several gates are drawn and counted together). */
+export const GATE_COLOURS = ['#facc15', '#34d399', '#f472b6', '#60a5fa', '#fb923c', '#a78bfa'];
+export const gateColour = (index: number) => GATE_COLOURS[index % GATE_COLOURS.length]!;
 const CIRCLE_SECONDS = 1.5;
 
 /**
@@ -101,38 +104,39 @@ const CIRCLE_SECONDS = 1.5;
  * video like the reference tools, or a compact corner box. Counts are provisional candidate evidence.
  */
 export function drawCounts(context: CanvasRenderingContext2D, view: View, counts: GateCounts, order: Map<string, number>,
-  segmentID: string, now: number, ticksPerSecond: number, tracks: TrackData[] = [], board: BoardMode = 'corner') {
+  segmentID: string, now: number, ticksPerSecond: number, tracks: TrackData[] = [], board: BoardMode = 'corner', colour = GATE_COLOURS[0]!, row = 0) {
   const gate = counts.gate;
   const intervals = counts.valid_spans[segmentID] ?? [];
   const valid = intervals.find(item => (item.from_pts === null || now >= item.from_pts) && (item.to_pts === null || now < item.to_pts));
   const points = valid?.points ?? gate.points;
   context.lineWidth = 3 * view.dpr;
   context.setLineDash(valid ? [] : [8 * view.dpr, 6 * view.dpr]);
-  context.strokeStyle = valid ? '#facc15' : '#64748b';
+  context.strokeStyle = valid ? colour : '#64748b';
   shape(context, view, gate, points);
-  if (gate.kind !== 'line') { context.fillStyle = valid ? 'rgba(250, 204, 21, 0.08)' : 'rgba(100, 116, 139, 0.15)'; context.fill(); }
+  if (gate.kind !== 'line') { context.globalAlpha = 0.1; context.fillStyle = valid ? colour : '#64748b'; context.fill(); context.globalAlpha = 1; }
   context.stroke();
   context.setLineDash([]);
   const font = 13 * view.dpr;
   context.font = `600 ${font}px ui-sans-serif, system-ui`;
   const [ax, ay] = points[0]!;
   if (gate.kind === 'line') {
-    const [bx, by] = points[points.length - 1]!;
+    const [bx, by] = points[1]!;
     const length = Math.hypot(bx - ax, by - ay) || 1;
     const lx = (by - ay) / length, ly = -(bx - ax) / length;
     const mx = view.dx + (ax + bx) / 2 * view.scale, my = view.dy + (ay + by) / 2 * view.scale;
-    context.fillStyle = '#fef08a';
+    context.fillStyle = colour;
     context.fillText('A', mx + lx * 18 * view.dpr, my + ly * 18 * view.dpr);
     context.fillText('B', mx - lx * 18 * view.dpr, my - ly * 18 * view.dpr);
   }
   if (!valid) {
     // Centred on the gate, clear of the counter board.
     const cx = view.dx + points.reduce((sum, point) => sum + point[0], 0) / points.length * view.scale;
-    const cy = view.dy + points.reduce((sum, point) => sum + point[1], 0) / points.length * view.scale;
+    // Several paused gates stack their notices instead of overlapping.
+    const cy = view.dy + points.reduce((sum, point) => sum + point[1], 0) / points.length * view.scale + row * 24 * view.dpr;
     context.fillStyle = 'rgba(15, 23, 42, 0.85)';
     context.fillRect(cx - 95 * view.dpr, cy - 10 * view.dpr, 190 * view.dpr, 20 * view.dpr);
     context.fillStyle = '#e2e8f0';
-    context.fillText('Gate paused: reconfirm it', cx - 89 * view.dpr, cy + 4 * view.dpr);
+    context.fillText(`${gate.name} paused: reconfirm it`.slice(0, 30), cx - 89 * view.dpr, cy + 4 * view.dpr);
   }
   // A circle where each crossing of the last 1.5 s met the gate.
   const byID = new Map(tracks.map(track => [track.id, track]));
@@ -164,7 +168,7 @@ export function drawCounts(context: CanvasRenderingContext2D, view: View, counts
   if (board === 'off') return;
   const total = soFar(counts, order, segmentID, now);
   const occupancy = insideNow(tracks, now, gate.kind, points);
-  const parts: [string, string][] = [['#e2e8f0', gate.name], [IN_COLOUR, `Entered ${total.entered}`], [OUT_COLOUR, `Exited ${total.exited}`],
+  const parts: [string, string][] = [[colour, gate.name], [IN_COLOUR, `Entered ${total.entered}`], [OUT_COLOUR, `Exited ${total.exited}`],
     ['#f8fafc', `Net ${total.net >= 0 ? '+' : ''}${total.net}`]];
   if (occupancy) parts.push(['#a5f3fc', `Inside ${occupancy.coherent}${occupancy.uncertain ? ` (+${occupancy.uncertain}?)` : ''} tracks now`]);
   if (total.pending) parts.push(['#f59e0b', `${total.pending} undecided`]);
@@ -173,24 +177,57 @@ export function drawCounts(context: CanvasRenderingContext2D, view: View, counts
     const left = view.dx, right = context.canvas.width - view.dx, bottom = context.canvas.height - view.dy;
     const size = Math.max(14, Math.min(26, (right - left) / view.dpr / 48)) * view.dpr;
     const height = size * 1.8;
+    const base = bottom - row * height;
     context.fillStyle = 'rgba(2, 6, 23, 0.78)';
-    context.fillRect(left, bottom - height, right - left, height);
+    context.fillRect(left, base - height, right - left, height);
     context.font = `700 ${size}px ui-sans-serif, system-ui`;
     let x = left + size * 0.6;
-    for (const [colour, text] of parts) {
-      context.fillStyle = colour;
-      context.fillText(text, x, bottom - height * 0.3);
+    for (const [tone, text] of parts) {
+      context.fillStyle = tone;
+      context.fillText(text, x, base - height * 0.3);
       x += context.measureText(text).width + size * 1.2;
     }
     return;
   }
+  const top = (8 + row * 38) * view.dpr;
   context.fillStyle = 'rgba(2, 6, 23, 0.75)';
-  context.fillRect(8 * view.dpr, 8 * view.dpr, 230 * view.dpr, 34 * view.dpr);
+  context.fillRect(8 * view.dpr, top, 230 * view.dpr, 34 * view.dpr);
+  context.fillStyle = colour;
+  context.fillRect(8 * view.dpr, top, 4 * view.dpr, 34 * view.dpr);
   context.font = `700 ${18 * view.dpr}px ui-sans-serif, system-ui`;
   context.fillStyle = IN_COLOUR;
-  context.fillText(`IN ${total.entered}`, 16 * view.dpr, 32 * view.dpr);
+  context.fillText(`IN ${total.entered}`, 16 * view.dpr, top + 24 * view.dpr);
   context.fillStyle = OUT_COLOUR;
-  context.fillText(`OUT ${total.exited}`, 86 * view.dpr, 32 * view.dpr);
+  context.fillText(`OUT ${total.exited}`, 86 * view.dpr, top + 24 * view.dpr);
   context.fillStyle = '#f8fafc';
-  context.fillText(`NET ${total.net >= 0 ? '+' : ''}${total.net}`, 166 * view.dpr, 32 * view.dpr);
+  context.fillText(`NET ${total.net >= 0 ? '+' : ''}${total.net}`, 166 * view.dpr, top + 24 * view.dpr);
+}
+
+/** Several gates of one video add up only as a labelled sum: a bat may cross more than one gate. */
+export function sumOfGates(all: GateCounts[], order: Map<string, number>, segmentID: string, now: number) {
+  return all.map(item => soFar(item, order, segmentID, now)).reduce((sum, item) => ({ entered: sum.entered + item.entered, exited: sum.exited + item.exited,
+    net: sum.net + item.net, pending: sum.pending + item.pending }), { entered: 0, exited: 0, net: 0, pending: 0 });
+}
+
+export function drawSum(context: CanvasRenderingContext2D, view: View, all: GateCounts[], order: Map<string, number>, segmentID: string, now: number, board: BoardMode, row: number) {
+  if (all.length < 2 || board === 'off') return;
+  const total = sumOfGates(all, order, segmentID, now);
+  const text = `Sum of gates (a bat may cross several): in ${total.entered}, out ${total.exited}, net ${total.net >= 0 ? '+' : ''}${total.net}`;
+  if (board === 'band') {
+    const left = view.dx, right = context.canvas.width - view.dx, bottom = context.canvas.height - view.dy;
+    const size = Math.max(12, Math.min(20, (right - left) / view.dpr / 60)) * view.dpr;
+    const height = size * 1.8, base = bottom - row * Math.max(14, Math.min(26, (right - left) / view.dpr / 48)) * view.dpr * 1.8;
+    context.fillStyle = 'rgba(2, 6, 23, 0.85)';
+    context.fillRect(left, base - height, right - left, height);
+    context.font = `600 ${size}px ui-sans-serif, system-ui`;
+    context.fillStyle = '#cbd5e1';
+    context.fillText(text, left + size * 0.6, base - height * 0.3);
+    return;
+  }
+  const top = (8 + row * 38) * view.dpr;
+  context.fillStyle = 'rgba(2, 6, 23, 0.75)';
+  context.fillRect(8 * view.dpr, top, 360 * view.dpr, 24 * view.dpr);
+  context.font = `600 ${11 * view.dpr}px ui-sans-serif, system-ui`;
+  context.fillStyle = '#cbd5e1';
+  context.fillText(text, 14 * view.dpr, top + 16 * view.dpr);
 }

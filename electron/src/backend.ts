@@ -8,7 +8,7 @@ import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia, SummaryRequest, SummaryRun, SummaryDetail, ReviewChange, WindowReview, ReviewHistory } from './contracts';
-import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, PlaybackProof, WatchedInput, FlightMap, ReconfirmInput, PlaybackFrames, PlaybackStatus, SceneEvent, TrackingRun, TrackingSettings, TrackingTest, TrackingTestInput, TrackPage, Gate, GateChange, GateValue, GateCounts, CountReviewInput, CountQAInput, SampleCheck, SampleCheckInput, TrackLabels, TrackLabelInput, SiteTemplate, NewTemplateInput, ApplyTemplateInput, Candidate, CandidateDecisionInput, AudioSource, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, AudioDerived } from './contracts';
+import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, PlaybackProof, WatchedInput, FlightMap, ReconfirmInput, PlaybackFrames, PlaybackStatus, SceneEvent, TrackingRun, TrackingSettings, TrackingTest, TrackingTestInput, TrackPage, Gate, GateChange, GateValue, GateCounts, CountReviewInput, CountQAInput, SampleCheck, SampleCheckInput, TrackLabels, TrackLabelInput, Sunset, SunsetInput, SiteTemplate, NewTemplateInput, ApplyTemplateInput, Candidate, CandidateDecisionInput, AudioSource, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, AudioDerived } from './contracts';
 
 export const isAudioMode = (value: unknown): value is AudioSourceMode =>
   ['full_spectrum', 'heterodyne', 'frequency_division', 'time_expansion', 'unknown'].includes(String(value));
@@ -79,6 +79,10 @@ export function isTrackLabelInput(input: unknown): input is TrackLabelInput {
   return object(input) && exactKeys(input, ['actor', 'track_ids', 'category', 'species', 'comment']) && text(input.actor, 120) &&
     Array.isArray(input.track_ids) && input.track_ids.length >= 1 && input.track_ids.length <= 5000 && input.track_ids.every(isUUID) &&
     text(input.category, 30) && text(input.species, 80, false) && text(input.comment, 2000, false);
+}
+export function isSunsetInput(input: unknown): input is SunsetInput {
+  return object(input) && exactKeys(input, ['actor', 'sunset', 'source']) && text(input.actor, 120) &&
+    typeof input.sunset === 'string' && /^(([01]\d|2[0-3]):[0-5]\d)?$/.test(input.sunset) && text(input.source, 200, false);
 }
 export function isNewTemplateInput(input: unknown): input is NewTemplateInput {
   return object(input) && exactKeys(input, ['name', 'actor', 'frame_w', 'frame_h', 'settings', 'gates']) && text(input.name, 60) && text(input.actor, 120) &&
@@ -331,7 +335,7 @@ function mediaFailure(code: unknown) {
 type ApiRoute = '/api/exports' | `/api/exports/${string}` | `/api/exports/${string}/cancel` | '/api/qa/upgrade' | `/api/summary-windows/${string}/qa` | `/api/summary-windows/${string}/qa-actions` | `/api/summary-windows/${string}/qa-history?after_revision=${number}` | '/api/reviews/upgrade' | `/api/summary-windows/${string}/review` | `/api/summary-windows/${string}/review-actions` | `/api/summary-windows/${string}/review-history?after_revision=${number}` | '/api/health' | '/api/sessions' | '/api/media/upgrade' | '/api/media/import' |
   `/api/sessions/${string}/media` | `/api/media/import/${string}` | `/api/media/import/${string}/cancel` |
   '/api/summaries/upgrade' | '/api/summaries' | `/api/summaries/${string}` | `/api/summaries/${string}/cancel` | `/api/sessions/${string}/summary-runs` |
-  '/api/storage/upgrade' | '/api/site-templates' | '/api/site-templates/import' | `/api/site-templates/${string}` | '/api/reviews/watched' | '/api/tracking-tests' | `/api/tracking-tests/${string}` | '/api/proxy' | `/api/proxy?session_id=${string}` | '/api/proxy/cancel' | `/api/proxy/${string}/frames` | `/api/sessions/${string}/audio` | `/api/audio/${string}` | `/api/sessions/${string}/gates` | `/api/sessions/${string}/gates/${string}` | '/api/tracking' | `/api/tracking/${string}` | `/api/summaries/${string}/tracking` | '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
+  '/api/storage/upgrade' | '/api/site-templates' | '/api/site-templates/import' | `/api/site-templates/${string}` | '/api/reviews/watched' | '/api/tracking-tests' | `/api/tracking-tests/${string}` | '/api/proxy' | `/api/proxy?session_id=${string}` | '/api/proxy/cancel' | `/api/proxy/${string}/frames` | `/api/sessions/${string}/audio` | `/api/audio/${string}` | `/api/sessions/${string}/gates` | `/api/sessions/${string}/sunset` | `/api/sessions/${string}/gates/${string}` | '/api/tracking' | `/api/tracking/${string}` | `/api/summaries/${string}/tracking` | '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
 
 /** Read only known, redacted startup codes from the Python process. */
 function safeStartupFailure(output: string): string | undefined {
@@ -467,6 +471,10 @@ export class BackendClient {
   saveGate(sessionID: string, gateID: string | null, change: GateChange): Promise<ApiResult<Gate>> {
     if (!isUUID(sessionID) || !(gateID === null || isUUID(gateID)) || !isGateChange(change)) return Promise.resolve(invalid());
     return gateID === null ? this.call(`/api/sessions/${sessionID}/gates`, 'POST', change) : this.call(`/api/sessions/${sessionID}/gates/${gateID}`, 'PUT', change);
+  }
+  getSunset(sessionID: string): Promise<ApiResult<Sunset | null>> { return isUUID(sessionID) ? this.call(`/api/sessions/${sessionID}/sunset`) : Promise.resolve(invalid()); }
+  saveSunset(sessionID: string, input: SunsetInput): Promise<ApiResult<Sunset | null>> {
+    return isUUID(sessionID) && isSunsetInput(input) ? this.call(`/api/sessions/${sessionID}/sunset`, 'POST', input) : Promise.resolve(invalid());
   }
   getCounts(runID: string, gateID: string): Promise<ApiResult<GateCounts>> {
     return isUUID(runID) && isUUID(gateID) ? this.call(`/api/tracking/${runID}/gates/${gateID}/counts`) : Promise.resolve(invalid());
@@ -832,6 +840,8 @@ export class BackendRuntime {
   listGates(sessionID: string): Promise<ApiResult<Gate[]>> { return this.ready(client => client.listGates(sessionID)); }
   saveGate(sessionID: string, gateID: string | null, change: GateChange): Promise<ApiResult<Gate>> { return this.ready(client => client.saveGate(sessionID, gateID, change)); }
   getCounts(runID: string, gateID: string): Promise<ApiResult<GateCounts>> { return this.ready(client => client.getCounts(runID, gateID)); }
+  getSunset(sessionID: string): Promise<ApiResult<Sunset | null>> { return this.ready(client => client.getSunset(sessionID)); }
+  saveSunset(sessionID: string, input: SunsetInput): Promise<ApiResult<Sunset | null>> { return this.ready(client => client.saveSunset(sessionID, input)); }
   reconfirmGate(runID: string, gateID: string, input: ReconfirmInput): Promise<ApiResult<GateCounts>> { return this.ready(client => client.reconfirmGate(runID, gateID, input)); }
   saveCountReview(runID: string, gateID: string, input: CountReviewInput): Promise<ApiResult<GateCounts>> { return this.ready(client => client.saveCountReview(runID, gateID, input)); }
   listSampleChecks(runID: string, gateID: string): Promise<ApiResult<SampleCheck[]>> { return this.ready(client => client.listSampleChecks(runID, gateID)); }

@@ -237,3 +237,16 @@ test('the track table joins labels and gate crossings, filters and selects by ar
   assert.deepEqual(table.tracksInArea([{ id: 'in', x: [20, 5], y: [20, 5] }, { id: 'out', x: [20, 30], y: [5, 5] }], square), ['in']);
   assert.equal(table.categoryName('fly_by'), 'fly-by');
 });
+
+test('the emergence profile has a column per minute of each video and a running net', async () => {
+  const profile = await rendererModule('lib/profile');
+  const layer = { bins: [{ segment_id: 'v1', minute: 1, entered: 1, exited: 4 }, { segment_id: 'v2', minute: 0, entered: 0, exited: 2 }],
+    first_exit: null, last_exit: null, peak_minute: null, peak_exits_per_second: 0 };
+  const columns = profile.profileColumns(layer, [{ id: 'v1', minutes: 3 }, { id: 'v2', minutes: 1 }]);
+  assert.deepEqual(columns.map(column => [column.video, column.minute, column.exited, column.entered, column.net]),
+    [[1, 0, 0, 0, 0], [1, 1, 4, 1, 3], [1, 2, 0, 0, 3], [2, 0, 2, 0, 5]]);
+  assert.equal(columns.reduce((sum, column) => sum + column.exited, 0), 6, 'columns add up to the layer');
+  assert.equal(profile.sunsetMinute('2026-08-10T20:50:30+01:00', '21:04'), 13.5);
+  assert.equal(profile.sunsetMinute('2026-08-11T00:10:00+01:00', '21:04'), -186, 'a clock after midnight refers to the evening before');
+  assert.equal(profile.sunsetMinute('not a clock', '21:04'), null);
+});

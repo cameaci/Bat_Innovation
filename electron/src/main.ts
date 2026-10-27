@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import { existsSync, readFileSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, isGateChange, isCountReviewInput, isCountQAInput, isSampleCheckInput, isTrackLabelInput, isNewTemplateInput, isApplyTemplateInput, isCandidateDecision, isAudioMode, isAudioAnchor, isAudioDerive, isTrackingSettings, isTrackingTestInput, isReconfirmInput, isWatchedInput, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
+import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, isGateChange, isCountReviewInput, isCountQAInput, isSampleCheckInput, isTrackLabelInput, isSunsetInput, isNewTemplateInput, isApplyTemplateInput, isCandidateDecision, isAudioMode, isAudioAnchor, isAudioDerive, isTrackingSettings, isTrackingTestInput, isReconfirmInput, isWatchedInput, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
 import { ExportSaver } from './export_saver';
 import type { NewSession } from './contracts';
 
@@ -208,6 +208,8 @@ async function open(): Promise<void> {
     ? backend.saveGate(session, gate, change) : invalid('Use a valid gate: name, kind, 2 to 32 points, labels, direction and hysteresis.'));
   handle('bat:reconfirm-gate', 3, ([run, gate, input]) => isUUID(run) && isUUID(gate) && isReconfirmInput(input) ? backend.reconfirmGate(run, gate, input) : invalid('Check the gate reconfirmation.'));
   handle('bat:get-counts', 2, ([run, gate]) => isUUID(run) && isUUID(gate) ? backend.getCounts(run, gate) : invalid());
+  handle('bat:get-sunset', 1, ([session]) => isUUID(session) ? backend.getSunset(session) : invalid());
+  handle('bat:save-sunset', 2, ([session, input]) => isUUID(session) && isSunsetInput(input) ? backend.saveSunset(session, input) : invalid('Enter the sunset as HH:MM with its source.'));
   handle('bat:list-templates', 0, () => backend.listTemplates());
   handle('bat:save-template', 1, ([input]) => isNewTemplateInput(input) ? backend.saveTemplate(input) : invalid('Check the template name, settings and gates.'));
   handle('bat:apply-template', 2, ([id, input]) => isUUID(id) && isApplyTemplateInput(input) ? backend.applyTemplate(id, input) : invalid('Choose a template and a survey.'));

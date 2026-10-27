@@ -52,7 +52,7 @@ export function GatePanel({ segment, actor, draft, setDraft }: {
       <Button size="icon" variant="ghost" className="h-6 w-6" aria-label={`Retire gate ${gate.name}`} onClick={() => void retire(gate)}><Trash2 /></Button>
     </li>)}</ul>}
     {draft && <div className="space-y-2">
-      <p className="text-slate-300">Pause the video, then click on the frame: a line needs 2 points (A is on the left of the first-to-second direction), a rectangle 2 opposite corners, a polygon 3 or more points.</p>
+      <p className="text-slate-300">Pause the video, then click on the frame: a line needs 2 to 8 points (a bent line follows a roof edge or gap; A is on the left of the drawing direction), a rectangle 2 opposite corners, a polygon 3 or more points.</p>
       <div className="grid grid-cols-2 gap-2">
         <div className="space-y-1"><Label htmlFor="gate-kind" className="text-xs">Gate type</Label>
           <Select id="gate-kind" className="h-8" value={draft.kind} onChange={event => setDraft({ kind: event.target.value as Gate['kind'], points: [] })}>
@@ -82,6 +82,6 @@ export function GatePanel({ segment, actor, draft, setDraft }: {
 
 /** Add one clicked point, respecting the point count of the chosen gate type. */
 export function addPoint(draft: GateDraft, point: [number, number]): GateDraft {
-  const limit = draft.kind === 'polygon' ? 32 : 2;
+  const limit = draft.kind === 'polygon' ? 32 : draft.kind === 'line' ? 8 : 2;
   return draft.points.length >= limit ? draft : { ...draft, points: [...draft.points, point] };
 }

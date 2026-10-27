@@ -41,14 +41,15 @@ export function SceneOverlay({ tracks, gates, drawing, displayedPTS, width, heig
     className={`absolute inset-0 h-full w-full ${drawing ? 'cursor-crosshair' : 'pointer-events-none'}`} onClick={click}>
     {shapes.map(gate => {
       const points = gate.points;
-      const [a, b] = [points[0]!, points[points.length - 1]!];
+      // A and B are labelled beside the first segment; a polyline keeps the sides of each segment's direction.
+      const [a, b] = [points[0]!, points[1]!];
       const middle = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
       const length = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
-      // Side A is the visual left of the first-to-last point direction (image y grows downwards).
+      // Side A is the visual left of the drawn direction (image y grows downwards).
       const left = [(b[1] - a[1]) / length, -(b[0] - a[0]) / length];
       return <g key={gate.id} data-gate={gate.name}>
         {gate.kind === 'line'
-          ? <line x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} stroke="#ef4444" strokeWidth={stroke * 2} />
+          ? <polyline points={points.map(point => point.join(',')).join(' ')} fill="none" stroke="#ef4444" strokeWidth={stroke * 2} />
           : <polygon points={points.map(point => point.join(',')).join(' ')} fill="#ef444422" stroke="#ef4444" strokeWidth={stroke * 2} />}
         {gate.kind === 'line' && <>
           <text x={middle[0]! + left[0]! * font * 1.5} y={middle[1]! + left[1]! * font * 1.5} fill="#fecaca" fontSize={font} textAnchor="middle">A</text>

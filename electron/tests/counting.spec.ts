@@ -52,6 +52,16 @@ test('a gate counts tracked bats live; a camera move pauses it for one reconfirm
     await shell.page.getByLabel('Your name or initials', { exact: true }).fill('QA Two');
     await shell.page.getByRole('button', { name: 'Approve counts', exact: true }).click();
     await expect(shell.page.getByText('QA approve by QA Two', { exact: true })).toBeVisible();
+    // The emergence profile of the gate, per layer, with a typed sunset (not computed).
+    const profile = shell.page.getByRole('region', { name: 'Emergence profile' });
+    await expect(profile.getByLabel('Flow metrics', { exact: true })).toContainText(/First exit (video 1 at|none)/);
+    await profile.getByRole('button', { name: 'QA', exact: true }).click();
+    await expect(profile.getByRole('button', { name: 'QA', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await profile.getByLabel('Sunset time', { exact: true }).fill('21:04');
+    await profile.getByLabel('Sunset source', { exact: true }).fill('Almanac for the site');
+    await profile.getByRole('button', { name: 'Save sunset', exact: true }).click();
+    await expect(profile).toContainText('Sunset 21:04 (Almanac for the site), entered by QA Two', { timeout: 15_000 });
+    await expect(profile).toContainText('Declare the recording clock');
     await video.evaluate(element => { (element as HTMLVideoElement).currentTime = 4.3; });
     await expect.poll(async () => Number(await shell!.page.getByLabel('Entered so far', { exact: true }).textContent()) +
       Number(await shell!.page.getByLabel('Exited so far', { exact: true }).textContent()), { timeout: 15_000 }).toBe(2);
@@ -79,6 +89,19 @@ test('a gate counts tracked bats live; a camera move pauses it for one reconfirm
     await shell.page.getByRole('tab', { name: 'Counts', exact: true }).click();
     await shell.page.getByLabel('Gate', { exact: true }).selectOption({ index: 1 });
     await expect(shell.page.getByRole('list', { name: 'Paused gate spans' })).toContainText('comes from a site template', { timeout: 15_000 });
+    // A bent line of three points is a third gate; all gates are counted together, each reviewed on its own.
+    await shell.page.getByRole('button', { name: 'New gate', exact: true }).click();
+    await shell.page.getByLabel('Gate name', { exact: true }).fill('Bent edge');
+    await area.scrollIntoViewIfNeeded();
+    const box2 = (await area.boundingBox())!;
+    const scale2 = Math.min(box2.width / 128, box2.height / 96), left2 = box2.x + (box2.width - 128 * scale2) / 2, top2 = box2.y + (box2.height - 96 * scale2) / 2;
+    for (const [x, y] of [[40, 2], [40, 48], [90, 94]]) await shell.page.mouse.click(left2 + x * scale2, top2 + y * scale2);
+    await expect(shell.page.getByText('3 points placed.', { exact: true })).toBeVisible();
+    await expect(shell.page.getByRole('list', { name: 'Active gates' }).getByRole('listitem')).toHaveCount(2);
+    await shell.page.getByRole('button', { name: 'Save gate', exact: true }).click();
+    await expect(shell.page.getByLabel('Gate', { exact: true }).getByRole('option')).toHaveCount(3, { timeout: 15_000 });
+    await shell.page.getByLabel('Gate', { exact: true }).selectOption({ label: 'Bent edge' });
+    await expect(shell.page.getByRole('region', { name: 'Emergence profile' })).toContainText('Emergence profile: Bent edge');
     await quit(shell); shell = undefined;
   } finally {
     await cleanupDraftShell(shell);

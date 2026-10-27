@@ -24,11 +24,12 @@ import { trackRows, tracksInArea } from '../lib/trackTable';
 import { settingsOf } from '../lib/trackingSettings';
 import { applyMeasured, gateWarnings, measureAt } from '../lib/setupGuide';
 import { savedReviewer } from '../lib/reviewer';
-import { drawCounts, soFar, type BoardMode } from '../components/watch/CountLayer';
+import { drawCounts, drawSum, gateColour, soFar, type BoardMode } from '../components/watch/CountLayer';
 import { CountsPanel } from '../components/watch/CountsPanel';
 import { SampleCheckPanel, type ActiveSample } from '../components/watch/SampleCheckPanel';
 import { SiteTemplatePanel } from '../components/watch/SiteTemplatePanel';
 import { SurveyTimeline } from '../components/watch/SurveyTimeline';
+import { EmergenceProfile } from '../components/watch/EmergenceProfile';
 import { useCoverage, WATCH_MAX_RATE } from '../components/watch/useCoverage';
 import { WatchReviewPanel, windowStates } from '../components/watch/WatchReviewPanel';
 import { addPoint, type GateDraft } from '../components/GatePanel';
@@ -71,7 +72,9 @@ export function WatchPage() {
   const [viewKey, setViewKey] = useState<'bats' | 'flight' | 'count'>('bats');
   const [actor, setActor] = useState(savedReviewer);
   const [gateID, setGateID] = useState<string | null>(null);
-  const [counts, setCounts] = useState<GateCounts | null>(null);
+  // Counts of every active gate: all are drawn and counted together, each reviewed on its own.
+  const [gateCounts, setGateCounts] = useState<GateCounts[]>([]);
+  const [countsRefresh, setCountsRefresh] = useState(0);
   const [gateDraft, setGateDraft] = useState<GateDraft | null>(null);
   const [redraw, setRedraw] = useState<InvalidSpan | null>(null);
   const [startAt, setStartAt] = useState<number | null>(null);
@@ -113,16 +116,23 @@ export function WatchPage() {
   }, [copy?.id]);
 
   const trackingRun = survey.tracking?.state === 'complete' ? survey.tracking.id : null;
+  const gateKey = activeGates.map(gate => `${gate.id}:${gate.revision}`).join(',');
   useEffect(() => {
-    setCounts(null);
-    if (!trackingRun || !chosenGate) return;
+    setGateCounts([]);
+    const api = getAPI();
+    if (!trackingRun || !api || activeGates.length === 0) return;
     let active = true;
-    void getAPI()?.getCounts(trackingRun, chosenGate.id).then(result => {
+    void Promise.all(activeGates.map(gate => api.getCounts(trackingRun, gate.id))).then(results => {
       if (!active) return;
-      if (result.ok) setCounts(result.value); else setFrameError(result.error.message);
+      const failed = results.find(result => !result.ok);
+      if (failed && !failed.ok) setFrameError(failed.error.message);
+      setGateCounts(results.flatMap(result => result.ok ? [result.value] : []));
     });
     return () => { active = false; };
-  }, [trackingRun, chosenGate?.id, chosenGate?.revision]);
+  }, [trackingRun, gateKey, countsRefresh]);
+  const counts = gateCounts.find(item => item.gate.id === chosenGate?.id) ?? null;
+  const setCounts = (value: GateCounts) => setGateCounts(previous => previous.map(item => item.gate.id === value.gate.id ? value : item));
+  const colourOf = (gateID: string) => gateColour(Math.max(0, activeGates.findIndex(gate => gate.id === gateID)));
   const loadSampleChecks = useCallback(async () => {
     if (!trackingRun || !chosenGate) { setSampleChecks([]); return; }
     const result = await getAPI()?.listSampleChecks(trackingRun, chosenGate.id);
@@ -228,7 +238,10 @@ export function WatchPage() {
         setLive(drawBats(context, view, testTracks, frame.pts, rate));
       } else {
         setLive(drawBats(context, view, tracks, frame.pts, rate, { highlight: reelItem?.trackID ?? focusedTrack, style: markerStyle, showRejected: showNoise }));
-        if (counts && segment && board !== 'off') drawCounts(context, view, counts, order, segment.id, frame.pts, rate, tracks, board);
+        if (segment && board !== 'off') {
+          gateCounts.forEach((item, row) => drawCounts(context, view, item, order, segment.id, frame.pts, rate, tracks, board, colourOf(item.gate.id), row));
+          drawSum(context, view, gateCounts, order, segment.id, frame.pts, board, gateCounts.length);
+        }
       }
       if (segment) drawClock(context, view, frameClock(segment, survey.media?.clock_anchor ?? null, frame.pts), frame.index + 1);
     } },
@@ -239,11 +252,15 @@ export function WatchPage() {
     } },
     { key: 'count', label: 'Count', draw: (context, view, frame) => {
       drawBats(context, view, tracks, frame.pts, rate, { style: markerStyle, showRejected: showNoise });
-      if (counts && segment) drawCounts(context, view, counts, order, segment.id, frame.pts, rate, tracks, board === 'off' ? 'corner' : board);
+      if (segment) {
+        const mode = board === 'off' ? 'corner' : board;
+        gateCounts.forEach((item, row) => drawCounts(context, view, item, order, segment.id, frame.pts, rate, tracks, mode, colourOf(item.gate.id), row));
+        drawSum(context, view, gateCounts, order, segment.id, frame.pts, mode, gateCounts.length);
+      }
       extras(context, view);
       if (segment) drawClock(context, view, frameClock(segment, survey.media?.clock_anchor ?? null, frame.pts), frame.index + 1);
     } },
-  ], [extras, testTracks, test, tracks, rate, flight, flightMode, allTracks, selectedTracks, focusedTrack, counts, segment, order, reelItem, markerStyle, showNoise, board, survey.media?.clock_anchor]);
+  ], [extras, testTracks, test, tracks, rate, flight, flightMode, allTracks, selectedTracks, focusedTrack, counts, gateCounts, gateKey, segment, order, reelItem, markerStyle, showNoise, board, survey.media?.clock_anchor]);
   useEffect(() => { player.current?.redraw(); }, [views, layout, viewKey]);
 
   const loadCandidates = useCallback(async () => {
@@ -607,6 +624,8 @@ export function WatchPage() {
           {trackingRun && noiseHidden > 0 && !showNoise && <p className="text-[11px] text-slate-500" aria-label="Hidden noise">{noiseHidden} noise tracks hidden here; they never count.</p>}
           <SurveyTimeline segments={segments} windows={survey.run?.windows ?? []} windowCounts={survey.tracking?.window_counts ?? {}}
             counts={counts} events={events} current={displayed ? { segmentID: segment.id, pts: displayed.pts } : null} onSeek={goTo} />
+          {counts && segment && <EmergenceProfile counts={counts} colour={colourOf(counts.gate.id)} segments={segments} anchor={survey.media?.clock_anchor ?? null}
+            sessionID={survey.session.id} actor={actor} onSeek={goTo} onChanged={() => setCountsRefresh(value => value + 1)} />}
           <p className="text-[11px] text-slate-500">Timeline: red bars tracks per window, cyan in, magenta out, amber undecided, violet crossings per minute, x camera moved, green reviewed windows, hatched gaps between videos not marked contiguous.</p>
           <p className="text-xs text-slate-500">Space play/pause - , . frame step - arrows 5 s - 1-6 speed - V side by side - C count board - E enhanced view. Playback copy: lossy VP9 for viewing; Verify opens the exact original frames.</p>
         </section>
