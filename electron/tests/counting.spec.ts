@@ -57,10 +57,10 @@ test('a gate counts tracked bats live; a camera move pauses it for one reconfirm
     await expect(profile.getByLabel('Flow metrics', { exact: true })).toContainText(/First exit (video 1 at|none)/);
     await profile.getByRole('button', { name: 'QA', exact: true }).click();
     await expect(profile.getByRole('button', { name: 'QA', exact: true })).toHaveAttribute('aria-pressed', 'true');
-    await profile.getByLabel('Sunset time', { exact: true }).fill('21:04');
+    await profile.getByLabel('Sunset time', { exact: true }).fill('21:04+01:00');
     await profile.getByLabel('Sunset source', { exact: true }).fill('Almanac for the site');
     await profile.getByRole('button', { name: 'Save sunset', exact: true }).click();
-    await expect(profile).toContainText('Sunset 21:04 (Almanac for the site), entered by QA Two', { timeout: 15_000 });
+    await expect(profile).toContainText('Sunset 21:04+01:00 (Almanac for the site), entered by QA Two', { timeout: 15_000 });
     await expect(profile).toContainText('Declare the recording clock');
     await video.evaluate(element => { (element as HTMLVideoElement).currentTime = 4.3; });
     await expect.poll(async () => Number(await shell!.page.getByLabel('Entered so far', { exact: true }).textContent()) +

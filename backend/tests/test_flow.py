@@ -56,17 +56,19 @@ def test_minutes_after_sunset_need_a_declared_clock(tmp_path: Path, monkeypatch:
         session_id, run_id, _summary = tracked(client, tmp_path, scenario("two_dots"))
         whole = gate(client, session_id)
         url = f"/api/sessions/{session_id}/sunset"
-        for bad in ({"actor": "R", "sunset": "25:00", "source": "almanac"}, {"actor": "R", "sunset": "21:04", "source": " "}):
+        for bad in ({"actor": "R", "sunset": "25:00+01:00", "source": "almanac"}, {"actor": "R", "sunset": "21:04", "source": "almanac"},
+                    {"actor": "R", "sunset": "21:04+01:00", "source": " "}):
             refused = client.post(url, headers=HEADERS, json=bad)
             assert refused.status_code == 422 and refused.json()["detail"]["code"] == "sunset_invalid"
-        saved = client.post(url, headers=HEADERS, json={"actor": "Reviewer One", "sunset": "21:04", "source": "HM Nautical Almanac"}).json()
-        assert saved["sunset"] == "21:04" and saved["revision"] == 1
+        saved = client.post(url, headers=HEADERS, json={"actor": "Reviewer One", "sunset": "21:04+01:00", "source": "HM Nautical Almanac"}).json()
+        assert saved["sunset"] == "21:04+01:00" and saved["revision"] == 1
         counts = lambda: client.get(f"/api/tracking/{run_id}/gates/{whole['id']}/counts", headers=HEADERS).json()["profile"]
         assert counts()["minutes_after_sunset"] is None, "without a declared clock no time after sunset is given"
         segment = counts()["layers"]["algorithm"]["first_exit"]["segment_id"]
         first_pts = store.segment_by_id(tmp_path / "app-data" / "bat_innovation.sqlite3", segment)["metadata_json"]
         import json
-        anchor = {"segment_id": segment, "utc": "2026-08-10T21:30:00+01:00", "provenance": "camera overlay", "source_pts": json.loads(first_pts)["first_pts"]}
+        # The declared clock is stored in UTC (20:30Z is 21:30 in BST).
+        anchor = {"segment_id": segment, "utc": "2026-08-10T20:30:00Z", "provenance": "camera overlay", "source_pts": json.loads(first_pts)["first_pts"]}
         monkeypatch.setattr(store, "clock_anchor", lambda _db, _session: anchor)
         profile = counts()
         assert profile["clock_segment_id"] == segment

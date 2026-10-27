@@ -3,7 +3,7 @@ import { Sunset as SunsetIcon } from 'lucide-react';
 import type { ClockAnchor, GateCounts, MediaSegment } from '../../../../electron/src/contracts';
 import { getAPI } from '../../api';
 import { seconds } from '../../lib/time';
-import { profileColumns, sunsetMinute } from '../../lib/profile';
+import { profileColumns, SUNSET_PATTERN, sunsetMinute } from '../../lib/profile';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { IN_COLOUR, OUT_COLOUR } from './CountLayer';
@@ -98,12 +98,12 @@ export function EmergenceProfile({ counts, colour, segments, anchor, sessionID, 
     </p>
     <div className="flex flex-wrap items-center gap-1 text-xs">
       <SunsetIcon className="h-4 w-4 text-orange-300" />
-      <input aria-label="Sunset time" placeholder="HH:MM" maxLength={5} value={typed} onChange={event => setTyped(event.target.value)} className="w-16 rounded bg-slate-800 px-2 py-0.5" />
+      <input aria-label="Sunset time" placeholder="21:04+01:00" maxLength={11} value={typed} onChange={event => setTyped(event.target.value)} className="w-28 rounded bg-slate-800 px-2 py-0.5" />
       <input aria-label="Sunset source" placeholder="Source, e.g. almanac for the site" maxLength={200} value={source} onChange={event => setSource(event.target.value)} className="min-w-0 flex-1 rounded bg-slate-800 px-2 py-0.5" />
-      <Button size="sm" variant="ghost" className="h-6 text-slate-200" disabled={!actor.trim() || !/^([01]\d|2[0-3]):[0-5]\d$/.test(typed) || !source.trim()} onClick={() => void saveSunset(typed)}>Save sunset</Button>
+      <Button size="sm" variant="ghost" className="h-6 text-slate-200" disabled={!actor.trim() || !SUNSET_PATTERN.test(typed) || !source.trim()} onClick={() => void saveSunset(typed)}>Save sunset</Button>
       {profile.sunset && <Button size="sm" variant="ghost" className="h-6 text-slate-400" disabled={!actor.trim()} onClick={() => void saveSunset('')}>Clear</Button>}
     </div>
-    <p className="text-[11px] text-slate-500">{profile.sunset ? `Sunset ${profile.sunset.sunset} (${profile.sunset.source}), entered by ${profile.sunset.actor}. ` : 'Type the sunset for the survey date; it is not computed. '}
+    <p className="text-[11px] text-slate-500">{profile.sunset ? `Sunset ${profile.sunset.sunset} (${profile.sunset.source}), entered by ${profile.sunset.actor}. ` : 'Type the local sunset for the survey date with its UTC offset (21:04+01:00 in summer time); it is not computed. '}
       {anchor ? 'Times after sunset use the declared recording clock of its video only.' : 'Declare the recording clock on the Process page to relate exits to sunset.'}</p>
     {error && <p role="alert" className="text-xs text-red-300">{error}</p>}
   </section>;

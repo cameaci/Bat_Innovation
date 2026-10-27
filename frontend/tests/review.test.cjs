@@ -246,9 +246,11 @@ test('the emergence profile has a column per minute of each video and a running 
   assert.deepEqual(columns.map(column => [column.video, column.minute, column.exited, column.entered, column.net]),
     [[1, 0, 0, 0, 0], [1, 1, 4, 1, 3], [1, 2, 0, 0, 3], [2, 0, 2, 0, 5]]);
   assert.equal(columns.reduce((sum, column) => sum + column.exited, 0), 6, 'columns add up to the layer');
-  assert.equal(profile.sunsetMinute('2026-08-10T20:50:30+01:00', '21:04'), 13.5);
-  assert.equal(profile.sunsetMinute('2026-08-11T00:10:00+01:00', '21:04'), -186, 'a clock after midnight refers to the evening before');
-  assert.equal(profile.sunsetMinute('not a clock', '21:04'), null);
+  // The declared clock is stored in UTC; the typed sunset carries its own offset.
+  assert.equal(profile.sunsetMinute('2026-08-10T19:50:30Z', '21:04+01:00'), 13.5);
+  assert.equal(profile.sunsetMinute('2026-08-10T23:10:00Z', '21:04+01:00'), -186, 'a clock after midnight refers to the evening before');
+  assert.equal(profile.sunsetMinute('2026-08-10T19:50:30Z', '21:04'), null, 'no offset, no position');
+  assert.equal(profile.sunsetMinute('not a clock', '21:04+01:00'), null);
 });
 
 test('the evidence report has every section, the provisional banner and escapes every entry', async () => {
@@ -259,7 +261,7 @@ test('the evidence report has every section, the provisional banner and escapes 
   const layer = { bins: [{ segment_id: 's1', minute: 0, entered: 1, exited: 3 }], first_exit: { segment_id: 's1', seconds: 12 }, last_exit: { segment_id: 's1', seconds: 50 },
     peak_minute: { segment_id: 's1', minute: 0, exited: 3 }, peak_exits_per_second: 1 };
   const counts = { gate: { id: 'g1', name: 'Gable <b>', kind: 'line', points: [[64, 0], [64, 96]], frame_w: 128, frame_h: 96, revision: 2, entry_direction: 'B_to_A', hysteresis_px: 3 },
-    algorithm_version: 'gate-hysteresis-v2-m2', invalid_spans: [], profile: { layers: { algorithm: layer, reviewer: layer, qa: null }, sunset: { sunset: '21:04', source: 'almanac', actor: 'R', revision: 1, utc: '' },
+    algorithm_version: 'gate-hysteresis-v2-m2', invalid_spans: [], profile: { layers: { algorithm: layer, reviewer: layer, qa: null }, sunset: { sunset: '21:04+01:00', source: 'almanac', actor: 'R', revision: 1, utc: '' },
       clock_segment_id: null, minutes_after_sunset: null, note: '' },
     layers: { algorithm: { entered: 1, exited: 3, net: 2, coherent: 4, uncertain: 1 }, reviewer: { entered: 1, exited: 3, net: 2, state: 'accepted', unresolved: 0, accepted: { actor: 'R', current: true } }, qa: null } };
   const html = report.reportHTML({ generatedUTC: '2026-10-28T00:00:00Z', session: { display_name: 'Survey "1"', camera_ref: 'cam' }, segments: [segment], anchor: null,
@@ -270,6 +272,6 @@ test('the evidence report has every section, the provisional banner and escapes 
   assert.match(html, /PROVISIONAL - NOT ECOLOGICALLY FINALISED/);
   assert.ok(!html.includes('<img') && !html.includes('Gable <b>') && html.includes('Gable &lt;b&gt;') && !html.includes('<i>') && !/<script/i.test(html), 'entries are escaped and the page has no script');
   assert.match(html, /2 of 5 planned windows have a first review/);
-  assert.match(html, /Sunset 21:04/);
+  assert.match(html, /Sunset 21:04\+01:00/);
   assert.match(html, /3 exits in minute 1 of video 1/);
 });

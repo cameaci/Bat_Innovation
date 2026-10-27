@@ -22,12 +22,20 @@ export function profileColumns(layer: FlowLayer, videos: ProfileVideo[]): Profil
   return columns;
 }
 
-/** Minutes from the anchored video's first frame to the typed sunset (local clock), or null for an unreadable clock. */
+export const SUNSET_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)([+-])(0\d|1[0-4]):([0-5]\d)$/;
+
+/**
+ * Minutes from the anchored video's first frame to the typed sunset (local time with its UTC offset, on the clock's
+ * evening), or null for an unreadable clock or entry.
+ */
 export function sunsetMinute(anchorUTC: string, sunset: string): number | null {
-  const clock = /T(\d\d):(\d\d):(\d\d(?:\.\d+)?)/.exec(anchorUTC);
-  const typed = /^(\d\d):(\d\d)$/.exec(sunset);
-  if (!clock || !typed) return null;
-  let difference = Number(typed[1]) * 60 + Number(typed[2]) - (Number(clock[1]) * 60 + Number(clock[2]) + Number(clock[3]) / 60);
+  const origin = Date.parse(anchorUTC);
+  const typed = SUNSET_PATTERN.exec(sunset);
+  if (!Number.isFinite(origin) || !typed) return null;
+  const offset = (typed[3] === '+' ? 1 : -1) * (Number(typed[4]) * 60 + Number(typed[5])) * 60_000;
+  const local = new Date(origin + offset);
+  const at = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate(), Number(typed[1]), Number(typed[2])) - offset;
+  let difference = (at - origin) / 60_000;
   // The same evening as the clock: a clock started after midnight refers to the day before.
   if (difference > 720) difference -= 1440;
   if (difference < -720) difference += 1440;

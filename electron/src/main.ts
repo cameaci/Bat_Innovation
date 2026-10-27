@@ -214,7 +214,7 @@ async function open(): Promise<void> {
   handle('bat:reconfirm-gate', 3, ([run, gate, input]) => isUUID(run) && isUUID(gate) && isReconfirmInput(input) ? backend.reconfirmGate(run, gate, input) : invalid('Check the gate reconfirmation.'));
   handle('bat:get-counts', 2, ([run, gate]) => isUUID(run) && isUUID(gate) ? backend.getCounts(run, gate) : invalid());
   handle('bat:get-sunset', 1, ([session]) => isUUID(session) ? backend.getSunset(session) : invalid());
-  handle('bat:save-sunset', 2, ([session, input]) => isUUID(session) && isSunsetInput(input) ? backend.saveSunset(session, input) : invalid('Enter the sunset as HH:MM with its source.'));
+  handle('bat:save-sunset', 2, ([session, input]) => isUUID(session) && isSunsetInput(input) ? backend.saveSunset(session, input) : invalid('Enter the local sunset as HH:MM with its UTC offset, and its source.'));
   handle('bat:list-templates', 0, () => backend.listTemplates());
   handle('bat:save-template', 1, ([input]) => isNewTemplateInput(input) ? backend.saveTemplate(input) : invalid('Check the template name, settings and gates.'));
   handle('bat:apply-template', 2, ([id, input]) => isUUID(id) && isApplyTemplateInput(input) ? backend.applyTemplate(id, input) : invalid('Choose a template and a survey.'));

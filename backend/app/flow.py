@@ -18,7 +18,8 @@ import re
 from . import store
 from .imports import ImportErrorResponse
 
-SUNSET = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
+# Local sunset with its UTC offset, e.g. 21:04+01:00: the declared clock is stored in UTC, so the zone must be explicit.
+SUNSET = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)([+-])(0\d|1[0-4]):([0-5]\d)$")
 
 
 class SunsetError(ImportErrorResponse):
@@ -53,7 +54,7 @@ def upgrade(db_path: Path) -> None:
 
 
 def sunset(db_path: Path, session_id: str) -> dict | None:
-    """The latest typed sunset of a survey (local time on the declared clock's date), or None; an empty entry clears it."""
+    """The latest typed sunset of a survey (local time with its UTC offset, on the declared clock's evening), or None; an empty entry clears it."""
     if store.schema_version(db_path) < store.SUNSET_SCHEMA_VERSION:
         return None
     with closing(store.connect(db_path)) as connection:
@@ -68,7 +69,7 @@ def set_sunset(db_path: Path, session_id: str, actor: str, value: str, source: s
         raise SunsetError("sunset_upgrade_required", "Upgrade storage before entering a sunset time.")
     actor, source = " ".join(actor.split()), " ".join(source.split())
     if not actor or (value and (not SUNSET.match(value) or not source)):
-        raise SunsetError("sunset_invalid", "Enter your name, the sunset as HH:MM and where it comes from (for example an almanac).", 422)
+        raise SunsetError("sunset_invalid", "Enter your name, the local sunset as HH:MM with its UTC offset (for example 21:04+01:00) and where it comes from.", 422)
     with closing(store.connect(db_path)) as connection, connection:
         connection.execute("BEGIN IMMEDIATE")
         if connection.execute("SELECT 1 FROM recording_session WHERE id=?", (session_id,)).fetchone() is None:
@@ -135,8 +136,9 @@ def profile(db_path: Path, gate: dict, algorithm: list, reviewed: list, qa_curre
     after = None
     if typed and clock:
         anchored, origin = clock
-        hour, minute = (int(part) for part in typed["sunset"].split(":"))
-        sunset_at = origin.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        hour, minute, sign, offset_hours, offset_minutes = SUNSET.match(typed["sunset"]).groups()
+        zone = timezone((1 if sign == "+" else -1) * timedelta(hours=int(offset_hours), minutes=int(offset_minutes)))
+        sunset_at = origin.astimezone(zone).replace(hour=int(hour), minute=int(minute), second=0, microsecond=0)
 
         def minutes(point: dict | None, extra: float = 0) -> float | None:
             if point is None or point["segment_id"] != anchored:

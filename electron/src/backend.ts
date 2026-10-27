@@ -86,7 +86,7 @@ export function isRenderInput(input: unknown): input is RenderInput {
 }
 export function isSunsetInput(input: unknown): input is SunsetInput {
   return object(input) && exactKeys(input, ['actor', 'sunset', 'source']) && text(input.actor, 120) &&
-    typeof input.sunset === 'string' && /^(([01]\d|2[0-3]):[0-5]\d)?$/.test(input.sunset) && text(input.source, 200, false);
+    typeof input.sunset === 'string' && /^(([01]\d|2[0-3]):[0-5]\d[+-](0\d|1[0-4]):[0-5]\d)?$/.test(input.sunset) && text(input.source, 200, false);
 }
 export function isNewTemplateInput(input: unknown): input is NewTemplateInput {
   return object(input) && exactKeys(input, ['name', 'actor', 'frame_w', 'frame_h', 'settings', 'gates']) && text(input.name, 60) && text(input.actor, 120) &&

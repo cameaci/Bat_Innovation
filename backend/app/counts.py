@@ -114,7 +114,7 @@ class ApplyTemplate(Strict):
 
 class SunsetInput(Strict):
     actor: str = Field(min_length=1, max_length=120)
-    sunset: str = Field(max_length=5)
+    sunset: str = Field(max_length=11)
     source: str = Field(default="", max_length=200)
 
 
