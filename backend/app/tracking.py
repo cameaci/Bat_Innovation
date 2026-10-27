@@ -199,11 +199,12 @@ Point = tuple[float, float]
 
 
 class TrackingSettings(BaseModel):
-    """Visible tracking settings (tracks-v2). Defaults are starting values, not validated thresholds."""
+    """Visible tracking settings (tracks-v3). Defaults are starting values, not validated thresholds."""
     model_config = ConfigDict(extra="forbid")
     target_px: float = Field(default=12, ge=3, le=80)
     polarity: Literal["both", "light", "dark"] = "both"
-    sensitivity: float = Field(default=12, ge=4, le=40)
+    threshold: float = Field(default=7, ge=1.5, le=12)
+    target_speed: float = Field(default=4, ge=1, le=12)
     activity: Literal["sparse", "normal", "dense"] = "normal"
     detection_area: list[list[Point]] = Field(default_factory=list, max_length=4)
     exclusions: list[list[Point]] = Field(default_factory=list, max_length=8)

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
+from backend.app import tracks
 from backend.tests import scenes
 
 
@@ -35,5 +36,5 @@ def test_benchmark_matches_crossings_by_direction_and_time() -> None:
     spec.loader.exec_module(benchmark)
     truth = [(1000, "B_to_A"), (2000, "A_to_B")]
     assert benchmark.match([(1100, "B_to_A"), (2000, "B_to_A")], truth, 200) == 1
-    row = benchmark.evaluate(scenes.scenarios()["resting_bat"], "tracks-v2", raw=True)
+    row = benchmark.evaluate(scenes.scenarios()["resting_bat"], tracks.ALGORITHM_VERSION, raw=True)
     assert row["true_crossings"] == 1 and row["matched"] == 1 and row["precision"] == 1.0

@@ -146,17 +146,20 @@ def test_polarity_selects_dark_or_light_targets() -> None:
 
 def test_exclusion_zone_and_detection_area_limit_where_targets_are_found() -> None:
     rng = np.random.default_rng(5)
-    target = path((4, 70), (4, 0), 25)
+    target, other = path((4, 70), (4, 0), 25), path((70, 10), (2, 0), 25)
     images = []
     for index in range(25):
-        image = frame([target[index]])
-        image[5:25, 90:120] = rng.integers(40, 250, size=(20, 30))  # flickering lamp or foliage
+        image = frame([target[index], other[index]])
+        image[30:45, 90:120] = rng.integers(40, 250, size=(15, 30))  # flickering lamp or foliage
         images.append(image)
-    assert any(track.box[0] >= 80 and track.box[1] < 30 for track in run(images)[0])
+    found, _, _ = run(images)
+    # Flicker is measured as local noise and gives no track; the second target in the top right does.
+    assert any(track.box[2] >= 100 and track.box[1] < 30 for track in real(found))
+    assert not any(track.box[1] >= 28 and track.box[3] <= 47 and track.box[0] >= 88 for track in found)
     excluded, _, _ = run(images, exclusions=[[[85, 0], [128, 0], [128, 30], [85, 30]]])
-    assert len(excluded) == 1 and excluded[0].box[1] > 60
+    assert len(real(excluded)) == 1 and real(excluded)[0].box[1] > 60
     outside, _, _ = run(images, detection_area=[[[0, 0], [128, 0], [128, 40], [0, 40]]], exclusions=[[[85, 0], [128, 0], [128, 30], [85, 30]]])
-    assert outside == []
+    assert real(outside) == []
 
 
 def test_one_frame_flash_is_a_glitch_and_the_track_continues() -> None:
@@ -258,7 +261,7 @@ def test_real_tracking_run_persists_tracks_for_a_summarised_video(tmp_path: Path
         assert page["shown"] == page["total"] == 2 and page["noise_hidden"] == 0
         assert len(found) == 2 and all(len(item["points"]) >= 15 for item in found)
         assert {item["quality"] for item in found} == {"coherent"} and all("straightness" in item["metrics"] for item in found)
-        assert run["parameters"]["algorithm_version"] == "tracks-v2" and run["parameters"]["settings"]["target_px"] == 12
+        assert run["parameters"]["algorithm_version"] == "tracks-v3" and run["parameters"]["settings"]["target_px"] == 12
         # Many more stored tracks than fit: coherent first within the points budget, noise hidden, and the cut reported.
         extra = []
         for index in range(30):
@@ -348,7 +351,9 @@ def test_tracks_v2_upgrade_from_v11_and_rollback(tmp_path: Path) -> None:
 
 
 def test_flight_map_bins_build_up_with_time_and_leave_out_noise(tmp_path: Path) -> None:
-    target = [(2 + index // 3, 40) for index in range(300)]  # 12 s at 25 fps: two 10 s bins
+    # 12 s at 25 fps: two 10 s bins. A slow target needs a target size near its own; one far smaller than the set
+    # size is blurred into the background median (a recorded tracks-v3 limitation).
+    target = [(2 + index // 3, 40) for index in range(300)]
     source = tmp_path / "long.mp4"
     encode_frames(source, [frame([target[i]]) for i in range(300)], [index * 40 for index in range(300)])
     with TestClient(create_app(Settings(tmp_path / "app-data", TOKEN))) as client:
@@ -356,7 +361,7 @@ def test_flight_map_bins_build_up_with_time_and_leave_out_noise(tmp_path: Path) 
         assert import_files(client, session_id, [source])["state"] == "complete"
         summary = client.post("/api/summaries", headers=HEADERS, json={"session_id": session_id, "window_seconds": 30}).json()
         summary = wait(client, f"/api/summaries/{summary['id']}", ("queued", "running"))
-        run = client.post("/api/tracking", headers=HEADERS, json={"summary_run_id": summary["id"]}).json()
+        run = client.post("/api/tracking", headers=HEADERS, json={"summary_run_id": summary["id"], "settings": {"target_px": 4}}).json()
         run = wait(client, f"/api/tracking/{run['id']}", ("queued", "running"))
         segment_id = summary["windows"][0]["segment_id"]
         bins = client.get(f"/api/tracking/{run['id']}/flight-map", headers=HEADERS, params={"segment_id": segment_id}).json()

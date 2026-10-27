@@ -807,8 +807,8 @@ Separate from the 22/27 expansion tracker and the 7/7 Phase 2 tracker. Each box 
 - [x] X1: display budget (noise hidden, points budget, banner), marker styles, crossing circles, count board with Inside, clock.
 - [x] X2: synthetic scene generator and benchmark script with a tracks-v2 baseline in the research log.
 - [x] X2: sample check (schema v14) with receipt, comparison and export.
-- [ ] X3: tracks-v3 detection (repeated frames, gain compensation, noise-adaptive threshold, matched filter, hysteresis, persistent spots).
-- [ ] X3: tracks-v3 association (speed limit, two-stage, flow prior, KD-tree) and the m-points crossing rule, with a v2/v3 benchmark.
+- [x] X3: tracks-v3 detection (repeated frames, gain compensation, noise-adaptive threshold, matched filter, hysteresis, persistent spots).
+- [x] X3: tracks-v3 association (speed limit, two-stage, flow prior, KD-tree) and the m-points crossing rule, with a v2/v3 benchmark.
 - [ ] X4: guided setup (click to measure, noise map and suggested exclusions, presets, gate checks).
 - [ ] X4: site templates (schema v15).
 - [ ] X5: enhanced view.

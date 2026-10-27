@@ -253,6 +253,8 @@ def derived_crossings(db_path: Path, run_id: str, gate: dict) -> tuple[list[dict
         quality = "quality" if store.schema_version_of(connection) >= store.TRACKS_V2_SCHEMA_VERSION else "'unrated' AS quality"
         rows = connection.execute(f"""SELECT id, segment_id, track_index, points, points_sha256, {quality} FROM track WHERE run_id=?
             ORDER BY segment_id, track_index""", (run_id,)).fetchall()
+        algorithm = connection.execute("SELECT algorithm_version FROM tracking_run WHERE id=?", (run_id,)).fetchone()["algorithm_version"]
+    rule, min_points = gates.version_for(algorithm)
     summary = tracks_summary_run(db_path, run_id)
     sizes = {source["id"]: (json.loads(source["metadata_json"])["width"], json.loads(source["metadata_json"])["height"])
              for source in summary["sources"]}
@@ -270,7 +272,7 @@ def derived_crossings(db_path: Path, run_id: str, gate: dict) -> tuple[list[dict
         for interval in valid.get(row["segment_id"], []):
             inside = [point for point in points if (interval["from_pts"] is None or point[0] >= interval["from_pts"])
                       and (interval["to_pts"] is None or point[0] < interval["to_pts"])]
-            for pts, direction in gates.crossings(inside, {**gate, "points": interval["points"]}):
+            for pts, direction in gates.crossings(inside, {**gate, "points": interval["points"]}, min_points):
                 if row["quality"] == "noise":
                     skipped_noise += 1
                     continue
@@ -279,7 +281,7 @@ def derived_crossings(db_path: Path, run_id: str, gate: dict) -> tuple[list[dict
                                "segment_id": row["segment_id"], "pts": str(pts), "direction": direction,
                                "window_id": window["id"] if window else None,
                                "quality": "coherent" if row["quality"] == "coherent" else "uncertain"})
-    return result, invalid, {"noise_crossings": skipped_noise, "valid_spans": valid}
+    return result, invalid, {"noise_crossings": skipped_noise, "valid_spans": valid, "rule": rule}
 
 
 def skipped_segments(db_path: Path, run_id: str, gate: dict) -> list[str]:
@@ -373,7 +375,7 @@ def counts(db_path: Path, run_id: str, gate_id: str) -> dict:
         qa_state = {"decision": qa["decision"], "actor": qa["actor"], "note": qa["note"], "utc": qa["utc"],
                     "review_revision": qa["review_revision"], "stale": not current,
                     "counts": _totals(reviewed, entry) if current and qa["decision"] == "approve" else None}
-    return {"gate": gate, "tracking_run_id": run_id, "algorithm_version": gates.ALGORITHM_VERSION,
+    return {"gate": gate, "tracking_run_id": run_id, "algorithm_version": extra["rule"],
             "crossings": crossings, "missed": list(missed.values()), "skipped_segments": skipped_segments(db_path, run_id, gate),
             "invalid_spans": invalid, "valid_spans": extra["valid_spans"],
             "review_revision": review_revision, "reviewers": sorted(reviewers),

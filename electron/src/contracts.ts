@@ -92,11 +92,12 @@ export interface PlaybackFrames {
   proxy_ms: number[];
 }
 
-/** tracks-v2 settings (Phase 2). Defaults are starting values, not validated thresholds. Polygons are in source pixels. */
+/** tracks-v3 settings (Phase 3). threshold: contrast in multiples of local noise; target_speed: target diameters per frame. Defaults are starting values, not validated thresholds. Polygons are in source pixels. */
 export interface TrackingSettings {
   target_px: number;
   polarity: 'both' | 'light' | 'dark';
-  sensitivity: number;
+  threshold: number;
+  target_speed: number;
   activity: 'sparse' | 'normal' | 'dense';
   detection_area: [number, number][][];
   exclusions: [number, number][][];

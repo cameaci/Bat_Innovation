@@ -69,7 +69,7 @@ def evaluate(scene: scenes.Scene, algorithm: str, raw: bool) -> dict:
     for track in found:
         if track.quality == "noise":
             continue
-        crossed = gates.crossings([(p[0], p[1], p[2]) for p in track.points], scene.gate)
+        crossed = gates.crossings([(p[0], p[1], p[2]) for p in track.points], scene.gate, gates.version_for(algorithm)[1])
         (proposal if track.quality == "coherent" else uncertain).extend(crossed)
     truth = [(scene.times_ms[frame], direction) for frame, direction in scene.truth()]
     tolerance = TOLERANCE_FRAMES * 1000 // scenes.FPS

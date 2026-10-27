@@ -12,6 +12,14 @@ from __future__ import annotations
 from math import hypot
 
 ALGORITHM_VERSION = "gate-hysteresis-v1"
+# tracks-v3 runs need two points on each side of a gate (a target seen once beyond the line is not yet a crossing).
+MIN_POINTS = {"tracks-v3": 2}
+
+
+def version_for(track_algorithm: str) -> tuple[str, int]:
+    """The crossing rule used with tracks of one algorithm version, and its name."""
+    points = MIN_POINTS.get(track_algorithm, 1)
+    return (ALGORITHM_VERSION if points == 1 else f"gate-hysteresis-v2-m{points}"), points
 DIRECTIONS = {"line": ("A_to_B", "B_to_A"), "area": ("out_to_in", "in_to_out")}
 
 Point = tuple[float, float]
@@ -66,24 +74,37 @@ def side(p: Point, gate: dict) -> int:
     return 1 if _inside(p, points) else -1
 
 
-def crossings(track: list[tuple[int, float, float]], gate: dict) -> list[tuple[int, str]]:
-    """(source PTS, direction) for each confirmed side change along one track."""
+def crossings(track: list[tuple[int, float, float]], gate: dict, min_points: int = 1) -> list[tuple[int, str]]:
+    """(source PTS, direction) for each confirmed side change along one track.
+
+    With `min_points` above one, a side is confirmed only after that many consecutive points on it (points in the
+    hysteresis band are skipped): a target seen once beyond the line is not yet a crossing. The crossing time is still
+    the first point on the new side.
+    """
     kind = "line" if gate["kind"] == "line" else "area"
     forward, backward = DIRECTIONS[kind]
     points = [tuple(item) for item in gate["points"]]
     result: list[tuple[int, str]] = []
     confirmed = 0
     anchor: Point | None = None
+    run_side, run_length, run_start = 0, 0, None
     for pts, x, y in track:
         current = side((x, y), gate)
         if current == 0:
             continue
+        if current == run_side:
+            run_length += 1
+        else:
+            run_side, run_length, run_start = current, 1, (pts, (x, y))
+        if run_length < min_points:
+            continue
         if confirmed and current != confirmed:
-            if kind == "area" or _intersects(anchor, (x, y), points[0], points[-1]):
+            first_pts, first = run_start
+            if kind == "area" or _intersects(anchor, first, points[0], points[-1]):
                 if kind == "line":
-                    result.append((pts, forward if confirmed == 1 else backward))
+                    result.append((first_pts, forward if confirmed == 1 else backward))
                 else:
-                    result.append((pts, forward if current == 1 else backward))
+                    result.append((first_pts, forward if current == 1 else backward))
         confirmed, anchor = current, (x, y)
     return result
 

@@ -8,10 +8,10 @@ export type DrawKind = 'area' | 'exclusion' | null;
 
 const segmented = (active: boolean) => cn('rounded px-2 py-1 text-xs', active ? 'bg-slate-100 text-slate-900' : 'bg-slate-800 text-slate-300 hover:bg-slate-700');
 
-function Slider({ id, label, value, min, max, onChange, hint }: { id: string; label: string; value: number; min: number; max: number; onChange: (value: number) => void; hint: string }) {
+function Slider({ id, label, value, min, max, step = 1, onChange, hint }: { id: string; label: string; value: number; min: number; max: number; step?: number; onChange: (value: number) => void; hint: string }) {
   return <div className="space-y-1">
     <div className="flex justify-between text-xs"><label htmlFor={id} className="font-medium">{label}</label><span className="tabular-nums text-slate-300">{value}</span></div>
-    <input id={id} type="range" min={min} max={max} step={1} value={value} onChange={event => onChange(Number(event.target.value))} className="w-full accent-red-500" />
+    <input id={id} type="range" min={min} max={max} step={step} value={value} onChange={event => onChange(Number(event.target.value))} className="w-full accent-red-500" />
     <p className="text-[11px] text-slate-400">{hint}</p>
   </div>;
 }
@@ -43,8 +43,10 @@ export function SetupPanel({ settings, onChange, drawing, draft, onDraw, onFinis
     </div>
     <Slider id="target-size" label="Target size (px)" value={settings.target_px} min={3} max={80} onChange={value => set('target_px', value)}
       hint="Click a bat on the paused video to place the red reference circle and compare its size." />
-    <Slider id="sensitivity" label="Sensitivity (grey levels)" value={settings.sensitivity} min={4} max={40} onChange={value => set('sensitivity', value)}
-      hint="Lower finds fainter targets and more noise." />
+    <Slider id="threshold" label="Contrast threshold (x local noise)" value={settings.threshold} min={1.5} max={12} step={0.5} onChange={value => set('threshold', value)}
+      hint="How far a target must stand out from the flicker at its place. Lower finds fainter targets and more noise." />
+    <Slider id="target-speed" label="Target speed (sizes per frame)" value={settings.target_speed} min={1} max={12} step={0.5} onChange={value => set('target_speed', value)}
+      hint="How far a target may move between frames. Raise it if fast bats split into pieces; lower it if tracks jump between neighbours." />
     <div className="space-y-1">
       <p className="text-xs font-medium">Target appears</p>
       <div className="flex gap-1" role="group" aria-label="Target polarity">
