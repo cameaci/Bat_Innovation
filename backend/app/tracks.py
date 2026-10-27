@@ -427,6 +427,14 @@ class Analyzer:
         return ticks * self.tick_seconds
 
 
+def analyzer(version: str, width: int, height: int, fps: float, tick_seconds: float, settings: dict,
+             record_detections: tuple[int, int] | None = None) -> Analyzer:
+    """The analyzer for one algorithm version; runs keep the version they were made with."""
+    if version != ALGORITHM_VERSION:
+        raise ValueError("tracking_settings")
+    return Analyzer(width, height, fps, tick_seconds, settings, record_detections)
+
+
 def _velocity(track: Track, end: bool) -> tuple[float, float, float]:
     """Mean velocity in pixels per tick over up to five points at the track's end (or start), and its area."""
     points = track.points[-5:] if end else track.points[:5]

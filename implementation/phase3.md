@@ -805,7 +805,7 @@ tracks-v3 needs no schema change. Its parameters and the new scene event kinds (
 Separate from the 22/27 expansion tracker and the 7/7 Phase 2 tracker. Each box is ticked in the commit that completes it, so an interrupted session resumes at the first open box.
 
 - [x] X1: display budget (noise hidden, points budget, banner), marker styles, crossing circles, count board with Inside, clock.
-- [ ] X2: synthetic scene generator and benchmark script with a tracks-v2 baseline in the research log.
+- [x] X2: synthetic scene generator and benchmark script with a tracks-v2 baseline in the research log.
 - [ ] X2: sample check (schema v14) with receipt, comparison and export.
 - [ ] X3: tracks-v3 detection (repeated frames, gain compensation, noise-adaptive threshold, matched filter, hysteresis, persistent spots).
 - [ ] X3: tracks-v3 association (speed limit, two-stage, flow prior, KD-tree) and the m-points crossing rule, with a v2/v3 benchmark.

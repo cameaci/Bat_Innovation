@@ -1,5 +1,25 @@
 # 07 - Research log
 
+## 2026-10-27 - Phase 3 X2: synthetic scenes and the tracks-v2 baseline
+
+**Method:** `backend/tests/scenes.py` generates deterministic 320x240, 25 fps scenes with exact paths and gate crossings (the truth uses the app's own gate rule): a sky trickle with re-entries, the same over fractal stone whose temporal noise grows with texture, camera gain steps, repeated frames, dark bats on a warm wall, fast blurred bats, a bat resting at the exit, bat-free stone and a dense stream of 150 bats in 4 s. `scripts/benchmark_tracking.py` encodes and decodes each scene through the fixture codec, tracks it in-process and matches crossings by direction within plus or minus 5 frames.
+
+**Baseline, tracks-v2 (proposal = coherent tracks):**
+
+| scene | true crossings | proposed | matched | uncertain queue | frames/s |
+| --- | --- | --- | --- | --- | --- |
+| sky_trickle | 12 | 8 | 8 | 0 | 176 |
+| stone_trickle | 12 | 0 | 0 | 0 | 194 |
+| gain_steps | 12 | 0 | 0 | 0 | 179 |
+| repeated_frames | 8 | 8 | 8 | 0 | 151 |
+| cold_bats | 9 | 0 | 0 | 0 | 157 |
+| fast_blur | 9 | 9 | 9 | 0 | 192 |
+| empty_stone | 0 | 0 | 0 | 0 | 173 |
+| resting_bat | 1 | 1 | 1 | 0 | 167 |
+| dense_stream | 149 | 98 | 95 | 56 | 56 |
+
+**Findings:** on texture every frame exceeds the component limit, so v2 drops every frame and finds nothing (the O-GEO failure); re-entering bats are classed as noise because start and end lie close together; the dense stream loses a third of its crossings. These are synthetic numbers for comparing versions, not accuracy on real footage.
+
 ## 2026-10-27 - Phase 3 X1: show what the tracker found
 
 **Problem:** with many tracks the Watch page went blank: a 30 s chunk over 500 tracks (noise included) raised `track_limit` and nothing was drawn.
