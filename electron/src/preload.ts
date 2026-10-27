@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { Modality, WatchedInput, ReconfirmInput, TrackingSettings, TrackingTestInput, CandidateDecisionInput, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, GateChange, CountReviewInput, CountQAInput, SampleCheckInput, TrackLabelInput, SunsetInput, NewTemplateInput, ApplyTemplateInput, BatAPI, NewSession, PreviewRequest, SaveMedia, SummaryRequest, ReviewChange, QAChange } from './contracts';
+import type { Modality, WatchedInput, ReconfirmInput, TrackingSettings, TrackingTestInput, CandidateDecisionInput, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, GateChange, CountReviewInput, CountQAInput, SampleCheckInput, TrackLabelInput, SunsetInput, RenderInput, NewTemplateInput, ApplyTemplateInput, BatAPI, NewSession, PreviewRequest, SaveMedia, SummaryRequest, ReviewChange, QAChange } from './contracts';
 
 const api: BatAPI = {
   startExport: (...args: [string]) => ipcRenderer.invoke('bat:start-export', ...args),
@@ -53,6 +53,10 @@ const api: BatAPI = {
   saveGate: (...args: [string, string | null, GateChange]) => ipcRenderer.invoke('bat:save-gate', ...args),
   getCounts: (...args: [string, string]) => ipcRenderer.invoke('bat:get-counts', ...args),
   getSunset: (...args: [string]) => ipcRenderer.invoke('bat:get-sunset', ...args),
+  listRenders: (...args: [string]) => ipcRenderer.invoke('bat:list-renders', ...args),
+  startRender: (...args: [RenderInput]) => ipcRenderer.invoke('bat:start-render', ...args),
+  cancelRender: (...args: [string]) => ipcRenderer.invoke('bat:cancel-render', ...args),
+  saveRender: (...args: [string]) => ipcRenderer.invoke('bat:save-render', ...args),
   saveSunset: (...args: [string, SunsetInput]) => ipcRenderer.invoke('bat:save-sunset', ...args),
   saveCountReview: (...args: [string, string, CountReviewInput]) => ipcRenderer.invoke('bat:save-count-review', ...args),
   listSampleChecks: (...args: [string, string]) => ipcRenderer.invoke('bat:list-sample-checks', ...args),

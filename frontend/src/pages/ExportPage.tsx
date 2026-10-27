@@ -9,6 +9,7 @@ import { Messages } from '../components/layout/Messages';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Checkbox, Label, Select } from '../components/ui/input';
+import { RenderCard } from '../components/export/RenderCard';
 
 const unavailable = 'The local backend is unavailable. No bundle was saved.';
 
@@ -106,6 +107,7 @@ export function ExportPage() {
           </>}
         </CardContent>
       </Card>
+      <RenderCard />
     </PageBody>
   </>;
 }

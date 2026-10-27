@@ -28,10 +28,12 @@ TEMPLATE_SCHEMA_VERSION = 15
 ENHANCED_SCHEMA_VERSION = 16
 LABEL_SCHEMA_VERSION = 17
 SUNSET_SCHEMA_VERSION = 18
+RENDER_SCHEMA_VERSION = 19
 EXPANSION_SCHEMA_VERSIONS = (MODALITY_SCHEMA_VERSION, TRACKING_SCHEMA_VERSION, COUNT_SCHEMA_VERSION, CANDIDATE_SCHEMA_VERSION,
                              AUDIO_SCHEMA_VERSION, PROXY_SCHEMA_VERSION, TRACKS_V2_SCHEMA_VERSION, GATE_SPAN_SCHEMA_VERSION,
                              SAMPLE_CHECK_SCHEMA_VERSION, TEMPLATE_SCHEMA_VERSION,
-                             ENHANCED_SCHEMA_VERSION, LABEL_SCHEMA_VERSION, SUNSET_SCHEMA_VERSION)
+                             ENHANCED_SCHEMA_VERSION, LABEL_SCHEMA_VERSION, SUNSET_SCHEMA_VERSION,
+                             RENDER_SCHEMA_VERSION)
 CURRENT_SCHEMA_VERSION = EXPANSION_SCHEMA_VERSIONS[-1]
 QA_SCHEMA_VERSIONS = (QA_SCHEMA_VERSION, *EXPANSION_SCHEMA_VERSIONS)
 REVIEW_SCHEMA_VERSIONS = (REVIEW_SCHEMA_VERSION, *QA_SCHEMA_VERSIONS)
@@ -114,6 +116,8 @@ def initialise(db_path: Path) -> None:
             connection.execute("SELECT id, track_ids_json, undoes FROM track_label_event LIMIT 1")
         if version >= SUNSET_SCHEMA_VERSION:
             connection.execute("SELECT session_id, revision, sunset FROM sunset_event LIMIT 1")
+        if version >= RENDER_SCHEMA_VERSION:
+            connection.execute("SELECT id, kind, state, result_json FROM render_job LIMIT 1")
 
 
 def schema_version(db_path: Path) -> int:
@@ -182,11 +186,11 @@ def upgrade_modality(db_path: Path) -> None:
 
 def upgrade_expansion(db_path: Path) -> None:
     """Steps after the QA schema, run in order by one explicit storage upgrade action."""
-    from . import audio_store, candidate_store, count_store, flow, label_store, proxy_store, sample_store, template_store, tracking_store
+    from . import audio_store, candidate_store, count_store, flow, label_store, renders, proxy_store, sample_store, template_store, tracking_store
 
     for step in (upgrade_modality, tracking_store.upgrade, count_store.upgrade, candidate_store.upgrade, audio_store.upgrade,
                  proxy_store.upgrade, tracking_store.upgrade_v2, count_store.upgrade_spans, sample_store.upgrade,
-                 template_store.upgrade, proxy_store.upgrade_kind, label_store.upgrade, flow.upgrade):
+                 template_store.upgrade, proxy_store.upgrade_kind, label_store.upgrade, flow.upgrade, renders.upgrade):
         step(db_path)
 
 

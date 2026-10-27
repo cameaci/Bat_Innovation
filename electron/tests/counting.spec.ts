@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
@@ -102,6 +102,17 @@ test('a gate counts tracked bats live; a camera move pauses it for one reconfirm
     await expect(shell.page.getByLabel('Gate', { exact: true }).getByRole('option')).toHaveCount(3, { timeout: 15_000 });
     await shell.page.getByLabel('Gate', { exact: true }).selectOption({ label: 'Bent edge' });
     await expect(shell.page.getByRole('region', { name: 'Emergence profile' })).toContainText('Emergence profile: Bent edge');
+    // A highlights video with the overlay burnt in, saved through the native dialog and checked against its hash.
+    await goTo(shell, 'Export');
+    const videos = shell.page.getByRole('region', { name: 'Review videos' });
+    await videos.getByRole('button', { name: 'Render video', exact: true }).click();
+    const rendered = videos.getByRole('list', { name: 'Rendered videos' }).getByRole('listitem').first();
+    await expect(rendered).toContainText('source frames drawn', { timeout: 60_000 });
+    const target = join(directory, 'highlights.webm');
+    await shell.application.evaluate(({ dialog }, file) => { dialog.showSaveDialog = (async () => ({ canceled: false, filePath: file })) as typeof dialog.showSaveDialog; }, target);
+    await rendered.getByRole('button', { name: 'Save video...', exact: true }).click();
+    await expect(videos.getByRole('status')).toHaveText(`Saved ${target}`);
+    expect((await stat(target)).size).toBeGreaterThan(1000);
     await quit(shell); shell = undefined;
   } finally {
     await cleanupDraftShell(shell);

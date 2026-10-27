@@ -1,7 +1,10 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, type IpcMainInvokeEvent } from 'electron';
 import { existsSync, readFileSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { createReadStream } from 'node:fs';
+import { copyFile, rename, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, isGateChange, isCountReviewInput, isCountQAInput, isSampleCheckInput, isTrackLabelInput, isSunsetInput, isNewTemplateInput, isApplyTemplateInput, isCandidateDecision, isAudioMode, isAudioAnchor, isAudioDerive, isTrackingSettings, isTrackingTestInput, isReconfirmInput, isWatchedInput, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
+import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, isGateChange, isCountReviewInput, isCountQAInput, isSampleCheckInput, isTrackLabelInput, isSunsetInput, isRenderInput, isNewTemplateInput, isApplyTemplateInput, isCandidateDecision, isAudioMode, isAudioAnchor, isAudioDerive, isTrackingSettings, isTrackingTestInput, isReconfirmInput, isWatchedInput, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
 import { ExportSaver } from './export_saver';
 import type { NewSession } from './contracts';
 
@@ -228,6 +231,37 @@ async function open(): Promise<void> {
     try { writeFileSync(selected.filePath, JSON.stringify(portable, null, 2), { flag: 'w' }); }
     catch { return { ok: false, error: { code: 'template_write_failed', message: 'The template file could not be written there.' } }; }
     return { ok: true, value: template.value.name };
+  });
+  handle('bat:list-renders', 1, ([session]) => isUUID(session) ? backend.listRenders(session) : invalid());
+  handle('bat:start-render', 1, ([input]) => isRenderInput(input) ? backend.startRender(input) : invalid('Choose a video and a completed tracking run.'));
+  handle('bat:cancel-render', 1, ([id]) => isUUID(id) ? backend.cancelRender(id) : invalid());
+  handle('bat:save-render', 1, async ([id]) => {
+    if (!isUUID(id)) return invalid('Choose a rendered video.');
+    const owner = window;
+    if (!owner || owner.isDestroyed()) return invalid('The application window is closed.');
+    const file = await backend.renderFile(id);
+    if (!file.ok) return file;
+    if (file.value.file_name !== `${id}.webm`) return invalid('The rendered file could not be identified.');
+    const selected = await dialog.showSaveDialog(owner, { title: 'Save PROVISIONAL rendered video', defaultPath: `bat-provisional-${id.slice(0, 8)}.webm`,
+      filters: [{ name: 'WebM video', extensions: ['webm'] }] }).catch(() => null);
+    if (!selected) return { ok: false, error: { code: 'picker_failed', message: 'The native file dialog could not open.' } };
+    if (selected.canceled || !selected.filePath) return { ok: true, value: null };
+    if (resolve(selected.filePath).startsWith(resolve(dataDir))) return invalid('Save the video outside the application data folder.');
+    // Copy beside the target, check the bytes against the recorded hash, then move it into place.
+    const partial = `${selected.filePath}.partial`;
+    try {
+      await copyFile(join(dataDir, 'renders', file.value.file_name), partial);
+      const digest = await new Promise<string>((done, fail) => {
+        const hash = createHash('sha256');
+        createReadStream(partial).on('data', chunk => hash.update(chunk)).on('end', () => done(hash.digest('hex'))).on('error', fail);
+      });
+      if (digest !== file.value.sha256) throw new Error('hash');
+      await rename(partial, selected.filePath);
+    } catch {
+      await rm(partial, { force: true });
+      return { ok: false, error: { code: 'render_save_failed', message: 'The video could not be saved there completely. Nothing was left behind.' } };
+    }
+    return { ok: true, value: selected.filePath };
   });
   handle('bat:import-template', 1, async ([actor]) => {
     if (typeof actor !== 'string' || !actor.trim() || actor.length > 120) return invalid('Enter your name first.');

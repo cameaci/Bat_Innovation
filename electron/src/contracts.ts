@@ -184,6 +184,15 @@ export interface FlowLayer {
   first_exit: { segment_id: string; seconds: number } | null; last_exit: { segment_id: string; seconds: number } | null;
   peak_minute: { segment_id: string; minute: number; exited: number } | null; peak_exits_per_second: number;
 }
+/** A rendered overlay or highlights video of one video (Phase 3 X8): derived and provisional. */
+export interface RenderJob {
+  id: string; session_id: string; segment_id: string; tracking_run_id: string; kind: 'overlay' | 'highlights';
+  state: 'queued' | 'running' | 'ready' | 'failed' | 'cancelled' | 'interrupted'; error: string | null; created_utc: string; finished_utc: string | null;
+  progress?: [number, number] | null;
+  result: { frames?: number; source_frames?: number; drawn_source_frames?: number; bytes?: number; sha256?: string; duration_ms?: number;
+    skipped?: { from_pts: string; to_pts: string; seconds: number }[]; gates?: { gate_id: string; gate_revision: number; review_revision: number }[] };
+}
+export interface RenderInput { session_id: string; segment_id: string; tracking_run_id: string; kind: 'overlay' | 'highlights' }
 export interface Sunset { sunset: string; source: string; actor: string; revision: number; utc: string }
 export interface SunsetInput { actor: string; sunset: string; source: string }
 export interface FlowProfile {
@@ -561,6 +570,11 @@ export interface BatAPI {
   saveGate(sessionID: string, gateID: string | null, change: GateChange): Promise<ApiResult<Gate>>;
   getCounts(runID: string, gateID: string): Promise<ApiResult<GateCounts>>;
   getSunset(sessionID: string): Promise<ApiResult<Sunset | null>>;
+  listRenders(sessionID: string): Promise<ApiResult<RenderJob[]>>;
+  startRender(input: RenderInput): Promise<ApiResult<RenderJob>>;
+  cancelRender(renderID: string): Promise<ApiResult<RenderJob>>;
+  /** Copy a ready render to a file the user picks; the copy is checked against the recorded SHA-256. Null when cancelled. */
+  saveRender(renderID: string): Promise<ApiResult<string | null>>;
   saveSunset(sessionID: string, input: SunsetInput): Promise<ApiResult<Sunset | null>>;
   saveCountReview(runID: string, gateID: string, input: CountReviewInput): Promise<ApiResult<GateCounts>>;
   listSampleChecks(runID: string, gateID: string): Promise<ApiResult<SampleCheck[]>>;
