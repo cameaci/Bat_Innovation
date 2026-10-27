@@ -373,7 +373,7 @@ def create_app(settings: Settings) -> FastAPI:
     install_review_routes(app, reviews, authenticate)
     install_qa_routes(app, qa, authenticate)
     install_tracking_routes(app, tracking, authenticate, previews, proxies)
-    install_count_routes(app, db_path, authenticate)
+    install_count_routes(app, db_path, authenticate, proxies)
     install_audio_routes(app, audio, authenticate)
     install_proxy_routes(app, proxies, authenticate)
     return app

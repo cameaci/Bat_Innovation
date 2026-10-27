@@ -8,7 +8,7 @@ import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia, SummaryRequest, SummaryRun, SummaryDetail, ReviewChange, WindowReview, ReviewHistory } from './contracts';
-import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, PlaybackProof, WatchedInput, FlightMap, ReconfirmInput, PlaybackFrames, PlaybackStatus, SceneEvent, TrackingRun, TrackingSettings, TrackingTest, TrackingTestInput, TrackPage, Gate, GateChange, GateCounts, CountReviewInput, CountQAInput, Candidate, CandidateDecisionInput, AudioSource, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, AudioDerived } from './contracts';
+import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, PlaybackProof, WatchedInput, FlightMap, ReconfirmInput, PlaybackFrames, PlaybackStatus, SceneEvent, TrackingRun, TrackingSettings, TrackingTest, TrackingTestInput, TrackPage, Gate, GateChange, GateCounts, CountReviewInput, CountQAInput, SampleCheck, SampleCheckInput, Candidate, CandidateDecisionInput, AudioSource, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, AudioDerived } from './contracts';
 
 export const isAudioMode = (value: unknown): value is AudioSourceMode =>
   ['full_spectrum', 'heterodyne', 'frequency_division', 'time_expansion', 'unknown'].includes(String(value));
@@ -63,6 +63,12 @@ export function isCountReviewInput(input: unknown): input is CountReviewInput {
     (input.key === null || isUUID(input.key)) && typeof input.flipped === 'boolean' && count(input.count, 10000) &&
     (input.direction === null || ['A_to_B', 'B_to_A', 'out_to_in', 'in_to_out'].includes(String(input.direction))) &&
     (input.segment_id === null || isUUID(input.segment_id)) && (input.pts === null || isPTS(input.pts)) && text(input.rationale, 2000, false);
+}
+export function isSampleCheckInput(input: unknown): input is SampleCheckInput {
+  return object(input) && isPlaybackProof(input, ['actor', 'segment_id', 'start_pts', 'end_pts', 'presses', 'proxy_id', 'intervals', 'max_rate']) &&
+    text(input.actor, 120) && isUUID(input.segment_id) && safePTS(input.start_pts) && safePTS(input.end_pts) && Array.isArray(input.presses) &&
+    input.presses.length <= 5000 && input.presses.every(press => object(press) && exactKeys(press, ['pts', 'kind']) && safePTS(press.pts) &&
+      (press.kind === 'entry' || press.kind === 'exit'));
 }
 export function isCountQAInput(input: unknown): input is CountQAInput {
   return object(input) && exactKeys(input, ['actor', 'expected_revision', 'review_revision', 'decision', 'note']) && text(input.actor, 120) &&
@@ -443,6 +449,14 @@ export class BackendClient {
   getCounts(runID: string, gateID: string): Promise<ApiResult<GateCounts>> {
     return isUUID(runID) && isUUID(gateID) ? this.call(`/api/tracking/${runID}/gates/${gateID}/counts`) : Promise.resolve(invalid());
   }
+  listSampleChecks(runID: string, gateID: string): Promise<ApiResult<SampleCheck[]>> {
+    return isUUID(runID) && isUUID(gateID) ? this.call(`/api/tracking/${runID}/gates/${gateID}/sample-checks`) : Promise.resolve(invalid());
+  }
+  saveSampleCheck(runID: string, gateID: string, input: SampleCheckInput): Promise<ApiResult<SampleCheck>> {
+    if (!isUUID(runID) || !isUUID(gateID) || !isSampleCheckInput(input)) return Promise.resolve(invalid());
+    return this.call(`/api/tracking/${runID}/gates/${gateID}/sample-checks`, 'POST', { ...numericSpans(input), start_pts: Number(input.start_pts),
+      end_pts: Number(input.end_pts), presses: input.presses.map(press => ({ pts: Number(press.pts), kind: press.kind })) });
+  }
   saveCountReview(runID: string, gateID: string, input: CountReviewInput): Promise<ApiResult<GateCounts>> {
     return isUUID(runID) && isUUID(gateID) && isCountReviewInput(input) ? this.call(`/api/tracking/${runID}/gates/${gateID}/review`, 'POST', input) : Promise.resolve(invalid());
   }
@@ -780,6 +794,8 @@ export class BackendRuntime {
   getCounts(runID: string, gateID: string): Promise<ApiResult<GateCounts>> { return this.ready(client => client.getCounts(runID, gateID)); }
   reconfirmGate(runID: string, gateID: string, input: ReconfirmInput): Promise<ApiResult<GateCounts>> { return this.ready(client => client.reconfirmGate(runID, gateID, input)); }
   saveCountReview(runID: string, gateID: string, input: CountReviewInput): Promise<ApiResult<GateCounts>> { return this.ready(client => client.saveCountReview(runID, gateID, input)); }
+  listSampleChecks(runID: string, gateID: string): Promise<ApiResult<SampleCheck[]>> { return this.ready(client => client.listSampleChecks(runID, gateID)); }
+  saveSampleCheck(runID: string, gateID: string, input: SampleCheckInput): Promise<ApiResult<SampleCheck>> { return this.ready(client => client.saveSampleCheck(runID, gateID, input)); }
   saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>> { return this.ready(client => client.saveCountQA(runID, gateID, input)); }
   listCandidates(runID: string): Promise<ApiResult<Candidate[]>> { return this.ready(client => client.listCandidates(runID)); }
   getFlightMap(runID: string, segmentID: string): Promise<ApiResult<FlightMap>> { return this.ready(client => client.getFlightMap(runID, segmentID)); }

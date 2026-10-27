@@ -1,5 +1,11 @@
 # 07 - Research log
 
+## 2026-10-27 - Phase 3 X2: sample check
+
+**Implementation (schema v14):** in the Counts tab, "Check a sample from here" switches to 1x (smart speed off) and records `[` (entry) and `]` (exit) at the displayed frame. "Finish and compare" sends the presses with a playback-copy receipt whose single interval must span the whole check at 1x or slower; the backend matches presses to the gate's coherent crossings of the same kind within 0.5 s (nearest first) and stores matched, missed by the algorithm, extra in the algorithm and the undecided crossings in the span, append-only in `sample_check`. Checks never change a count. They are listed with jump links and summarised in the export manifest (`sample_checks`).
+
+**Verified:** backend tests for the matching, refusals (faster than 1x, partly watched span, presses outside the span), append-only storage, unchanged counts and the v13 to v14 upgrade with rollback; an end-to-end test counts a clip by hand and sees the comparison. **Not verified:** whether 0.5 s suits real footage and human key timing; reviewer effort.
+
 ## 2026-10-27 - Phase 3 X2: synthetic scenes and the tracks-v2 baseline
 
 **Method:** `backend/tests/scenes.py` generates deterministic 320x240, 25 fps scenes with exact paths and gate crossings (the truth uses the app's own gate rule): a sky trickle with re-entries, the same over fractal stone whose temporal noise grows with texture, camera gain steps, repeated frames, dark bats on a warm wall, fast blurred bats, a bat resting at the exit, bat-free stone and a dense stream of 150 bats in 4 s. `scripts/benchmark_tracking.py` encodes and decodes each scene through the fixture codec, tracks it in-process and matches crossings by direction within plus or minus 5 frames.

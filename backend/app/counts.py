@@ -9,7 +9,7 @@ from uuid import UUID
 from fastapi import Depends, FastAPI
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from . import count_store, store
+from . import count_store, sample_store, store
 
 Text = Field(min_length=1, max_length=60)
 
@@ -79,7 +79,23 @@ class QAAction(Strict):
     note: str = Field(default="", max_length=2000)
 
 
-def install_routes(app: FastAPI, db_path: Path, authenticate) -> None:
+class SamplePress(Strict):
+    pts: int
+    kind: Literal["entry", "exit"]
+
+
+class SampleCheck(Strict):
+    actor: str = Field(min_length=1, max_length=120)
+    segment_id: UUID
+    start_pts: int
+    end_pts: int
+    presses: list[SamplePress] = Field(max_length=sample_store.MAX_PRESSES)
+    proxy_id: UUID
+    intervals: list[tuple[int, int]] = Field(min_length=1, max_length=200)
+    max_rate: float = Field(gt=0, le=16)
+
+
+def install_routes(app: FastAPI, db_path: Path, authenticate, proxies=None) -> None:
     @app.get("/api/sessions/{session_id}/gates", dependencies=[Depends(authenticate)])
     def list_gates(session_id: UUID) -> list[dict]:
         return count_store.list_gates(db_path, str(session_id))
@@ -132,3 +148,18 @@ def install_routes(app: FastAPI, db_path: Path, authenticate) -> None:
         if store.schema_version(db_path) < store.COUNT_SCHEMA_VERSION:
             return []
         return count_store.history(db_path, str(run_id), str(gate_id))
+
+    @app.get("/api/tracking/{run_id}/gates/{gate_id}/sample-checks", dependencies=[Depends(authenticate)])
+    def sample_checks(run_id: UUID, gate_id: UUID) -> list[dict]:
+        return sample_store.checks(db_path, str(run_id), str(gate_id))
+
+    @app.post("/api/tracking/{run_id}/gates/{gate_id}/sample-checks", dependencies=[Depends(authenticate)])
+    def sample_check(run_id: UUID, gate_id: UUID, payload: SampleCheck) -> dict:
+        segment = store.segment_by_id(db_path, str(payload.segment_id))
+        if segment is None:
+            raise sample_store.SampleError("sample_invalid", "The video does not exist.", 404)
+        if payload.max_rate > sample_store.SAMPLE_MAX_RATE:
+            raise sample_store.SampleError("sample_too_fast", "Count a sample at normal speed or slower.")
+        receipt = proxies.receipt(str(payload.proxy_id), segment, [list(span) for span in payload.intervals], payload.max_rate)
+        return sample_store.record(db_path, str(run_id), str(gate_id), segment, payload.start_pts, payload.end_pts, payload.actor,
+                                   [(press.pts, press.kind) for press in payload.presses], receipt)

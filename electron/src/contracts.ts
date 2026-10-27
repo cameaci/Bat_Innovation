@@ -153,6 +153,17 @@ export interface Crossing { key: string; track_id: string; track_index: number; 
 /** A camera move or a new video not marked contiguous: counting is paused until one reconfirmation. */
 export interface InvalidSpan { segment_id: string; anchor_kind: 'camera_moved' | 'segment_start'; anchor_id: string; reason: 'camera_moved' | 'new_video'; from_pts: string | null; resume_pts: string | null }
 export interface ValidSpan { from_pts: number | null; to_pts: number | null; points: [number, number][] }
+/** A reviewer's manual count of one span at normal speed or slower, compared with the gate's proposal; never changes a count. */
+export interface SampleCheckInput extends PlaybackProof { actor: string; segment_id: string; start_pts: string; end_pts: string; presses: { pts: string; kind: 'entry' | 'exit' }[] }
+export interface SampleCheck {
+  id: string; tracking_run_id: string; gate_id: string; gate_revision: number; segment_id: string; start_pts: string; end_pts: string; actor: string; utc: string;
+  presses: [string, 'entry' | 'exit'][];
+  receipt: { kind: 'playback_copy'; proxy_id: string; max_rate: number; intervals: [string, string][] };
+  result: { manual: { entry: number; exit: number }; algorithm: { entry: number; exit: number }; uncertain_in_span: number; tolerance_seconds: string;
+    matched: { pts: string; kind: 'entry' | 'exit'; key: string; crossing_pts: string }[];
+    missed_by_algorithm: { pts: string; kind: 'entry' | 'exit' }[];
+    extra_in_algorithm: { key: string; pts: string; kind: 'entry' | 'exit'; track_index: number }[] };
+}
 export interface ReconfirmInput { actor: string; anchor_kind: InvalidSpan['anchor_kind']; anchor_id: string; points: [number, number][] | null; note: string }
 export interface GateCounts {
   gate: Gate; tracking_run_id: string; algorithm_version: string; revision: number; review_revision: number; reviewers: string[];
@@ -516,6 +527,8 @@ export interface BatAPI {
   saveGate(sessionID: string, gateID: string | null, change: GateChange): Promise<ApiResult<Gate>>;
   getCounts(runID: string, gateID: string): Promise<ApiResult<GateCounts>>;
   saveCountReview(runID: string, gateID: string, input: CountReviewInput): Promise<ApiResult<GateCounts>>;
+  listSampleChecks(runID: string, gateID: string): Promise<ApiResult<SampleCheck[]>>;
+  saveSampleCheck(runID: string, gateID: string, input: SampleCheckInput): Promise<ApiResult<SampleCheck>>;
   saveCountQA(runID: string, gateID: string, input: CountQAInput): Promise<ApiResult<GateCounts>>;
   reconfirmGate(runID: string, gateID: string, input: ReconfirmInput): Promise<ApiResult<GateCounts>>;
   listCandidates(runID: string): Promise<ApiResult<Candidate[]>>;

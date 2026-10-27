@@ -55,6 +55,20 @@ test('a gate counts tracked bats live; a camera move pauses it for one reconfirm
     await video.evaluate(element => { (element as HTMLVideoElement).currentTime = 4.3; });
     await expect.poll(async () => Number(await shell!.page.getByLabel('Entered so far', { exact: true }).textContent()) +
       Number(await shell!.page.getByLabel('Exited so far', { exact: true }).textContent()), { timeout: 15_000 }).toBe(2);
+    // Sample check: count the whole clip by hand at 1x and compare with the proposal; counts stay as they are.
+    await video.evaluate(element => { const player = element as HTMLVideoElement; player.pause(); player.currentTime = 0; });
+    await expect(shell.page.getByLabel('Frame number', { exact: true })).toHaveText('frame 1', { timeout: 15_000 });
+    await shell.page.getByRole('button', { name: 'Check a sample from here', exact: true }).click();
+    await expect(shell.page.getByRole('status', { name: 'Sample check running' })).toBeVisible();
+    await video.evaluate(element => { void (element as HTMLVideoElement).play(); });
+    await shell.page.locator('body').press(']');
+    await expect(shell.page.getByLabel('Presses so far', { exact: true })).toHaveText('0 entries, 1 exits');
+    await expect.poll(() => video.evaluate(element => (element as HTMLVideoElement).ended), { timeout: 30_000 }).toBe(true);
+    await shell.page.getByRole('button', { name: 'Finish and compare', exact: true }).click();
+    const check = shell.page.getByRole('list', { name: 'Sample checks' }).getByRole('listitem');
+    await expect(check).toHaveCount(1, { timeout: 15_000 });
+    await expect(check).toContainText('by QA Two');
+    await expect(check).toContainText(/You: 0 in, 1 out - algorithm: \d+ in, \d+ out/);
     await quit(shell); shell = undefined;
   } finally {
     await cleanupDraftShell(shell);

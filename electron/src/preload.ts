@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { Modality, WatchedInput, ReconfirmInput, TrackingSettings, TrackingTestInput, CandidateDecisionInput, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, GateChange, CountReviewInput, CountQAInput, BatAPI, NewSession, PreviewRequest, SaveMedia, SummaryRequest, ReviewChange, QAChange } from './contracts';
+import type { Modality, WatchedInput, ReconfirmInput, TrackingSettings, TrackingTestInput, CandidateDecisionInput, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, GateChange, CountReviewInput, CountQAInput, SampleCheckInput, BatAPI, NewSession, PreviewRequest, SaveMedia, SummaryRequest, ReviewChange, QAChange } from './contracts';
 
 const api: BatAPI = {
   startExport: (...args: [string]) => ipcRenderer.invoke('bat:start-export', ...args),
@@ -49,6 +49,8 @@ const api: BatAPI = {
   saveGate: (...args: [string, string | null, GateChange]) => ipcRenderer.invoke('bat:save-gate', ...args),
   getCounts: (...args: [string, string]) => ipcRenderer.invoke('bat:get-counts', ...args),
   saveCountReview: (...args: [string, string, CountReviewInput]) => ipcRenderer.invoke('bat:save-count-review', ...args),
+  listSampleChecks: (...args: [string, string]) => ipcRenderer.invoke('bat:list-sample-checks', ...args),
+  saveSampleCheck: (...args: [string, string, SampleCheckInput]) => ipcRenderer.invoke('bat:save-sample-check', ...args),
   saveCountQA: (...args: [string, string, CountQAInput]) => ipcRenderer.invoke('bat:save-count-qa', ...args),
   reconfirmGate: (...args: [string, string, ReconfirmInput]) => ipcRenderer.invoke('bat:reconfirm-gate', ...args),
   trackingRun: (...args: [string]) => ipcRenderer.invoke('bat:tracking-run', ...args),

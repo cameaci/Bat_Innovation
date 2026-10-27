@@ -187,7 +187,7 @@ def clock(anchor: dict | None, source: dict, start: dict, end: dict | None) -> d
 
 def expansion_rows(database: Path, directory: Path, run_id: str, as_of: str, check, files: dict) -> dict | None:
     """Tracks and three-layer gate counts; header-only files when no complete tracking run exists."""
-    from . import count_store, store, tracking_store
+    from . import count_store, sample_store, store, tracking_store
 
     tracks_file = CSVFile(directory / FILES["tracks"], TRACK_COLUMNS, check)
     counts_file = None
@@ -247,6 +247,13 @@ def expansion_rows(database: Path, directory: Path, run_id: str, as_of: str, che
                 info = {"tracking_run_id": run["id"], "algorithm_version": run["algorithm_version"], "parameter_sha256": run["parameter_hash"],
                         "settings": settings, "scene_events": [{key: event[key] for key in ("segment_id", "kind", "start_pts", "end_pts")} for event in scene_events],
                         "tracks": len(rows), "gates": sum(1 for gate in gates if gate["state"] == "active"),
+                        "sample_checks": [{"gate_id": check_["gate_id"], "gate_revision": check_["gate_revision"], "actor": check_["actor"],
+                                           "segment_id": check_["segment_id"], "start_pts": check_["start_pts"], "end_pts": check_["end_pts"],
+                                           "manual": check_["result"]["manual"], "algorithm": check_["result"]["algorithm"],
+                                           "matched": len(check_["result"]["matched"]), "missed_by_algorithm": len(check_["result"]["missed_by_algorithm"]),
+                                           "extra_in_algorithm": len(check_["result"]["extra_in_algorithm"]), "max_rate": check_["receipt"]["max_rate"],
+                                           "utc": check_["utc"]}
+                                          for gate in gates for check_ in sample_store.checks(database, run["id"], gate["id"])],
                         "note": "Tracks and crossings are review candidates, not animals. Layers: algorithm (unverified), reviewer, qa (null until approved)."}
         files["tracks"], files["counts"] = tracks_file.close(), counts_file.close()
         return info

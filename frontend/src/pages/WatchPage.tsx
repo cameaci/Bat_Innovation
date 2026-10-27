@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw, ScanSearch, SkipBack, SkipForward } from 'lucide-react';
-import type { Candidate, GateCounts, InvalidSpan, SceneEvent, MediaSegment, PlaybackFrames, TrackingSettings, TrackingTest } from '../../../electron/src/contracts';
+import type { Candidate, SampleCheck, GateCounts, InvalidSpan, SceneEvent, MediaSegment, PlaybackFrames, TrackingSettings, TrackingTest } from '../../../electron/src/contracts';
 import { getAPI } from '../api';
 import { activeRun, activeTracking, useSurvey } from '../survey';
 import { clock } from '../lib/time';
@@ -23,6 +23,7 @@ import { settingsOf } from '../lib/trackingSettings';
 import { savedReviewer } from '../lib/reviewer';
 import { drawCounts, soFar, type BoardMode } from '../components/watch/CountLayer';
 import { CountsPanel } from '../components/watch/CountsPanel';
+import { SampleCheckPanel, type ActiveSample } from '../components/watch/SampleCheckPanel';
 import { SurveyTimeline } from '../components/watch/SurveyTimeline';
 import { useCoverage, WATCH_MAX_RATE } from '../components/watch/useCoverage';
 import { WatchReviewPanel, windowStates } from '../components/watch/WatchReviewPanel';
@@ -69,6 +70,10 @@ export function WatchPage() {
   const [markerStyle, setMarkerStyle] = useState<MarkerStyle>('boxes');
   const [showNoise, setShowNoise] = useState(false);
   const [board, setBoard] = useState<BoardMode>('band');
+  const [sample, setSample] = useState<ActiveSample | null>(null);
+  const [sampleChecks, setSampleChecks] = useState<SampleCheck[]>([]);
+  const [sampleBusy, setSampleBusy] = useState(false);
+  const lastFrame = useRef<DisplayedFrame | null>(null);
   const order = useMemo(() => new Map(segments.map((item, index) => [item.id, index])), [segments]);
   const activeGates = survey.gates.filter(gate => gate.state === 'active');
   const chosenGate = activeGates.find(gate => gate.id === gateID) ?? activeGates[0] ?? null;
@@ -107,6 +112,12 @@ export function WatchPage() {
     });
     return () => { active = false; };
   }, [trackingRun, chosenGate?.id, chosenGate?.revision]);
+  const loadSampleChecks = useCallback(async () => {
+    if (!trackingRun || !chosenGate) { setSampleChecks([]); return; }
+    const result = await getAPI()?.listSampleChecks(trackingRun, chosenGate.id);
+    if (result?.ok) setSampleChecks(result.value);
+  }, [trackingRun, chosenGate?.id]);
+  useEffect(() => { void loadSampleChecks(); }, [loadSampleChecks]);
   const chunk = displayed ? Math.floor(displayed.ms / CHUNK_MS) : 0;
   const { tracks, error: trackError, shown: tracksShown, total: tracksTotal, noiseHidden } = useTracks(trackingRun, frames, chunk, showNoise);
   const rate = segment ? ticksPerSecond(segment) : 1;
@@ -202,6 +213,7 @@ export function WatchPage() {
   frameState.current = { segment, copy, tracks, counts, smart, speed, reelItem };
   const onFrame = useCallback((frame: DisplayedFrame | null) => {
     // The page re-renders ten times a second at most; the canvas redraws on every displayed frame.
+    lastFrame.current = frame;
     const bucket = frame === null ? -1 : Math.floor(frame.ms / 100);
     if (bucket !== tenths.current) { tenths.current = bucket; setDisplayed(frame); }
     const state = frameState.current;
@@ -325,6 +337,35 @@ export function WatchPage() {
 
   function clearTest() { setTest(null); setTestRange(null); }
 
+  function startSample() {
+    const frame = lastFrame.current;
+    if (!segment || !frame) return;
+    // A manual count needs normal speed or slower; smart speed would change the rate under the counter.
+    setSmart(false);
+    if (SPEEDS[speed]! > 1) setSpeed(SPEEDS.indexOf(1));
+    setSample({ segmentID: segment.id, start: frame.pts, presses: [] });
+  }
+
+  async function finishSample() {
+    const api = getAPI();
+    const frame = lastFrame.current;
+    if (!sample || !api || !trackingRun || !chosenGate || !frame) return;
+    player.current?.pause();
+    const watched = coverage.spans(sample.segmentID);
+    const span = watched?.spans.find(item => item.start <= sample.start && item.end >= frame.pts && item.maxRate <= 1);
+    if (sample.segmentID !== segment?.id || frame.pts <= sample.start) { setFrameError('Play forward in the same video before finishing the check.'); return; }
+    if (!watched || !span) { setFrameError('The span was not played through at 1x or slower without seeking. Start the check again.'); setSample(null); return; }
+    setSampleBusy(true);
+    const result = await api.saveSampleCheck(trackingRun, chosenGate.id, { actor: actor.trim(), segment_id: sample.segmentID,
+      start_pts: String(Math.round(sample.start)), end_pts: String(Math.round(frame.pts)),
+      presses: sample.presses.map(press => ({ pts: String(Math.round(press.pts)), kind: press.kind })),
+      proxy_id: watched.proxyID, intervals: [[String(Math.round(sample.start)), String(Math.round(frame.pts))]], max_rate: span.maxRate });
+    setSampleBusy(false);
+    if (!result.ok) { setFrameError(result.error.message); return; }
+    setSample(null); setFrameError('');
+    await loadSampleChecks();
+  }
+
   function pick(point: [number, number]) {
     if (gateDraft) setGateDraft(addPoint(gateDraft, point));
     else if (drawing) setDraft(previous => previous.length < 32 ? [...previous, point] : previous);
@@ -357,6 +398,12 @@ export function WatchPage() {
         const reelAction = reelKeys[event.key];
         if (reelAction) { event.preventDefault(); reelAction(); return; }
       }
+      if (sample && (event.key === '[' || event.key === ']')) {
+        event.preventDefault();
+        const frame = lastFrame.current;
+        if (frame) setSample(current => current ? { ...current, presses: [...current.presses, { pts: frame.pts, kind: event.key === '[' ? 'entry' : 'exit' }] } : current);
+        return;
+      }
       const handle = player.current;
       if (!handle) return;
       const actions: Record<string, () => void> = {
@@ -375,7 +422,7 @@ export function WatchPage() {
     }
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
-  }, [displayed, verify, drawing, draft, reel, reelItems, actor, counts, windowList]);
+  }, [displayed, verify, drawing, draft, reel, reelItems, actor, counts, windowList, sample]);
 
   const elapsed = segment && displayed ? clock(Number(BigInt(Math.round(displayed.pts)) - BigInt(segment.metadata.first_pts)) / rate) : '--';
   const status = useMemo(() => {
@@ -490,6 +537,9 @@ export function WatchPage() {
             actor={actor} setActor={setActor} segment={segment} segments={segments}
             live={counts && displayed ? soFar(counts, order, segment.id, displayed.pts) : null}
             gateDraft={gateDraft} setGateDraft={draft => { setGateDraft(draft); if (draft) player.current?.pause(); }} redraw={redraw} setRedraw={setRedraw} onGo={goTo} />}
+          {panel === 'counts' && counts && <SampleCheckPanel checks={sampleChecks} active={sample} segments={segments} actor={actor} busy={sampleBusy}
+            canStart={Boolean(displayed) && (survey.media?.schema_version ?? 0) >= 14} onStart={startSample} onFinish={() => void finishSample()}
+            onCancel={() => setSample(null)} onGo={goTo} />}
           {activeTracking(survey.tracking) && <p role="status" className="rounded-lg border border-slate-800 bg-slate-900 p-3 text-sm">Tracking the whole survey with these settings...</p>}
           <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
             <p className="text-xs uppercase tracking-wide text-slate-400">Tracked now</p>
