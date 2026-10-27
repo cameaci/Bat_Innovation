@@ -47,7 +47,7 @@ test('native selection inspects real media and persists explicit video order acr
     expect(picker.options?.defaultPath).toBeUndefined();
 
     const inspected = await getMedia(shell, sessionID);
-    expect(inspected.schema_version).toBe(17);
+    expect(inspected.schema_version).toBe(18);
     expect(inspected.clock_anchor).toBeNull();
     expect(inspected.segments.map((segment) => segment.metadata.filename)).toEqual(['cfr.mp4', 'nonzero.mts', 'irregular.mp4']);
     expect(inspected.segments.every((segment) => segment.continuity === 'unknown' && segment.continuity_provenance === null)).toBe(true);

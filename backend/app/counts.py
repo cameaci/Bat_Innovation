@@ -9,7 +9,7 @@ from uuid import UUID
 from fastapi import Depends, FastAPI
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from . import count_store, sample_store, store, template_store
+from . import count_store, flow, sample_store, store, template_store
 
 Text = Field(min_length=1, max_length=60)
 
@@ -112,6 +112,12 @@ class ApplyTemplate(Strict):
     frame_h: int = Field(ge=1, le=8192)
 
 
+class SunsetInput(Strict):
+    actor: str = Field(min_length=1, max_length=120)
+    sunset: str = Field(max_length=5)
+    source: str = Field(default="", max_length=200)
+
+
 class ImportTemplate(Strict):
     actor: str = Field(min_length=1, max_length=120)
     data: dict
@@ -185,6 +191,14 @@ def install_routes(app: FastAPI, db_path: Path, authenticate, proxies=None) -> N
         receipt = proxies.receipt(str(payload.proxy_id), segment, [list(span) for span in payload.intervals], payload.max_rate)
         return sample_store.record(db_path, str(run_id), str(gate_id), segment, payload.start_pts, payload.end_pts, payload.actor,
                                    [(press.pts, press.kind) for press in payload.presses], receipt)
+
+    @app.get("/api/sessions/{session_id}/sunset", dependencies=[Depends(authenticate)])
+    def get_sunset(session_id: UUID) -> dict | None:
+        return flow.sunset(db_path, str(session_id))
+
+    @app.post("/api/sessions/{session_id}/sunset", dependencies=[Depends(authenticate)])
+    def save_sunset(session_id: UUID, payload: SunsetInput) -> dict | None:
+        return flow.set_sunset(db_path, str(session_id), payload.actor, payload.sunset, payload.source)
 
     @app.get("/api/site-templates", dependencies=[Depends(authenticate)])
     def templates() -> list[dict]:

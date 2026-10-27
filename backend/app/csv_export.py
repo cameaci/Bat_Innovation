@@ -217,10 +217,16 @@ def expansion_rows(database: Path, directory: Path, run_id: str, as_of: str, che
                                      "label_category": label.get("category"), "label_species": label.get("species"),
                                      "label_comment": label.get("comment"), "label_actor": label.get("actor"), "label_event_id": label.get("event_id")})
                 gates = count_store.list_gates(database, run["session_id"])
+                flows = []
                 for gate in gates:
                     if gate["state"] != "active":
                         continue
                     result = count_store.counts(database, run["id"], gate["id"])
+                    profile = result["profile"]
+                    flows.append({"gate_id": gate["id"], "gate_name": gate["name"], "sunset": profile["sunset"],
+                                  "clock_segment_id": profile["clock_segment_id"], "minutes_after_sunset": profile["minutes_after_sunset"],
+                                  "layers": {name: None if layer is None else {key: layer[key] for key in ("first_exit", "last_exit", "peak_minute", "peak_exits_per_second")}
+                                             for name, layer in profile["layers"].items()}})
                     head = {**base, "gate_id": gate["id"], "gate_name": gate["name"], "gate_revision": gate["revision"], "gate_kind": gate["kind"],
                             "gate_points_json": json.dumps(gate["points"]), "gate_frame_w": gate["frame_w"], "gate_frame_h": gate["frame_h"],
                             "label_a": gate["label_a"], "label_b": gate["label_b"], "entry_direction": gate["entry_direction"],
@@ -253,7 +259,7 @@ def expansion_rows(database: Path, directory: Path, run_id: str, as_of: str, che
                         "settings": settings, "scene_events": [{key: event[key] for key in ("segment_id", "kind", "start_pts", "end_pts")} for event in scene_events],
                         "tracks": len(rows), "labels": {"events": len(labelled["events"]), "undone": sum(1 for event in labelled["events"] if event["undoes"]),
                                                          "labelled_tracks": len(labelled["tracks"]), "custom": labelled["custom"]},
-                        "gates": sum(1 for gate in gates if gate["state"] == "active"),
+                        "gates": sum(1 for gate in gates if gate["state"] == "active"), "flow": flows,
                         "sample_checks": [{"gate_id": check_["gate_id"], "gate_revision": check_["gate_revision"], "actor": check_["actor"],
                                            "segment_id": check_["segment_id"], "start_pts": check_["start_pts"], "end_pts": check_["end_pts"],
                                            "manual": check_["result"]["manual"], "algorithm": check_["result"]["algorithm"],

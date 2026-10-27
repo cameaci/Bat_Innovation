@@ -38,11 +38,24 @@ def test_back_and_forth_counts_twice_and_beyond_the_line_end_counts_nothing() ->
     assert gates.crossings(walk([10 + 8 * i for i in range(12)], y=80), short) == []
 
 
+def test_a_polyline_counts_each_pass_once_even_over_a_vertex() -> None:
+    # A bent line: down from the top to (64, 48), then on to the bottom-right corner.
+    bent = {**LINE, "points": [[64, 0], [64, 48], [120, 96]]}
+    assert gates.crossings(walk([10 + 8 * i for i in range(12)], y=20), bent) == [(8, "B_to_A")]
+    assert gates.crossings(walk([10 + 8 * i for i in range(15)], y=80), bent) == [(12, "B_to_A")]
+    # Exactly through the vertex, and across the bend near it: one side change, one crossing each.
+    assert gates.crossings(walk([10 + 8 * i for i in range(14)], y=48), bent) == [(8, "B_to_A")]
+    assert [direction for _, direction in gates.crossings([(i, 100 - 6 * i, 20 + 6 * i) for i in range(14)], bent)] == ["A_to_B"]
+    # Back again over the second segment counts the opposite way.
+    assert [item[1] for item in gates.crossings(walk([60, 110, 60], y=80), bent)] == ["B_to_A", "A_to_B"]
+
+
 def test_area_entry_and_exit() -> None:
     assert gates.crossings(walk([10 + 8 * i for i in range(14)], y=45), BOX) == [(6, "out_to_in"), (9, "in_to_out")]
 
 
-@pytest.mark.parametrize("bad, message", [({**LINE, "points": [[64, 0]]}, "two points"), ({**LINE, "points": [[64, 0], [64, 4]]}, "too short"),
+@pytest.mark.parametrize("bad, message", [({**LINE, "points": [[64, 0]]}, "2 to 8 points"), ({**LINE, "points": [[64, 0], [64, 4]]}, "longer than its hysteresis"),
+                                          ({**LINE, "points": [[64, 0]] * 9}, "2 to 8 points"),
                                           ({**LINE, "points": [[64, 0], [200, 0]]}, "inside the video"), ({**BOX, "points": [[1, 1], [2, 1], [2, 2], [1, 2]]}, "too small")])
 def test_degenerate_gates_are_refused(bad: dict, message: str) -> None:
     with pytest.raises(ValueError, match=message):

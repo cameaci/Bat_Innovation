@@ -18,7 +18,7 @@ import json
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
-from . import gates, store, summary_store, tracks
+from . import flow, gates, store, summary_store, tracks
 from .imports import ImportErrorResponse
 
 REVIEW_ACTIONS = {"confirm", "reject", "add_missed", "clear", "accept"}
@@ -318,9 +318,9 @@ def _flip(direction: str) -> str:
     return {"A_to_B": "B_to_A", "B_to_A": "A_to_B", "out_to_in": "in_to_out", "in_to_out": "out_to_in"}[direction]
 
 
-def _totals(items: list[tuple[str, int]], entry: str) -> dict:
-    entered = sum(count for direction, count in items if direction == entry)
-    exited = sum(count for direction, count in items if direction == _flip(entry))
+def _totals(items: list[tuple], entry: str) -> dict:
+    entered = sum(count for direction, count, *_ in items if direction == entry)
+    exited = sum(count for direction, count, *_ in items if direction == _flip(entry))
     return {"entered": entered, "exited": exited, "net": exited - entered}
 
 
@@ -350,24 +350,26 @@ def counts(db_path: Path, run_id: str, gate_id: str) -> dict:
             (missed if event["action"] == "add_missed" else reviews)[event["key"]] = event
     for crossing in crossings:
         crossing["review"] = reviews.get(crossing["key"])
-    algorithm = [(item["direction"], 1) for item in crossings if item["quality"] == "coherent"]
+    # (direction, count, segment, PTS): the times feed the emergence profile.
+    algorithm = [(item["direction"], 1, item["segment_id"], item["pts"]) for item in crossings if item["quality"] == "coherent"]
     # The reviewer layer starts from the algorithm proposal: coherent crossings count unless rejected, uncertain
     # ones only once a reviewer says they are bats.
-    reviewed: list[tuple[str, int]] = []
+    reviewed: list[tuple[str, int, str, str]] = []
     unresolved = rejected = 0
     for crossing in crossings:
         review = crossing["review"]
         if review is None:
             if crossing["quality"] == "coherent":
-                reviewed.append((crossing["direction"], 1))
+                reviewed.append((crossing["direction"], 1, crossing["segment_id"], crossing["pts"]))
             else:
                 unresolved += 1
             continue
         if review["action"] == "reject":
             rejected += 1
             continue
-        reviewed.append((_flip(crossing["direction"]) if review["flipped"] else crossing["direction"], review["count"]))
-    reviewed += [(item["direction"], item["count"]) for item in missed.values()]
+        reviewed.append((_flip(crossing["direction"]) if review["flipped"] else crossing["direction"], review["count"],
+                         crossing["segment_id"], crossing["pts"]))
+    reviewed += [(item["direction"], item["count"], item["segment_id"], item["pts"]) for item in missed.values()]
     current_accept = accepted is not None and accepted["revision"] == review_revision
     state = "accepted" if current_accept else "unresolved" if unresolved or invalid else "ready"
     reviewers = {" ".join(event["actor"].lower().split()) for event in events if event["layer"] == "review"}
@@ -381,6 +383,7 @@ def counts(db_path: Path, run_id: str, gate_id: str) -> dict:
     return {"gate": gate, "tracking_run_id": run_id, "algorithm_version": extra["rule"],
             "crossings": crossings, "missed": list(missed.values()), "skipped_segments": skipped_segments(db_path, run_id, gate),
             "invalid_spans": invalid, "valid_spans": extra["valid_spans"],
+            "profile": flow.profile(db_path, gate, algorithm, reviewed, bool(qa_state and qa_state["counts"])),
             "review_revision": review_revision, "reviewers": sorted(reviewers),
             "layers": {"algorithm": {**_totals(algorithm, entry), "coherent": len(algorithm),
                                      "uncertain": sum(1 for item in crossings if item["quality"] != "coherent"),

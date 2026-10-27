@@ -1,10 +1,12 @@
 """Counting-gate geometry with hysteresis (feature expansion E3). Pure functions, source pixel coordinates.
 
-A line gate has side A on the left of its first-to-last point direction and side B on the right. An area gate
+A line gate (2 to 8 vertices, Phase 3 X7) has side A on the left of each segment's drawn direction and side B on the
+right; a point takes the side of its nearest segment. An area gate
 (rectangle or polygon) has inside and outside. A point is only *confirmed* on a side when it is at least
 `hysteresis` pixels from the boundary, so jitter on the boundary never produces a crossing. A crossing is the
 first confirmed point on the new side; for a line, the path between the last confirmed point on the old side and
-that point must also intersect the drawn line segment, so passing beyond its ends is not counted.
+that point must also intersect one of the drawn segments, so passing beyond its ends is not counted. A pass over a
+vertex changes side once and counts once.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ def version_for(track_algorithm: str) -> tuple[str, int]:
     points = MIN_POINTS.get(track_algorithm, 1)
     return (ALGORITHM_VERSION if points == 1 else f"gate-hysteresis-v2-m{points}"), points
 DIRECTIONS = {"line": ("A_to_B", "B_to_A"), "area": ("out_to_in", "in_to_out")}
+MAX_LINE_POINTS = 8
 
 Point = tuple[float, float]
 
@@ -63,8 +66,10 @@ def side(p: Point, gate: dict) -> int:
     points = [tuple(item) for item in gate["points"]]
     h = gate["hysteresis_px"]
     if gate["kind"] == "line":
-        a, b = points[0], points[-1]
+        a, b = min(_edges(points, False), key=lambda edge: _segment_distance(p, *edge))
         length = hypot(b[0] - a[0], b[1] - a[1])
+        if length == 0:
+            return 0
         signed = _cross(a, b, p) / length
         # Image y grows downwards, so a positive cross product is on the visual right; A is the visual left.
         return -1 if signed >= h else 1 if signed <= -h else 0
@@ -100,7 +105,7 @@ def crossings(track: list[tuple[int, float, float]], gate: dict, min_points: int
             continue
         if confirmed and current != confirmed:
             first_pts, first = run_start
-            if kind == "area" or _intersects(anchor, first, points[0], points[-1]):
+            if kind == "area" or any(_intersects(anchor, first, a, b) for a, b in _edges(points, False)):
                 if kind == "line":
                     result.append((first_pts, forward if confirmed == 1 else backward))
                 else:
@@ -112,16 +117,16 @@ def crossings(track: list[tuple[int, float, float]], gate: dict, min_points: int
 def validate(gate: dict) -> None:
     """Reject geometry that cannot define a gate (degenerate, out of frame or self-overlapping band)."""
     points = gate["points"]
-    if gate["kind"] == "line" and len(points) != 2:
-        raise ValueError("A line gate needs exactly two points.")
+    if gate["kind"] == "line" and not 2 <= len(points) <= MAX_LINE_POINTS:
+        raise ValueError(f"A line gate needs 2 to {MAX_LINE_POINTS} points.")
     if gate["kind"] == "rect" and len(points) != 4:
         raise ValueError("A rectangle gate needs four corners.")
     if gate["kind"] == "polygon" and not 3 <= len(points) <= 32:
         raise ValueError("A polygon gate needs 3 to 32 points.")
     if any(not (0 <= x <= gate["frame_w"] and 0 <= y <= gate["frame_h"]) for x, y in points):
         raise ValueError("Gate points must lie inside the video frame.")
-    if gate["kind"] == "line" and hypot(points[1][0] - points[0][0], points[1][1] - points[0][1]) < 2 * gate["hysteresis_px"] + 1:
-        raise ValueError("The line is too short for its hysteresis band.")
+    if gate["kind"] == "line" and any(hypot(b[0] - a[0], b[1] - a[1]) < 2 * gate["hysteresis_px"] + 1 for a, b in zip(points, points[1:])):
+        raise ValueError("Each segment of the line must be longer than its hysteresis band.")
     if gate["kind"] != "line":
         area = abs(sum(_cross((0.0, 0.0), tuple(a), tuple(b)) for a, b in _edges(points, True))) / 2
         if area < (2 * gate["hysteresis_px"] + 1) ** 2:
