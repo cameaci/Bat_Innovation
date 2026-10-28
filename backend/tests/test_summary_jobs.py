@@ -109,7 +109,9 @@ def test_linux_worker_limits_token_removal_and_native_thread_bounds(
     try:
         assert pid is not None
         assert "Max cpu time              300" in limits
-        assert "Max file size             134217728" in limits
+        # The worker writes window rows into the survey database: its file limit is that database's size plus 128 MiB.
+        file_limit = int(next(line for line in limits.splitlines() if line.startswith("Max file size")).split()[3])
+        assert file_limit == database.stat().st_size + 134217728
         assert "Max core file size        0" in limits
         environment = Path(f"/proc/{pid}/environ").read_bytes()
         assert b"BAT_API_TOKEN=" not in environment
