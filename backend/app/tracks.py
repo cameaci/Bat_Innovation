@@ -220,6 +220,7 @@ class Analyzer:
         self.events: list[SceneEvent] = []
         self.event: dict | None = None
         self.previous: np.ndarray | None = None
+        self.corrected_previous: np.ndarray | None = None
         self.raw_previous: np.ndarray | None = None
         self.last_pts: int | None = None
         self.first_pts: int | None = None
@@ -358,7 +359,13 @@ class Analyzer:
         score, raw = self._score(corrected, background)
         foreground = score >= self.threshold
         before = None
-        if self._disturbed(foreground):
+        # A hard cut slips past the centred background (by the cut it already holds more of the new scene), so a jump
+        # of a large part of the frame since the previous frame is checked against the past samples too.
+        # Both frames are gain-compensated, so camera gain settling is not a jump.
+        noise = self.noise if self.noise is not None else np.ones(self.grid, np.float32)
+        jump = self.corrected_previous is not None and self._disturbed(np.abs(corrected - self.corrected_previous) / noise >= self.threshold)
+        self.corrected_previous = corrected
+        if self._disturbed(foreground) or jump:
             # The scene before the disturbance: past samples only, since the centred window already sees later frames.
             past = [image_ for at, image_ in self.samples if at < index]
             before = np.median(np.stack(past), axis=0).astype(np.float32) if past else background.copy()

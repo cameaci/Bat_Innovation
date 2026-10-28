@@ -192,6 +192,32 @@ def test_camera_shift_is_classified_and_ends_tracks() -> None:
     assert {track.epoch for track in real(found)} == {0, 1}
 
 
+def test_a_hard_cut_to_another_view_is_a_camera_move() -> None:
+    """A cut to a different view (an edited clip, a camera restarted elsewhere) is held by the centred background as
+    soon as most of its samples show the new view, so the jump from the previous frame is checked as well (a real
+    documentary clip had one of its two cuts missed)."""
+    rng = np.random.default_rng(5)
+    first, second = textured(3)[:H, :W], textured(9)[:H, :W]
+    images = [np.clip((first if index < 60 else second) + rng.normal(0, 1.5, (H, W)), 0, 255).astype(np.uint8) for index in range(120)]
+    _found, events, _ = run(images)
+    assert [event.kind for event in events] == ["camera_moved"]
+    assert abs(events[0].start_pts - 60 * 40) <= 2 * 40
+
+
+def test_camera_gain_settling_is_not_a_scene_event() -> None:
+    """A trail camera's gain settling by two grey levels over a static view (with most frames repeated) is no event."""
+    rng = np.random.default_rng(6)
+    scene = textured(3)[:H, :W].astype(np.float32)
+    images = []
+    for index in range(90):
+        level = -2.0 if index >= 3 else 0.0
+        if index % 4 == 0:
+            frame = np.clip(scene + level + rng.normal(0, 0.8, (H, W)), 0, 255).astype(np.uint8)
+        images.append(frame)
+    _found, events, _ = run(images)
+    assert events == []
+
+
 def test_target_leaving_the_frame_ends_its_track() -> None:
     found = real(run(scenario("edge_exit"))[0])
     assert len(found) == 1 and found[0].points[-1][1] > 110
