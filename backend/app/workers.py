@@ -183,6 +183,13 @@ def linux_limits(parent_pid: int, memory_bytes: int, cpu_seconds: int, file_byte
     return True
 
 
+def database_file_limit(db_path: str | Path, growth_bytes: int) -> int:
+    """File-size limit for a worker that writes rows to the survey database: SQLite writes at the end of the file (and
+    its journal is as large as the pages it changes), so the bound is the database's current size plus the growth
+    this worker may add, never a fixed size that a real survey database soon passes."""
+    return os.path.getsize(db_path) + growth_bytes
+
+
 def require_limits(error: Exception) -> None:
     """Worker side on Windows: refuse to decode unless the parent's Job Object limits are in force."""
     from . import winjob

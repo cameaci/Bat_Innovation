@@ -13,6 +13,8 @@ MAX_REQUEST_BYTES = 64 * 1024
 MAX_FRAMES = 1_000_000
 MAX_TRACKS = 20_000
 MAX_POINTS = 2_000_000
+# Rows a run may add (tracks with up to MAX_POINTS points and scene events), with room for the journal.
+MAX_DATABASE_GROWTH = 512 * 1024 * 1024
 MEMORY_BYTES = 1024 ** 3
 TEST_SECONDS = 12
 WARM_SECONDS = 2
@@ -25,10 +27,11 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 
 
-def limits(parent_pid: int) -> None:
+def limits(parent_pid: int, db_path: str) -> None:
     if sys.platform == "win32":
         workers.require_limits(ValueError("tracking_limits_unavailable"))
-    elif sys.platform != "linux" or not workers.linux_limits(parent_pid, MEMORY_BYTES, CPU_SECONDS, 1024 * 1024):
+    elif sys.platform != "linux" or not workers.linux_limits(parent_pid, MEMORY_BYTES, CPU_SECONDS,
+                                                             workers.database_file_limit(db_path, MAX_DATABASE_GROWTH)):
         raise ValueError("tracking_limits_unavailable")
 
 
@@ -124,7 +127,7 @@ def main() -> None:
         if len(raw) > MAX_REQUEST_BYTES:
             raise ValueError("tracking_limit")
         payload = json.loads(raw)
-        limits(payload["parent_pid"])
+        limits(payload["parent_pid"], payload["db_path"])
         result["stats"] = test(payload) if payload.get("mode") == "test" else render(payload)
     except Exception as error:
         code = str(error) if isinstance(error, ValueError) and str(error) in ERRORS else getattr(error, "code", None)

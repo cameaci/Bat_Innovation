@@ -417,3 +417,26 @@ def test_large_targets_are_analysed_on_a_coarser_grid() -> None:
     assert tracks.Analyzer(1920, 1080, 30.0, 1 / 30, {"target_px": 12}).step == 3
     assert tracks.Analyzer(1920, 1080, 30.0, 1 / 30, {"target_px": 140}).step == 17
     assert tracks.Analyzer(320, 240, 30.0, 1 / 30, {"target_px": 12}).step == 1
+
+
+def test_database_writing_workers_may_grow_the_survey_database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The tracking and summary workers write rows at the end of the survey database. A fixed 1 MiB file limit made
+    every real tracking run that added more than about 1 MiB of tracks fail with a disk I/O error (a dense thermal
+    swarm); the limit is now the database's own size plus the growth a run may add."""
+    import resource
+
+    from backend.app import summary_worker, track_worker, workers
+
+    database = tmp_path / "survey.sqlite3"
+    database.write_bytes(b"\0" * (5 * 1024 * 1024))
+    seen: dict[str, int] = {}
+    monkeypatch.setattr(workers, "linux_limits", lambda _pid, _memory, _cpu, file_bytes: seen.update(track=file_bytes) or True)
+    track_worker.limits(0, str(database))
+    assert seen["track"] == 5 * 1024 * 1024 + track_worker.MAX_DATABASE_GROWTH
+    applied: dict[int, int] = {}
+    monkeypatch.setattr(resource, "setrlimit", lambda kind, values: applied.update({kind: values[0]}))
+    monkeypatch.setattr(summary_worker.os, "getppid", lambda: 0)
+    monkeypatch.setattr("ctypes.CDLL", lambda *_args, **_kwargs: type("C", (), {"prctl": staticmethod(lambda *_a: 0)})())
+    summary_worker.limits(0, str(database))
+    assert applied[resource.RLIMIT_FSIZE] >= 5 * 1024 * 1024 + summary_worker.MAX_RUN_BYTES
+

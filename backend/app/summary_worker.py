@@ -30,7 +30,7 @@ class WorkerError(Exception):
         self.code = code
 
 
-def limits(parent_pid: int) -> None:
+def limits(parent_pid: int, db_path: str) -> None:
     """Install limits before importing native codecs, numerical or image libraries."""
     if sys.platform == "win32":
         workers.require_limits(WorkerError("summary_limits_unavailable"))
@@ -42,7 +42,8 @@ def limits(parent_pid: int) -> None:
     if ctypes.CDLL(None, use_errno=True).prctl(1, 9, 0, 0, 0) != 0 or os.getppid() != parent_pid:
         raise WorkerError("summary_limits_unavailable")
     for kind, amount in ((resource.RLIMIT_AS, 1024 ** 3), (resource.RLIMIT_CPU, 300),
-                         (resource.RLIMIT_FSIZE, MAX_RUN_BYTES), (resource.RLIMIT_CORE, 0)):
+                         (resource.RLIMIT_FSIZE, max(MAX_RUN_BYTES, workers.database_file_limit(db_path, MAX_RUN_BYTES))),
+                         (resource.RLIMIT_CORE, 0)):
         _, hard = resource.getrlimit(kind)
         bound = amount if hard == resource.RLIM_INFINITY else min(amount, hard)
         resource.setrlimit(kind, (bound, bound))
@@ -268,7 +269,7 @@ def main() -> None:
         if len(raw) > MAX_REQUEST_BYTES:
             raise WorkerError("summary_limit")
         payload = json.loads(raw)
-        limits(payload["parent_pid"])
+        limits(payload["parent_pid"], payload["db_path"])
         render(payload)
     except Exception as error:
         code = getattr(error, "code", None)
