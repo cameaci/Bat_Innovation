@@ -18,9 +18,16 @@ from collections import deque
 import numpy as np
 from scipy import ndimage
 
-PARAMETERS = {"version": "enhance-v1", "samples": 9, "samples_per_second": 4, "sigma_px": 1.5, "floor": 0.5,
+PARAMETERS = {"version": "enhance-v2", "samples": 9, "samples_per_second": 4, "sigma_px": 1.5, "floor": 0.5,
               "start_z": 5.0, "full_z": 12.0, "disturbed_fraction": 0.03, "max_gain_change": 10.0, "half_life_s": 1.0, "scene_level": 0.35,
               "warm_rgb": [255, 150, 30], "cold_rgb": [60, 170, 255]}
+
+
+def _median(stack: np.ndarray) -> np.ndarray:
+    """Median along the first axis of a few samples: sorting nine values per pixel is faster than a partition."""
+    ordered = np.sort(stack, axis=0)
+    middle = len(stack) // 2
+    return ordered[middle] if len(stack) % 2 else (ordered[middle - 1] + ordered[middle]) / 2
 
 
 class Enhancer:
@@ -36,12 +43,17 @@ class Enhancer:
 
     def _model(self) -> None:
         stack = np.stack(self.samples)
-        self.background = np.median(stack, axis=0)
+        self.background = _median(stack)
         if len(self.samples) >= 3:
-            smoothed = ndimage.gaussian_filter(stack, (0, PARAMETERS["sigma_px"], PARAMETERS["sigma_px"]))
-            deviation = np.median(np.abs(smoothed - np.median(smoothed, axis=0)), axis=0) * 1.4826
-            steps = np.median(np.abs(np.diff(smoothed, axis=0)), axis=0) * 1.4826 / np.sqrt(2)
-            self.noise = np.maximum(ndimage.maximum_filter(np.minimum(deviation, steps), size=5), PARAMETERS["floor"])
+            # The noise map is coarse (the largest nearby value), so it is estimated on every second pixel: the same
+            # map at a quarter of the cost, scaled back to the frame.
+            rows, columns = stack.shape[1:]
+            half = stack[:, ::2, ::2]
+            smoothed = ndimage.gaussian_filter(half, (0, PARAMETERS["sigma_px"] / 2, PARAMETERS["sigma_px"] / 2))
+            deviation = _median(np.abs(smoothed - _median(smoothed))) * 1.4826
+            steps = _median(np.abs(np.diff(smoothed, axis=0))) * 1.4826 / np.sqrt(2)
+            coarse = ndimage.maximum_filter(np.minimum(deviation, steps), size=3)
+            self.noise = np.maximum(np.repeat(np.repeat(coarse, 2, axis=0), 2, axis=1)[:rows, :columns], PARAMETERS["floor"]).astype(np.float32)
         else:
             self.noise = np.full(stack.shape[1:], 4.0 * PARAMETERS["floor"], np.float32)
 
@@ -50,7 +62,8 @@ class Enhancer:
         larger changes are left visible."""
         assert self.background is not None and self.noise is not None
         difference = image - self.background
-        quiet = np.abs(difference - np.median(difference)) < 3 * self.noise
+        # The typical offset from a regular 1-in-16 sample of pixels: the same estimate at a sixteenth of the cost.
+        quiet = np.abs(difference - float(np.median(difference[::4, ::4]))) < 3 * self.noise
         if int(quiet.sum()) < 100:
             return image
         b, d = self.background[quiet], image[quiet]
@@ -69,7 +82,7 @@ class Enhancer:
             self._model()
         self.index += 1
         assert self.background is not None and self.noise is not None
-        z = ndimage.gaussian_filter(self._compensated(image) - self.background, PARAMETERS["sigma_px"]) / self.noise
+        z = ndimage.gaussian_filter((self._compensated(image) - self.background).astype(np.float32), PARAMETERS["sigma_px"]) / self.noise
         span = PARAMETERS["full_z"] - PARAMETERS["start_z"]
         light = np.clip((z - PARAMETERS["start_z"]) / span, 0, 1)
         dark = np.clip((-z - PARAMETERS["start_z"]) / span, 0, 1)
@@ -79,8 +92,8 @@ class Enhancer:
             light = dark = np.zeros_like(z)
         self.light = light if self.light is None else np.maximum(self.light * self.decay, light)
         self.dark = dark if self.dark is None else np.maximum(self.dark * self.decay, dark)
-        scene = (image * PARAMETERS["scene_level"])[..., None]
-        out = scene * (1 - np.maximum(self.light, self.dark))[..., None]
-        out = out + self.light[..., None] * np.array(PARAMETERS["warm_rgb"], np.float32)
-        out = out + self.dark[..., None] * np.array(PARAMETERS["cold_rgb"], np.float32)
-        return np.clip(out, 0, 255).astype(np.uint8)
+        scene = image * PARAMETERS["scene_level"] * (1 - np.maximum(self.light, self.dark))
+        out = np.empty((*image.shape, 3), np.uint8)
+        for channel, (warm, cold) in enumerate(zip(PARAMETERS["warm_rgb"], PARAMETERS["cold_rgb"])):
+            out[..., channel] = np.clip(scene + self.light * np.float32(warm) + self.dark * np.float32(cold), 0, 255)
+        return out
