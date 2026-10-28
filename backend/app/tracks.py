@@ -48,7 +48,8 @@ CONSTANTS = {"analysis_max": [640, 360], "background_samples": 9, "samples_per_s
              "confirm_hits": 3, "tentative_misses": 2, "join_max_area_ratio": 3, "join_min_cos": 0.5,
              "size_range_targets": [0.25, 4], "coherent_min_points": 5, "coherent_max_gap_ratio": 0.3, "coherent_max_size_cv": 0.6,
              "repeat_level": 2.0, "noise_floor": 1.0, "filter_sigma_targets": 0.25, "weak_ratio": 0.75,
-             "gain_step_noise": 2.0, "max_gain_change": 10.0, "size_level": 0.5, "static_seconds": 2.0, "flow_grid": [8, 6], "flow_memory": 0.9}
+             "gain_step_noise": 2.0, "max_gain_change": 10.0, "size_level": 0.5, "static_seconds": 2.0, "flow_grid": [8, 6], "flow_memory": 0.9,
+             "cells_per_target": 8}
 MAX_EVENT_SECONDS = 600
 
 
@@ -186,7 +187,9 @@ class Analyzer:
         self.width, self.height, self.fps = width, height, fps
         target = float(s["target_px"])
         coarse = max(ceil(width / CONSTANTS["analysis_max"][0]), ceil(height / CONSTANTS["analysis_max"][1]))
-        self.step = max(1, min(coarse, floor(target / 3)))
+        # A target spans at least three cells, and need not span more than about eight: finer cells only cost time
+        # (large targets close to the camera otherwise mean a wide filter on a fine grid).
+        self.step = max(1, min(coarse, floor(target / 3)), floor(target / CONSTANTS["cells_per_target"]))
         self.grid = (height // self.step, width // self.step)
         self.mask = self._mask()
         self.mask_cells = int(self.mask.sum())
@@ -465,11 +468,14 @@ class Analyzer:
             if label == 0:
                 # The peak of the smoothed contrast lies beside the target's own pixels: take the nearest component.
                 hits = np.argwhere(labels > 0)
-                if len(hits) == 0:
+                distances = np.hypot(hits[:, 0] - (y - y0), hits[:, 1] - (x - x0))
+                if len(hits) == 0 or distances.min() > radius:
                     continue
-                nearest = hits[np.argmin(np.hypot(hits[:, 0] - (y - y0), hits[:, 1] - (x - x0)))]
+                nearest = hits[np.argmin(distances)]
                 label = labels[nearest[0], nearest[1]]
             region = labels == label
+            if not (region & above).any():
+                continue  # only fill from the closing, no pixels of its own: not a target
             claimed[y0:y1, x0:x1] |= ndimage.binary_dilation(region, closing)
             claimed[max(0, y - radius):y + radius + 1, max(0, x - radius):x + radius + 1] = True
             body = region & above

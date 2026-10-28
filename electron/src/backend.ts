@@ -33,7 +33,7 @@ const polygonList = (value: unknown, max: number) => Array.isArray(value) && val
 const between = (value: unknown, low: number, high: number) => typeof value === 'number' && Number.isFinite(value) && value >= low && value <= high;
 export function isTrackingSettings(input: unknown): input is TrackingSettings {
   return object(input) && exactKeys(input, ['target_px', 'polarity', 'threshold', 'target_speed', 'activity', 'detection_area', 'exclusions', 'max_gap_s', 'min_track_s', 'join_gap_s', 'min_displacement_targets']) &&
-    between(input.target_px, 3, 80) && ['both', 'light', 'dark'].includes(String(input.polarity)) && between(input.threshold, 1.5, 12) && between(input.target_speed, 1, 12) &&
+    between(input.target_px, 3, 240) && ['both', 'light', 'dark'].includes(String(input.polarity)) && between(input.threshold, 1.5, 12) && between(input.target_speed, 1, 12) &&
     ['sparse', 'normal', 'dense'].includes(String(input.activity)) && polygonList(input.detection_area, 4) && polygonList(input.exclusions, 8) &&
     between(input.max_gap_s, 0.04, 2) && between(input.min_track_s, 0, 5) && between(input.join_gap_s, 0, 5) && between(input.min_displacement_targets, 0, 20);
 }

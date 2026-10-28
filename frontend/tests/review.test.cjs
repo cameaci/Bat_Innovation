@@ -192,6 +192,13 @@ test('setup guide measures a clicked detection and warns about badly placed gate
   assert.deepEqual(measured, { area: 78, contrast: 14.2, polarity: 'light', targetPx: 10 });
   assert.equal(guide.measureAt(result, 440, [104, 106], 12), null, 'only the displayed frame is measured');
   assert.equal(guide.measureAt(result, 400, [600, 600], 12), null, 'a click far from any detection measures nothing');
+  // A bat much larger than the set size is found as several pieces: one click measures the group, not one piece.
+  const pieces = { detections: [{ pts: '400', rejected: [], accepted: [[1000, 500, 1030, 530], [1040, 520, 1070, 560], [1080, 540, 1120, 600], [1500, 100, 1510, 110]],
+    measures: [[700, 9, 1], [900, 8, 1], [1500, 10, 1], [80, 9, 1]] }] };
+  const grouped = guide.measureAt(pieces, 400, [1015, 515], 12);
+  assert.equal(grouped.pieces, 3, 'the far piece is another target');
+  assert.equal(grouped.targetPx, Math.round(Math.sqrt(120 * 100)));
+  assert.equal(guide.measureAt({ detections: [{ ...pieces.detections[0], accepted: [[0, 0, 600, 600]], measures: [[300000, 9, 1]] }] }, 400, [300, 300], 12).targetPx, guide.MAX_TARGET_PX);
   const settings = { target_px: 12, polarity: 'both', threshold: 7, target_speed: 4 };
   assert.deepEqual(guide.applyMeasured(settings, measured), { ...settings, target_px: 10, polarity: 'light', threshold: 7 });
   assert.equal(guide.applyMeasured(settings, { ...measured, contrast: 6.4 }).threshold, 3);

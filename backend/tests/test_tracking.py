@@ -394,3 +394,26 @@ def test_test_run_detections_carry_measures_and_noise_clusters_become_suggestion
     assert suggestions, "The blinking lamp is proposed for exclusion"
     (x0, y0), _, (x1, y1), _ = suggestions[0]["points"]
     assert x0 <= 100 and x1 >= 106 and y0 <= 10 and y1 >= 16 and y1 < 60, "The suggestion covers the lamp, not the moving target"
+
+
+def test_a_faint_peak_beside_a_bright_target_is_measured_or_skipped_never_a_crash() -> None:
+    """The pixel pattern recorded where a dense real thermal swarm stopped tracks-v3: a faint peak (36) within reach of a
+    brighter bat (167) has no pixels above half the brighter peak, and the closing leaves a lone fill pixel beside it.
+    That fill pixel must not be taken as the target (it has no pixels of its own)."""
+    analyzer = tracks.Analyzer(25, 25, 30.0, 1 / 30, {"target_px": 12})
+    assert analyzer.step == 1 and analyzer.grid == (25, 25)
+    raw = np.zeros((25, 25), dtype=np.float32)
+    for y, x in ((10, 13), (11, 13), (13, 8), (13, 9), (14, 8), (14, 9), (15, 2), (16, 1), (16, 2), (17, 1), (17, 2), (17, 3)):
+        raw[y, x] = 167.0
+    raw[12, 12] = 36.0
+    score = np.zeros((25, 25), dtype=np.float32)
+    score[12, 12] = 20.0
+    analyzer.signed = raw
+    assert analyzer._detect(score, raw, 0) == []
+
+
+def test_large_targets_are_analysed_on_a_coarser_grid() -> None:
+    """A bat close to the lens can be 140 px across in 1080p: about eight cells per target is enough to measure it."""
+    assert tracks.Analyzer(1920, 1080, 30.0, 1 / 30, {"target_px": 12}).step == 3
+    assert tracks.Analyzer(1920, 1080, 30.0, 1 / 30, {"target_px": 140}).step == 17
+    assert tracks.Analyzer(320, 240, 30.0, 1 / 30, {"target_px": 12}).step == 1

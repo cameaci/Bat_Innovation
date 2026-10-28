@@ -21,7 +21,9 @@ export const ROOST_PRESETS: { key: string; label: string; settings: Partial<Trac
     tip: 'Choose a section where bats do not overlap much; exclude swirling areas that do not cross the gate.' },
 ];
 
-export interface Measured { targetPx: number; contrast: number; polarity: 'light' | 'dark'; area: number }
+/** The largest target size the tracker accepts (a bat close to a 1080p trail camera is 100-200 px across). */
+export const MAX_TARGET_PX = 240;
+export interface Measured { targetPx: number; contrast: number; polarity: 'light' | 'dark'; area: number; pieces?: number }
 
 /** The test-run detection under (or nearest) a click on the displayed frame, as suggested settings. */
 export function measureAt(result: TrackingTestResult | null | undefined, pts: number, point: Point, targetPx: number): Measured | null {
@@ -33,8 +35,23 @@ export function measureAt(result: TrackingTestResult | null | undefined, pts: nu
     if (distance <= Math.max(2 * targetPx, (x1 - x0) + (y1 - y0)) && (!best || distance < best.distance)) best = { index, distance };
   });
   if (!best) return null;
-  const [area, contrast, sign] = item.measures[(best as { index: number }).index]!;
-  return { area, contrast, polarity: sign > 0 ? 'light' : 'dark', targetPx: Math.min(80, Math.max(3, Math.round(2 * Math.sqrt(area / Math.PI)))) };
+  const index = (best as { index: number }).index;
+  const [area, contrast, sign] = item.measures[index]!;
+  // With a target size much smaller than the bat, one bat is found as several pieces (wings, body, blur): the pieces
+  // around the click are grouped, so a single click measures the whole bat rather than one piece.
+  let union = [...item.accepted[index]!] as [number, number, number, number];
+  const used = new Set([index]);
+  for (let grown = true; grown;) {
+    grown = false;
+    const gap = Math.max(2 * targetPx, 0.5 * Math.max(union[2] - union[0], union[3] - union[1]));
+    item.accepted.forEach(([x0, y0, x1, y1], other) => {
+      if (used.has(other) || x0 > union[2] + gap || x1 < union[0] - gap || y0 > union[3] + gap || y1 < union[1] - gap) return;
+      union = [Math.min(union[0], x0), Math.min(union[1], y0), Math.max(union[2], x1), Math.max(union[3], y1)];
+      used.add(other); grown = true;
+    });
+  }
+  const size = used.size > 1 ? Math.sqrt((union[2] - union[0]) * (union[3] - union[1])) : 2 * Math.sqrt(area / Math.PI);
+  return { area, contrast, polarity: sign > 0 ? 'light' : 'dark', targetPx: Math.min(MAX_TARGET_PX, Math.max(3, Math.round(size))), ...(used.size > 1 ? { pieces: used.size } : {}) };
 }
 
 /** Settings from a measured target: its size, its polarity, and a threshold at half its contrast (never above 7). */

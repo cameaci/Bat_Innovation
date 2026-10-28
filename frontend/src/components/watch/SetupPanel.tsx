@@ -3,7 +3,7 @@ import { FlaskConical, Loader2, Play, Ruler, Trash2, X } from 'lucide-react';
 import type { TrackingSettings, TrackingTest } from '../../../../electron/src/contracts';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
-import { ROOST_PRESETS, testWarnings, type Measured } from '../../lib/setupGuide';
+import { MAX_TARGET_PX, ROOST_PRESETS, testWarnings, type Measured } from '../../lib/setupGuide';
 
 type Point = [number, number];
 export type DrawKind = 'area' | 'exclusion' | 'select' | null;
@@ -59,10 +59,10 @@ export function SetupPanel({ settings, onChange, drawing, draft, onDraw, onFinis
       {tip && <span className="block text-[11px] text-amber-200" aria-label="Gate tip">{tip}</span>}
     </label>
     {measured && <div role="status" aria-label="Measured target" className="space-y-1 rounded border border-sky-500/40 bg-sky-500/10 p-2 text-xs">
-      <p><Ruler className="mr-1 inline h-3 w-3" />Clicked target: about {measured.targetPx} px across, {measured.contrast} x local noise, {measured.polarity === 'light' ? 'lighter' : 'darker'} than the scene.</p>
+      <p><Ruler className="mr-1 inline h-3 w-3" />Clicked target: about {measured.targetPx} px across{measured.pieces && measured.pieces > 1 ? ` (found as ${measured.pieces} pieces at the current size)` : ''}, {measured.contrast} x local noise, {measured.polarity === 'light' ? 'lighter' : 'darker'} than the scene.</p>
       <Button size="sm" className="h-7" onClick={onUseMeasured}>Use for size, polarity and threshold</Button>
     </div>}
-    <Slider id="target-size" label="Target size (px)" value={settings.target_px} min={3} max={80} onChange={value => set('target_px', value)}
+    <Slider id="target-size" label="Target size (px)" value={settings.target_px} min={3} max={MAX_TARGET_PX} onChange={value => set('target_px', value)}
       hint="Click a bat on the paused video to place the red reference circle; after a test, the click also measures it." />
     <Slider id="threshold" label="Contrast threshold (x local noise)" value={settings.threshold} min={1.5} max={12} step={0.5} onChange={value => set('threshold', value)}
       hint="How far a target must stand out from the flicker at its place. Lower finds fainter targets and more noise." />
