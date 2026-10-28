@@ -30,6 +30,8 @@ import { SampleCheckPanel, type ActiveSample } from '../components/watch/SampleC
 import { SiteTemplatePanel } from '../components/watch/SiteTemplatePanel';
 import { SurveyTimeline } from '../components/watch/SurveyTimeline';
 import { EmergenceProfile } from '../components/watch/EmergenceProfile';
+import { AudioLanes } from '../components/watch/AudioLanes';
+import { tracksDuringCalls, type Call } from '../lib/calls';
 import { useCoverage, WATCH_MAX_RATE } from '../components/watch/useCoverage';
 import { WatchReviewPanel, windowStates } from '../components/watch/WatchReviewPanel';
 import { addPoint, type GateDraft } from '../components/GatePanel';
@@ -436,6 +438,9 @@ export function WatchPage() {
 
   const rows = useMemo(() => trackRows(candidates, labels, counts?.crossings ?? [], counts?.gate.entry_direction ?? null, segments),
     [candidates, labels, counts, segments]);
+  // Call marks per recording, from the audio lanes; a track alive during any call is flagged in the table.
+  const [calls, setCalls] = useState<Record<string, Call[]>>({});
+  const withCalls = useMemo(() => tracksDuringCalls(rows, Object.values(calls).flat()), [rows, calls]);
   async function saveLabel(input: { track_ids: string[]; category: string; species: string; comment: string }): Promise<string | null> {
     const api = getAPI();
     if (!api || !trackingRun) return 'No tracking run.';
@@ -624,6 +629,9 @@ export function WatchPage() {
           {trackingRun && noiseHidden > 0 && !showNoise && <p className="text-[11px] text-slate-500" aria-label="Hidden noise">{noiseHidden} noise tracks hidden here; they never count.</p>}
           <SurveyTimeline segments={segments} windows={survey.run?.windows ?? []} windowCounts={survey.tracking?.window_counts ?? {}}
             counts={counts} events={events} current={displayed ? { segmentID: segment.id, pts: displayed.pts } : null} onSeek={goTo} />
+          {segment && trackingRun && <AudioLanes sources={survey.audio} segment={segment}
+            tracks={rows.filter(row => row.segmentID === segment.id)} onCalls={(audioID, found) => setCalls(previous => ({ ...previous, [audioID]: found }))}
+            onSeek={pts => goTo(segment.id, String(Math.round(pts)), false, true)} />}
           {counts && segment && <EmergenceProfile counts={counts} colour={colourOf(counts.gate.id)} segments={segments} anchor={survey.media?.clock_anchor ?? null}
             sessionID={survey.session.id} actor={actor} onSeek={goTo} onChanged={() => setCountsRefresh(value => value + 1)} />}
           <p className="text-[11px] text-slate-500">Timeline: red bars tracks per window, cyan in, magenta out, amber undecided, violet crossings per minute, x camera moved, green reviewed windows, hatched gaps between videos not marked contiguous.</p>
@@ -659,7 +667,7 @@ export function WatchPage() {
             canStart={Boolean(displayed) && (survey.media?.schema_version ?? 0) >= 14} onStart={startSample} onFinish={() => void finishSample()}
             onCancel={() => setSample(null)} onGo={goTo} />}
           {panel === 'tracks' && trackingRun && <div className={cn(layout === 'split' && 'md:col-span-2')}><TracksPanel rows={rows} labels={labels} segmentID={segment?.id ?? null}
-            selected={selectedTracks} setSelected={setSelectedTracks} focused={focusedTrack}
+            selected={selectedTracks} setSelected={setSelectedTracks} focused={focusedTrack} withCalls={withCalls}
             onFocus={row => { setFocusedTrack(row.id); goTo(row.segmentID, String(row.first), false, true); }}
             actor={actor} onLabel={saveLabel} onUndo={undoLabel}
             onSelectArea={() => { if (drawing === 'select') finishShape(); else { setDrawing('select'); setDraft([]); setFlightMode('tracks'); player.current?.pause(); } }}

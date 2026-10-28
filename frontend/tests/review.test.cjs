@@ -275,3 +275,17 @@ test('the evidence report has every section, the provisional banner and escapes 
   assert.match(html, /Sunset 21:04\+01:00/);
   assert.match(html, /3 exits in minute 1 of video 1/);
 });
+
+test('call marks are placed on the anchored video and linked to the tracks alive during them', async () => {
+  const calls = await rendererModule('lib/calls');
+  const segment = { id: 'v1', metadata: { time_base: { num: '1', den: '1000' }, first_pts: '0', last_pts: '10000' } };
+  const source = { id: 'a1', anchor: { segment_id: 'v1', video_pts: '2000', audio_sample: 0 } };
+  const activity = { sample_rate: 1000, marks: [[500, 520, 20], [3000, 3010, 15], [20000, 20010, 15]] };
+  const placed = calls.callsInVideo(activity, source, segment);
+  assert.deepEqual(placed.map(call => [call.start, call.end]), [[2500, 2520], [5000, 5010]], 'audio time 0 is video 2 s; the mark past the video is left out');
+  assert.deepEqual(calls.callsInVideo(activity, { ...source, anchor: null }, segment), [], 'no anchor, no marks');
+  assert.deepEqual(calls.callsInVideo(activity, source, { ...segment, id: 'v2' }), [], 'only the anchored video');
+  const tracks = [{ id: 'during', segmentID: 'v1', first: 2400, last: 2510 }, { id: 'before', segmentID: 'v1', first: 1000, last: 2499 },
+    { id: 'after', segmentID: 'v1', first: 5011, last: 6000 }, { id: 'other video', segmentID: 'v2', first: 2400, last: 2600 }, { id: 'second', segmentID: 'v1', first: 5010, last: 5100 }];
+  assert.deepEqual([...calls.tracksDuringCalls(tracks, placed)].sort(), ['during', 'second']);
+});

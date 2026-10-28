@@ -12,7 +12,7 @@ const QUALITY_TEXT: Record<string, string> = { coherent: 'text-emerald-300', unc
  * ticking, by filter or by an area drawn on the video, and label the selection in one audited action. Labels and
  * species are reviewer entries; they never change a count.
  */
-export function TracksPanel({ rows, labels, segmentID, selected, setSelected, focused, onFocus, actor, onLabel, onUndo, onSelectArea, selectingArea }: {
+export function TracksPanel({ rows, labels, segmentID, selected, setSelected, focused, onFocus, actor, onLabel, onUndo, onSelectArea, selectingArea, withCalls = new Set() }: {
   rows: TrackRow[];
   labels: TrackLabels | null;
   segmentID: string | null;
@@ -25,6 +25,8 @@ export function TracksPanel({ rows, labels, segmentID, selected, setSelected, fo
   onUndo: (eventID: string) => Promise<string | null>;
   onSelectArea: () => void;
   selectingArea: boolean;
+  /** Tracks alive during a call mark of a synchronised recording. */
+  withCalls?: Set<string>;
 }) {
   const [filter, setFilter] = useState<TrackFilter>({ quality: 'all', label: 'all', crossed: false, video: null });
   const [sort, setSort] = useState<TrackSort>('time');
@@ -93,7 +95,7 @@ export function TracksPanel({ rows, labels, segmentID, selected, setSelected, fo
           <th className="px-1"><input type="checkbox" aria-label="Select all shown" checked={shown.length > 0 && shown.every(row => selected.has(row.id))}
             onChange={event => { const next = new Set(selected); shown.forEach(row => event.target.checked ? next.add(row.id) : next.delete(row.id)); setSelected(next); }} /></th>
           <th className="px-1">#</th><th className="px-1">Video</th><th className="px-1">Start s</th><th className="px-1">Dur s</th><th className="px-1">Pts</th>
-          <th className="px-1">Quality</th><th className="px-1">Gate</th><th className="px-1">Label</th><th className="px-1">Species</th>
+          <th className="px-1">Quality</th><th className="px-1">Gate</th><th className="px-1" title="Alive during a call mark of a synchronised recording">Call</th><th className="px-1">Label</th><th className="px-1">Species</th>
         </tr></thead>
         <tbody>
           {shown.map(row => <tr key={row.id} data-track={row.id} aria-selected={row.id === focused} onClick={() => onFocus(row)}
@@ -103,6 +105,7 @@ export function TracksPanel({ rows, labels, segmentID, selected, setSelected, fo
             <td className="px-1">{row.seconds.toFixed(1)}</td><td className="px-1">{row.points}</td>
             <td className={cn('px-1', QUALITY_TEXT[row.quality])}>{row.quality}{row.decision ? ` (${row.decision.replace('_', ' ')})` : ''}</td>
             <td className="px-1">{row.crossings.join(', ')}</td>
+            <td className="px-1 text-sky-300">{withCalls.has(row.id) ? 'call' : ''}</td>
             <td className="px-1" title={row.comment}>{row.category ? categoryName(row.category) : ''}</td>
             <td className="max-w-24 truncate px-1 italic" title={row.species}>{row.species}</td>
           </tr>)}

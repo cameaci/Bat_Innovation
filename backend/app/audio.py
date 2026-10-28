@@ -18,7 +18,7 @@ from threading import Lock
 from typing import Literal
 from uuid import UUID, uuid4
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -41,6 +41,52 @@ MESSAGES = {
     "not_retunable": "This recording is not full-spectrum (or its sample rate is too low for this tuning), so it cannot be retuned.",
     "audio_not_synchronised": "Set a sync anchor for this video before showing its audio.",
 }
+ACTIVITY_WALL_SECONDS = 1800
+# Call activity needs the ultrasonic band, so only full-spectrum recordings are analysed.
+ACTIVITY_BAND_HZ = (15_000.0, 120_000.0)
+
+
+def proposed_anchor(source: dict, segments: list[dict], clock: dict | None, utc_offset: str | None = None) -> dict:
+    """A sync anchor from the file clocks (the audio file's claimed start and the declared camera clock): unverified,
+    shown for one confirmation and never applied by itself. Returns the proposal or the reason there is none.
+
+    Detector clocks usually write local time without a zone; such a time needs the UTC offset the reviewer states."""
+    from datetime import datetime, timedelta, timezone
+
+    claimed = source["metadata"].get("file_clock")
+    if not claimed:
+        return {"proposal": None, "reason": "The audio file states no start time (no GUANO Timestamp or time in its name)."}
+    by_id = {segment["id"]: segment for segment in segments}
+    if not clock or not clock.get("provenance", "").strip() or clock.get("segment_id") not in by_id:
+        return {"proposal": None, "reason": "Declare the recording clock of a video on the Process page first."}
+    metadata = json.loads(by_id[clock["segment_id"]]["metadata_json"])
+    try:
+        video_start = datetime.fromisoformat(clock["utc"])
+        audio_start = datetime.fromisoformat(claimed["timestamp"].replace(" ", "T", 1))
+    except ValueError:
+        return {"proposal": None, "reason": f"The file time {claimed['timestamp']!r} could not be read."}
+    if clock.get("source_pts") != metadata["first_pts"] or video_start.tzinfo is None:
+        return {"proposal": None, "reason": "The declared recording clock is not bound to its video's first frame."}
+    stated_zone = audio_start.tzinfo is None
+    if stated_zone:
+        if utc_offset is None:
+            return {"proposal": None, "needs_offset": True,
+                    "reason": f"The audio file time {claimed['timestamp']} has no time zone. Enter its UTC offset (for example +01:00)."}
+        sign, hours, minutes = utc_offset[0], int(utc_offset[1:3]), int(utc_offset[4:6])
+        audio_start = audio_start.replace(tzinfo=timezone((1 if sign == "+" else -1) * timedelta(hours=hours, minutes=minutes)))
+    base = Fraction(int(metadata["time_base"]["num"]), int(metadata["time_base"]["den"]))
+    rate, frames = source["metadata"]["sample_rate"], source["metadata"]["frames"]
+    delta = Fraction(str((audio_start - video_start).total_seconds()))
+    first, last = int(metadata["first_pts"]), int(metadata["last_pts"])
+    if delta >= 0:
+        video_pts, audio_sample = first + round(delta / base), 0
+    else:
+        video_pts, audio_sample = first, round(-delta * rate)
+    if video_pts > last or audio_sample >= frames:
+        return {"proposal": None, "reason": "By the file clocks the audio and this video do not overlap."}
+    return {"proposal": {"segment_id": clock["segment_id"], "video_pts": str(video_pts), "audio_sample": audio_sample,
+                         "basis": claimed["source"], "timestamp": claimed["timestamp"], "stated_offset": utc_offset if stated_zone else None,
+                         "offset_seconds": float(delta)}, "reason": None}
 
 
 def error(code: str, status: int = 409) -> audio_store.AudioError:
@@ -129,8 +175,56 @@ class AudioService:
             self.derived[derived_id] = record
             while len(self.derived) > 8:
                 _, old = self.derived.popitem(last=False)
-                Path(old["path"]).unlink(missing_ok=True)
+                if old["path"]:
+                    Path(old["path"]).unlink(missing_ok=True)
         return {key: item for key, item in record.items() if key != "path"}
+
+    def propose(self, audio_id: str, utc_offset: str | None = None) -> dict:
+        audio_store.require_schema(self.db_path)
+        source = audio_store.get_source(self.db_path, audio_id)
+        segments = store.private_segments(self.db_path, source["session_id"])
+        return proposed_anchor(source, segments, store.clock_anchor(self.db_path, source["session_id"]), utc_offset)
+
+    def activity(self, audio_id: str, low_hz: float, high_hz: float, margin_db: float) -> dict:
+        """Call marks of the whole recording (cached per recording and parameters), in audio samples."""
+        audio_store.require_schema(self.db_path)
+        source = audio_store.get_source(self.db_path, audio_id, private=True)
+        if not source["retunable"]:
+            raise error("not_retunable")
+        key = f"activity:{audio_id}:{source['sha256']}:{low_hz}:{high_hz}:{margin_db}"
+        with self._guard:
+            if key in self.derived:
+                return self.derived[key]["value"]
+        try:
+            if media.identity_info(Path(source["source_path"])) != source["identity"]:
+                raise error("changed_source")
+        except FileNotFoundError:
+            raise error("missing_source") from None
+        if not self.lock.acquire(blocking=False):
+            raise error("audio_busy")
+        partial = self.directory / f"{uuid4()}.json.part"
+        seconds = source["metadata"]["frames"] / source["metadata"]["sample_rate"]
+        try:
+            if not workers.supported():
+                raise error("audio_limits_unavailable")
+            cpu = int(60 + seconds * 0.25)
+            status, body = workers.supervise("audio_worker", {"parent_pid": os.getpid(), "operation": "activity", "source_path": source["source_path"],
+                                             "sha256": source["sha256"], "channel": source["channel"], "sample_rate": source["metadata"]["sample_rate"],
+                                             "low_hz": low_hz, "high_hz": high_hz, "margin_db": margin_db, "output_path": str(partial), "cpu_seconds": cpu},
+                                             lambda: False, min(ACTIVITY_WALL_SECONDS, 2 * cpu), MEMORY_BYTES, cpu, MAX_REQUEST_BYTES, 64 * 1024)
+            if status != "ok" or not isinstance(body, dict):
+                raise error("audio_limit" if status == "limit" else "audio_failed")
+            if body["error"] is not None:
+                raise error(body["error"] if body["error"] in WORKER_ERRORS else "audio_failed")
+            data = json.loads(partial.read_text())
+        finally:
+            partial.unlink(missing_ok=True)
+            self.lock.release()
+        value = {"audio_id": audio_id, "sample_rate": source["metadata"]["sample_rate"], "frames": source["metadata"]["frames"],
+                 "parameters": body["value"]["parameters"], **data}
+        with self._guard:
+            self.derived[key] = {"path": "", "value": value}
+        return value
 
     def content(self, derived_id: str) -> tuple[bytes, str]:
         with self._guard:
@@ -160,6 +254,18 @@ class Anchor(BaseModel):
     note: str = Field(default="", max_length=2000)
 
 
+class AudioLabel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    label: str = Field(max_length=60)
+
+
+class Activity(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    low_hz: float = Field(default=ACTIVITY_BAND_HZ[0], ge=1_000, le=200_000)
+    high_hz: float = Field(default=ACTIVITY_BAND_HZ[1], ge=2_000, le=250_000)
+    margin_db: float = Field(default=12.0, ge=3, le=40)
+
+
 class Derive(BaseModel):
     model_config = ConfigDict(extra="forbid")
     segment_id: UUID
@@ -182,6 +288,18 @@ def install_routes(app: FastAPI, service: AudioService, authenticate) -> None:
     def anchor(audio_id: UUID, payload: Anchor) -> dict:
         return audio_store.set_anchor(service.db_path, str(audio_id), payload.actor, payload.expected_revision, str(payload.segment_id),
                                       int(payload.video_pts), payload.audio_sample, payload.note)
+
+    @app.post("/api/audio/{audio_id}/label", dependencies=[Depends(authenticate)])
+    def label(audio_id: UUID, payload: AudioLabel) -> dict:
+        return audio_store.set_label(service.db_path, str(audio_id), payload.label)
+
+    @app.get("/api/audio/{audio_id}/proposed-anchor", dependencies=[Depends(authenticate)])
+    def proposed(audio_id: UUID, utc_offset: str | None = Query(default=None, pattern=r"^[+-](0\d|1[0-4]):[0-5]\d$")) -> dict:
+        return service.propose(str(audio_id), utc_offset)
+
+    @app.post("/api/audio/{audio_id}/activity", dependencies=[Depends(authenticate)])
+    def activity(audio_id: UUID, payload: Activity) -> dict:
+        return service.activity(str(audio_id), payload.low_hz, payload.high_hz, payload.margin_db)
 
     @app.post("/api/audio/{audio_id}/derive", dependencies=[Depends(authenticate)])
     def derive(audio_id: UUID, payload: Derive) -> dict:

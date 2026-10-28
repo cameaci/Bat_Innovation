@@ -63,6 +63,30 @@ def upgrade(db_path: Path) -> None:
         connection.execute(f"PRAGMA user_version={store.AUDIO_SCHEMA_VERSION}")
 
 
+def upgrade_label(db_path: Path) -> None:
+    """Explicit v19 -> v20 transition: each recording gets a label such as "detector at the roost" (Phase 3 X9)."""
+    if not db_path.is_file():
+        raise store.DatabaseSchemaError("Audio label upgrade requires an existing version 19 database")
+    with closing(store.connect(db_path)) as connection, connection:
+        connection.execute("BEGIN IMMEDIATE")
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
+        if version >= store.AUDIO_LABEL_SCHEMA_VERSION:
+            return
+        if version != store.RENDER_SCHEMA_VERSION:
+            raise store.DatabaseSchemaError("Audio label upgrade requires database schema version 19")
+        connection.execute("ALTER TABLE audio_source ADD COLUMN label TEXT NOT NULL DEFAULT ''")
+        connection.execute(f"PRAGMA user_version={store.AUDIO_LABEL_SCHEMA_VERSION}")
+
+
+def set_label(db_path: Path, audio_id: str, label: str) -> dict:
+    if store.schema_version(db_path) < store.AUDIO_LABEL_SCHEMA_VERSION:
+        raise AudioError("audio_upgrade_required", "Upgrade storage before labelling recordings.")
+    get_source(db_path, audio_id)
+    with closing(store.connect(db_path)) as connection, connection:
+        connection.execute("UPDATE audio_source SET label=? WHERE id=?", (" ".join(label.split()), audio_id))
+    return get_source(db_path, audio_id)
+
+
 def require_schema(db_path: Path) -> None:
     if store.schema_version(db_path) < store.AUDIO_SCHEMA_VERSION:
         raise AudioError("audio_upgrade_required", "Upgrade storage before adding audio.")
@@ -80,7 +104,9 @@ def add_source(db_path: Path, session_id: str, path: Path, inspected: dict, sour
             raise AudioError("audio_duplicate", "This recording is already added.")
         audio_id = str(uuid4())
         metadata = {key: inspected[key] for key in ("sample_rate", "channels", "frames", "codec", "filename")}
-        connection.execute("INSERT INTO audio_source VALUES (?,?,?,?,?,?,?,?,?)",
+        metadata["file_clock"] = inspected.get("file_clock")
+        connection.execute("""INSERT INTO audio_source (id, session_id, source_path, sha256, identity_json, metadata_json, source_mode, channel,
+            created_at_utc) VALUES (?,?,?,?,?,?,?,?,?)""",
                            (audio_id, session_id, str(path), inspected["sha256"], json.dumps(inspected["identity"]),
                             json.dumps(metadata), source_mode, channel, _now()))
     return get_source(db_path, audio_id)
@@ -89,7 +115,7 @@ def add_source(db_path: Path, session_id: str, path: Path, inspected: dict, sour
 def _public(row, anchor) -> dict:
     return {"id": row["id"], "session_id": row["session_id"], "metadata": json.loads(row["metadata_json"]), "sha256": row["sha256"],
             "source_mode": row["source_mode"], "channel": row["channel"], "retunable": row["source_mode"] == "full_spectrum",
-            "anchor": anchor}
+            "label": row["label"] if "label" in row.keys() else "", "anchor": anchor}
 
 
 def _anchor(connection, audio_id: str) -> dict | None:

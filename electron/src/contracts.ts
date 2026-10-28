@@ -231,8 +231,22 @@ export interface TrackLabelInput { actor: string; track_ids: string[]; category:
 export type AudioSourceMode = 'full_spectrum' | 'heterodyne' | 'frequency_division' | 'time_expansion' | 'unknown';
 export interface AudioSource {
   id: string; session_id: string; sha256: string; source_mode: AudioSourceMode; channel: number; retunable: boolean;
-  metadata: { sample_rate: number; channels: number; frames: number; codec: string; filename: string };
+  metadata: { sample_rate: number; channels: number; frames: number; codec: string; filename: string;
+    /** The start time the file claims (GUANO Timestamp or a time in its name), as written and unverified. */
+    file_clock?: { timestamp: string; source: 'guano' | 'filename' } | null };
+  /** A reviewer's label such as "detector at the roost" (storage v20). */
+  label?: string;
   anchor: { revision: number; actor: string; segment_id: string; video_pts: string; audio_sample: number; note: string; utc: string } | null;
+}
+/** A sync anchor proposed from file clocks: unverified until a person confirms it as an ordinary anchor. */
+export interface AnchorProposal {
+  proposal: { segment_id: string; video_pts: string; audio_sample: number; basis: 'guano' | 'filename'; timestamp: string; stated_offset: string | null; offset_seconds: number } | null;
+  reason: string | null; needs_offset?: boolean;
+}
+/** Call marks [start sample, end sample, peak dB above the floor] and band level above the floor per envelope step. */
+export interface CallActivity {
+  audio_id: string; sample_rate: number; frames: number; parameters: Record<string, unknown>;
+  marks: [number, number, number][]; envelope: number[]; envelope_samples: number;
 }
 export interface AudioAnchorInput { actor: string; expected_revision: number; segment_id: string; video_pts: string; audio_sample: number; note: string }
 export interface AudioDeriveInput { segment_id: string; start_pts: string; seconds: number; kind: 'spectrogram' | 'heterodyne'; tune_hz: number | null }
@@ -599,6 +613,9 @@ export interface BatAPI {
   listAudio(sessionID: string): Promise<ApiResult<AudioSource[]>>;
   chooseAudio(sessionID: string, sourceMode: AudioSourceMode, channel: number): Promise<ApiResult<AudioSource[] | null>>;
   setAudioAnchor(audioID: string, input: AudioAnchorInput): Promise<ApiResult<AudioSource>>;
+  setAudioLabel(audioID: string, label: string): Promise<ApiResult<AudioSource>>;
+  proposeAnchor(audioID: string, utcOffset: string | null): Promise<ApiResult<AnchorProposal>>;
+  callActivity(audioID: string): Promise<ApiResult<CallActivity>>;
   deriveAudio(audioID: string, input: AudioDeriveInput): Promise<ApiResult<AudioDerived>>;
   audioContent(derivedID: string, kind: 'spectrogram' | 'heterodyne'): Promise<ApiResult<{ bytes: Uint8Array }>>;
   decideCandidate(runID: string, trackID: string, input: CandidateDecisionInput): Promise<ApiResult<Candidate>>;

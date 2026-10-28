@@ -5,7 +5,7 @@ import { copyFile, rename, rm } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, isGateChange, isCountReviewInput, isCountQAInput, isSampleCheckInput, isTrackLabelInput, isSunsetInput, isRenderInput, isNewTemplateInput, isApplyTemplateInput, isCandidateDecision, isAudioMode, isAudioAnchor, isAudioDerive, isTrackingSettings, isTrackingTestInput, isReconfirmInput, isWatchedInput, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
+import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, isGateChange, isCountReviewInput, isCountQAInput, isSampleCheckInput, isTrackLabelInput, isSunsetInput, isRenderInput, UTC_OFFSET, isNewTemplateInput, isApplyTemplateInput, isCandidateDecision, isAudioMode, isAudioAnchor, isAudioDerive, isTrackingSettings, isTrackingTestInput, isReconfirmInput, isWatchedInput, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
 import { ExportSaver } from './export_saver';
 import type { NewSession } from './contracts';
 
@@ -234,6 +234,9 @@ async function open(): Promise<void> {
     catch { return { ok: false, error: { code: 'template_write_failed', message: 'The template file could not be written there.' } }; }
     return { ok: true, value: template.value.name };
   });
+  handle('bat:set-audio-label', 2, ([id, label]) => isUUID(id) && typeof label === 'string' && label.length <= 60 ? backend.setAudioLabel(id, label) : invalid('Use a label of up to 60 characters.'));
+  handle('bat:propose-anchor', 2, ([id, offset]) => isUUID(id) && (offset === null || (typeof offset === 'string' && UTC_OFFSET.test(offset))) ? backend.proposeAnchor(id, offset) : invalid('Enter the UTC offset as +01:00.'));
+  handle('bat:call-activity', 1, ([id]) => isUUID(id) ? backend.callActivity(id) : invalid());
   handle('bat:list-renders', 1, ([session]) => isUUID(session) ? backend.listRenders(session) : invalid());
   handle('bat:start-render', 1, ([input]) => isRenderInput(input) ? backend.startRender(input) : invalid('Choose a video and a completed tracking run.'));
   handle('bat:cancel-render', 1, ([id]) => isUUID(id) ? backend.cancelRender(id) : invalid());

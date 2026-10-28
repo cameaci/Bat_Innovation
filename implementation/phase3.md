@@ -816,5 +816,5 @@ Separate from the 22/27 expansion tracker and the 7/7 Phase 2 tracker. Each box 
 - [x] X7: multiple gates at once, polyline gate, emergence profile and typed sunset (schema v18).
 - [x] X8: overlay and highlights video (schema v19).
 - [x] X8: PDF evidence report with inline figures.
-- [ ] X9: several audio sources, proposed sync, call activity (schema v20).
+- [x] X9: labelled recordings, sync proposed from file clocks, call activity and track links (schema v20).
 - [ ] X10: Windows and real-footage validation (owner).

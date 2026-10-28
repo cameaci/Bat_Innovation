@@ -31,6 +31,9 @@ def generate_tracking_media(directory: Path) -> dict[str, Path]:
     encode_frames(result["quiet"], scenario("noise"), [index * 40 for index in range(20)])
     from backend.tests.test_audio import tone
     result["tone_wav"] = tone(directory / "detector-45khz.wav")
+    from backend.tests.test_calls import wav
+
+    result["call_wav"] = wav(directory / "detector-calls.wav", seconds=1.0, calls=(0.2, 0.5), guano="GUANO|Version: 1.0\nTimestamp: 2026-08-10T21:00:00+01:00\n")
     return result
 
 

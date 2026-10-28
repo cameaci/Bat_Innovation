@@ -8,7 +8,7 @@ import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ApiResult, Health, ImportJob, MediaSession, NewSession, PreviewJob, PreviewRequest, RecordingSession, SaveMedia, SummaryRequest, SummaryRun, SummaryDetail, ReviewChange, WindowReview, ReviewHistory } from './contracts';
-import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, PlaybackProof, WatchedInput, FlightMap, ReconfirmInput, PlaybackFrames, PlaybackStatus, SceneEvent, TrackingRun, TrackingSettings, TrackingTest, TrackingTestInput, TrackPage, Gate, GateChange, GateValue, GateCounts, CountReviewInput, CountQAInput, SampleCheck, SampleCheckInput, TrackLabels, TrackLabelInput, Sunset, SunsetInput, RenderJob, RenderInput, SiteTemplate, NewTemplateInput, ApplyTemplateInput, Candidate, CandidateDecisionInput, AudioSource, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, AudioDerived } from './contracts';
+import type { ExportJob, ExportKind, ExportFile, QAChange, WindowQA, QAHistory, Modality, PlaybackProof, WatchedInput, FlightMap, ReconfirmInput, PlaybackFrames, PlaybackStatus, SceneEvent, TrackingRun, TrackingSettings, TrackingTest, TrackingTestInput, TrackPage, Gate, GateChange, GateValue, GateCounts, CountReviewInput, CountQAInput, SampleCheck, SampleCheckInput, TrackLabels, TrackLabelInput, Sunset, SunsetInput, RenderJob, RenderInput, AnchorProposal, CallActivity, SiteTemplate, NewTemplateInput, ApplyTemplateInput, Candidate, CandidateDecisionInput, AudioSource, AudioSourceMode, AudioAnchorInput, AudioDeriveInput, AudioDerived } from './contracts';
 
 export const isAudioMode = (value: unknown): value is AudioSourceMode =>
   ['full_spectrum', 'heterodyne', 'frequency_division', 'time_expansion', 'unknown'].includes(String(value));
@@ -24,6 +24,7 @@ export function isAudioDerive(input: unknown): input is AudioDeriveInput {
 }
 
 const within = (input: Record<string, unknown>, keys: string[]) => Object.keys(input).every(key => keys.includes(key));
+export const UTC_OFFSET = /^[+-](0\d|1[0-4]):[0-5]\d$/;
 const text = (value: unknown, max: number, required = true) => typeof value === 'string' && value.length <= max && (!required || value.trim().length > 0);
 const count = (value: unknown, max: number) => typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= max;
 const polygonList = (value: unknown, max: number) => Array.isArray(value) && value.length <= max && value.every(polygon =>
@@ -339,7 +340,7 @@ function mediaFailure(code: unknown) {
 type ApiRoute = '/api/exports' | `/api/exports/${string}` | `/api/exports/${string}/cancel` | '/api/qa/upgrade' | `/api/summary-windows/${string}/qa` | `/api/summary-windows/${string}/qa-actions` | `/api/summary-windows/${string}/qa-history?after_revision=${number}` | '/api/reviews/upgrade' | `/api/summary-windows/${string}/review` | `/api/summary-windows/${string}/review-actions` | `/api/summary-windows/${string}/review-history?after_revision=${number}` | '/api/health' | '/api/sessions' | '/api/media/upgrade' | '/api/media/import' |
   `/api/sessions/${string}/media` | `/api/media/import/${string}` | `/api/media/import/${string}/cancel` |
   '/api/summaries/upgrade' | '/api/summaries' | `/api/summaries/${string}` | `/api/summaries/${string}/cancel` | `/api/sessions/${string}/summary-runs` |
-  '/api/renders' | `/api/renders?session_id=${string}` | `/api/renders/${string}` | '/api/storage/upgrade' | '/api/site-templates' | '/api/site-templates/import' | `/api/site-templates/${string}` | '/api/reviews/watched' | '/api/tracking-tests' | `/api/tracking-tests/${string}` | '/api/proxy' | `/api/proxy?session_id=${string}` | '/api/proxy/cancel' | `/api/proxy/${string}/frames` | `/api/sessions/${string}/audio` | `/api/audio/${string}` | `/api/sessions/${string}/gates` | `/api/sessions/${string}/sunset` | `/api/sessions/${string}/gates/${string}` | '/api/tracking' | `/api/tracking/${string}` | `/api/summaries/${string}/tracking` | '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
+  '/api/renders' | `/api/renders?session_id=${string}` | `/api/renders/${string}` | `/api/audio/${string}/proposed-anchor?utc_offset=${string}` | '/api/storage/upgrade' | '/api/site-templates' | '/api/site-templates/import' | `/api/site-templates/${string}` | '/api/reviews/watched' | '/api/tracking-tests' | `/api/tracking-tests/${string}` | '/api/proxy' | `/api/proxy?session_id=${string}` | '/api/proxy/cancel' | `/api/proxy/${string}/frames` | `/api/sessions/${string}/audio` | `/api/audio/${string}` | `/api/sessions/${string}/gates` | `/api/sessions/${string}/sunset` | `/api/sessions/${string}/gates/${string}` | '/api/tracking' | `/api/tracking/${string}` | `/api/summaries/${string}/tracking` | '/api/media/preview' | `/api/media/preview/${string}` | `/api/media/preview/${string}/cancel`;
 
 /** Read only known, redacted startup codes from the Python process. */
 function safeStartupFailure(output: string): string | undefined {
@@ -530,6 +531,14 @@ export class BackendClient {
     return isUUID(sessionID) && isAudioMode(sourceMode) && count(channel, 7) && paths.length > 0 && paths.every(path => typeof path === 'string' && isAbsolute(path))
       ? this.call(`/api/sessions/${sessionID}/audio`, 'POST', { paths, source_mode: sourceMode, channel }) : Promise.resolve(invalid());
   }
+  setAudioLabel(audioID: string, label: string): Promise<ApiResult<AudioSource>> {
+    return isUUID(audioID) && text(label, 60, false) ? this.call(`/api/audio/${audioID}/label`, 'POST', { label }) : Promise.resolve(invalid());
+  }
+  proposeAnchor(audioID: string, utcOffset: string | null): Promise<ApiResult<AnchorProposal>> {
+    if (!isUUID(audioID) || (utcOffset !== null && !UTC_OFFSET.test(utcOffset))) return Promise.resolve(invalid());
+    return this.call(utcOffset === null ? `/api/audio/${audioID}/proposed-anchor` : `/api/audio/${audioID}/proposed-anchor?utc_offset=${encodeURIComponent(utcOffset)}`);
+  }
+  callActivity(audioID: string): Promise<ApiResult<CallActivity>> { return isUUID(audioID) ? this.call(`/api/audio/${audioID}/activity`, 'POST', {}) : Promise.resolve(invalid()); }
   setAudioAnchor(audioID: string, input: AudioAnchorInput): Promise<ApiResult<AudioSource>> {
     return isUUID(audioID) && isAudioAnchor(input) ? this.call(`/api/audio/${audioID}/anchor`, 'POST', input) : Promise.resolve(invalid());
   }
@@ -875,6 +884,9 @@ export class BackendRuntime {
   listAudio(sessionID: string): Promise<ApiResult<AudioSource[]>> { return this.ready(client => client.listAudio(sessionID)); }
   addSelectedAudio(sessionID: string, paths: string[], sourceMode: AudioSourceMode, channel: number): Promise<ApiResult<AudioSource[]>> { return this.ready(client => client.addSelectedAudio(sessionID, paths, sourceMode, channel)); }
   setAudioAnchor(audioID: string, input: AudioAnchorInput): Promise<ApiResult<AudioSource>> { return this.ready(client => client.setAudioAnchor(audioID, input)); }
+  setAudioLabel(audioID: string, label: string): Promise<ApiResult<AudioSource>> { return this.ready(client => client.setAudioLabel(audioID, label)); }
+  proposeAnchor(audioID: string, utcOffset: string | null): Promise<ApiResult<AnchorProposal>> { return this.ready(client => client.proposeAnchor(audioID, utcOffset)); }
+  callActivity(audioID: string): Promise<ApiResult<CallActivity>> { return this.ready(client => client.callActivity(audioID)); }
   deriveAudio(audioID: string, input: AudioDeriveInput): Promise<ApiResult<AudioDerived>> { return this.ready(client => client.deriveAudio(audioID, input)); }
   audioContent(derivedID: string, kind: 'spectrogram' | 'heterodyne'): Promise<ApiResult<{ bytes: Uint8Array }>> { return this.ready(client => client.audioContent(derivedID, kind)); }
   decideCandidate(runID: string, trackID: string, input: CandidateDecisionInput): Promise<ApiResult<Candidate>> { return this.ready(client => client.decideCandidate(runID, trackID, input)); }
