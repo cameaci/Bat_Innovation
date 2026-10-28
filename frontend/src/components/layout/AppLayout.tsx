@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type React from 'react';
-import { Outlet, useParams } from 'react-router-dom';
+import { Outlet, useLocation, useParams } from 'react-router-dom';
 import { DatabaseZap } from 'lucide-react';
 import type { RecordingSession } from '../../../../electron/src/contracts';
 import { getAPI } from '../../api';
@@ -43,13 +43,21 @@ export function AppLayout() {
     {!session && sidebar(false)}
     <main className={cn('min-w-0 flex-1 bg-gradient-to-br from-slate-50 to-slate-100 transition-[margin] duration-200', collapsed ? 'ml-[72px]' : 'ml-64')}>
       {error && <div className="p-8"><Messages error={error} /></div>}
-      {session && <SurveyProvider key={session.id} session={session}><SurveySidebar render={sidebar} /><StorageGate /><Outlet /></SurveyProvider>}
+      {session && <SurveyProvider key={session.id} session={session}><SurveySidebar render={sidebar} /><NoticeReset /><StorageGate /><Outlet /></SurveyProvider>}
     </main>
   </div>;
 }
 
 function SurveySidebar({ render }: { render: (locked: boolean) => React.ReactNode }) {
   return <>{render(useSurvey().dirty)}</>;
+}
+
+/** A notice reports the last action on its own page; it does not follow the reviewer to another page. */
+function NoticeReset() {
+  const { pathname } = useLocation();
+  const { clearNotice } = useSurvey();
+  useEffect(() => clearNotice(), [pathname, clearNotice]);
+  return null;
 }
 
 /** Databases created by older versions need one explicit upgrade before every page works. */

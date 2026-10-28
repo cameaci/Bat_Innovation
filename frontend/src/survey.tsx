@@ -21,7 +21,7 @@ export interface Survey {
   media: MediaSession | null;
   error: string;
   notice: string;
-  clearMessages: () => void;
+  clearNotice: () => void;
   refreshMedia: () => Promise<void>;
   upgradeStorage: () => Promise<void>;
   importJob: ImportJob | null;
@@ -75,6 +75,7 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
   const [media, setMedia] = useState<MediaSession | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const clearNotice = useCallback(() => setNotice(''), []);
   const [importJob, setImportJob] = useState<ImportJob | null>(null);
   const [runs, setRuns] = useState<SummaryRun[]>([]);
   const [runID, setRunID] = useState('');
@@ -341,7 +342,7 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
   }
 
   const value: Survey = {
-    session, media, error, notice, clearMessages: () => { setError(''); setNotice(''); },
+    session, media, error, notice, clearNotice,
     refreshMedia, upgradeStorage, importJob, chooseVideos, cancelImport, saveTimeline,
     runs, runID, selectRun: id => { setRunID(id); setRefresh(current => current + 1); }, run, verified,
     startRun, cancelRun, cancelling, reloadRun: () => setRefresh(current => current + 1),

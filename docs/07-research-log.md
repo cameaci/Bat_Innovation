@@ -1,5 +1,31 @@
 # 07 - Research log
 
+## 2026-10-28 - Real-footage test on the owner's authorised test set (Linux)
+
+**Question:** do the app and its methods hold up on real footage rather than synthetic clips: what breaks, how long each step takes, and how close tracking gets to what a reviewer sees?
+
+**Test set:** files the owner placed in a private shared folder for testing, kept outside the repository; only numbers and text are recorded here. Two night trail-camera clips (1080p H.264, about 20 s each, IR with a bat flying through), three short dense thermal sequences (small frames, many bats), one documentary clip with hard cuts between views, and one WebM screen recording. Competitor clips used for Phase 3 research were left out.
+
+**Method:** the real backend driven over its API (import, 30 s summaries, playback copies, tracking, enhanced copy, highlights render) with wall-clock timings, one group at a time; tracks compared with reference events noted by watching (trail camera) or a top-hat foreground proxy (dense thermal); a full UI walkthrough in the built Electron app at 1440x900 with screenshots, kept out of Git.
+
+**Defects found and fixed:**
+- Tracking crashed on the dense thermal clip when the nearest-component fallback picked a region of closing fill only; the fallback is now limited to the search radius and an empty region is skipped (dense synthetic stream 143/149 instead of 142).
+- Tracking failed on the dense thermal and documentary groups only inside the worker: its 1 MiB file-size limit stopped SQLite growing the survey database. Workers that write to the database now get its current size plus a stated growth (512 MiB for tracking, 128 MiB for summaries).
+- A hard cut to another view in the documentary clip was not flagged; a jump between consecutive gain-corrected frames over most of the image is now a camera move (raw frames gave a false move from gain settling).
+- Speed: tracking analyses large targets on a coarser grid (about 10x faster at a 140 px target, same tracks), the enhanced copy is 2.5x faster (`enhance-v2`), and the motion-summary evidence step went from about 30 to 7.4 ms per 1080p frame with bit-identical output.
+
+**UX changes from the walkthrough:** the split Watch layout gives the video most of the space; clicking a bat after the 10 s test reports what was measured or why nothing was (outside the tested range, nothing under the click); a mixed lighter and darker bat gives polarity "both"; pieces of one bat (wings, body) are grouped into one measure; after the test the size advice suggests a target size when the detections are much smaller than the setting; tracking shows its progress in frames; the gate panel says why drawing is disabled while busy; a notice no longer follows the reviewer to another page.
+
+**Results:**
+- Trail camera: with the target size from one click (about 140-200 px) 5 of 6 passes became coherent tracks with no false track; at the 12 px default every pass of one clip was found but split into many tracks and one clear pass was missed, which is what the size advice now catches. 73 % of frames were repeats (night-mode duplication), which the app reports. The walkthrough's retest gave 4 stable tracks for the 4 real passes of one clip, and a gate counted 1 in and 2 out.
+- Dense thermal at a 4 px target: coherent tracks covered 82 %, 87 % and 43 % of the proxy foreground of the three clips (94 % and 90 % with uncertain tracks); at 12 px only 9 %, 51 % and 7 %, so the target size matters more than any other setting.
+- Documentary: both cuts are flagged as camera moves.
+- Timings: every group now completes end to end. Trail camera (about 40 s of 1080p): import 10 s, summaries 24 s (44 s before the summary speed-up), playback copies 15 s, tracking 19 s, enhanced copy 37 s (83 s before), highlights 21 s. Dense thermal (three short sequences): summaries 3 s, tracking 132 s (2,265 coherent, 1,914 uncertain and 368 noise tracks), highlights 37 s. Documentary (about 110 s, 3,282 frames): summaries 13 s, tracking 118 s with 2 camera moves flagged, enhanced copy 125 s, highlights 96 s. Tracking and rendering, not summaries, now dominate; measured in this container, not on Windows.
+
+**Not verified:** Windows; long recordings (minutes to hours) and real `.MTS` originals; call activity on a real full-spectrum detector WAV (none in the set; MP4 audio is not accepted as WAV); ecological accuracy beyond these few passes (no independent adjudication). The WebM screen recording is refused explicitly, by design. The event-reel end-to-end test failed once while a heavy job ran alongside it and passes in the full suite (timing, not behaviour).
+
+**Decision or next action:** keep the guided target size as the first setup step; X10 on Windows with the owner's own originals.
+
 ## 2026-10-28 - Phase 3 X9: labelled recordings, sync proposed from file clocks, call activity
 
 **Implementation:** each recording can carry a label such as "detector at the roost" (schema v20). Inspection reads the start time the file claims, a GUANO `Timestamp` or else a date-time in the file name, and shows it as unverified. "Propose sync from file clocks" compares it with the declared camera clock and proposes an anchor (the audio sample meeting a video frame); a file time without a zone needs the UTC offset the reviewer states, nothing is assumed, and the proposal is only applied when a named person confirms it as an ordinary anchor whose note records the basis. Call activity (`call-activity-v1`, full-spectrum recordings only, run in the contained audio worker with a CPU budget scaled to the recording) marks spans where 15-120 kHz band energy rises 12 dB above a rolling noise floor (a low percentile per second, median over 10 s) for at least two STFT hops, and returns an envelope of band level above the floor. On Watch, each recording anchored to the displayed video gets a lane with that envelope and its call marks placed by the anchor; clicking a mark goes there and lists the tracks alive during it, and the track table flags tracks alive during any call. No species is inferred and which target called is not claimed.
