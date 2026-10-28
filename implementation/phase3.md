@@ -818,3 +818,22 @@ Separate from the 22/27 expansion tracker and the 7/7 Phase 2 tracker. Each box 
 - [x] X8: PDF evidence report with inline figures.
 - [x] X9: labelled recordings, sync proposed from file clocks, call activity and track links (schema v20).
 - [ ] X10: Windows and real-footage validation (owner).
+
+## 13. X10 Windows check list (for the owner)
+
+Run after the Phase 2 list (T1-T19) on the same build, with synthetic files first and authorised footage only. Report each as PASS / FAIL / NOT RUN with any message verbatim; text and numbers only, never media.
+
+- P1 Storage upgrade: an existing survey upgrades to storage v20 in one step and keeps its reviews, gates and counts.
+- P2 Markers and board: Boxes, Dots and Rings; Noise hidden; C cycles the board; the clock shows; a long video shows the display-limit banner instead of slowing down.
+- P3 Sample check: count a span at 1x with `[` and `]`; the comparison appears and the counts do not change.
+- P4 Guided setup: a roost preset, click a bat after a 10 s test, use the measured values; suggested exclusions appear in amber.
+- P5 Site template: save, export to a file, import it into a new survey, apply it; the gate waits for one reconfirmation.
+- P6 Enhanced view: prepare it for one video, toggle with E; note the preparation time and size, and whether faint bats are easier to see.
+- P7 Track table: filter, sort, click a row, select by area, label a group with a species, undo it.
+- P8 Several gates: draw a second gate with three points; both count on the video with a labelled sum; the emergence profile and sunset entry (for example 21:04+01:00) work.
+- P9 Review video: render highlights and an overlay video of one video; note time and size; save it and play it in another player.
+- P10 PDF report: save it and check every section and the PROVISIONAL banner.
+- P11 Audio: add a detector WAV, label it, propose sync from file clocks (with the clock declared), confirm it, find calls on Watch and click a call.
+- P12 Export: the CSV bundle saves with `bat-provisional-csv-v4` and track label columns; the originals' hashes are unchanged.
+- P13 Closing while busy: close during an enhanced copy, a render and a call analysis; no `bat-backend.exe` is left and each shows as interrupted on reopening.
+
