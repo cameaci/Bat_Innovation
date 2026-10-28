@@ -19,7 +19,7 @@ function Slider({ id, label, value, min, max, step = 1, onChange, hint }: { id: 
 }
 
 /** Tracking setup: what to look for and where, a 10 s test on the displayed footage, then the whole survey. */
-export function SetupPanel({ settings, onChange, drawing, draft, onDraw, onFinishShape, onCancelShape, test, testing, onTest, onClearTest, onApply, canTest, canApply, applyReason, measured, onUseMeasured, suggestions, onExclude, onIgnore }: {
+export function SetupPanel({ settings, onChange, drawing, draft, onDraw, onFinishShape, onCancelShape, test, testing, onTest, onClearTest, onApply, canTest, canApply, applyReason, measured, measureNote = '', onUseMeasured, suggestions, onExclude, onIgnore }: {
   settings: TrackingSettings;
   onChange: (settings: TrackingSettings) => void;
   drawing: DrawKind;
@@ -36,6 +36,7 @@ export function SetupPanel({ settings, onChange, drawing, draft, onDraw, onFinis
   canApply: boolean;
   applyReason: string;
   measured: Measured | null;
+  measureNote?: string;
   onUseMeasured: () => void;
   suggestions: { points: [number, number][]; detections: number }[];
   onExclude: (points: [number, number][]) => void;
@@ -58,10 +59,6 @@ export function SetupPanel({ settings, onChange, drawing, draft, onDraw, onFinis
       </select>
       {tip && <span className="block text-[11px] text-amber-200" aria-label="Gate tip">{tip}</span>}
     </label>
-    {measured && <div role="status" aria-label="Measured target" className="space-y-1 rounded border border-sky-500/40 bg-sky-500/10 p-2 text-xs">
-      <p><Ruler className="mr-1 inline h-3 w-3" />Clicked target: about {measured.targetPx} px across{measured.pieces && measured.pieces > 1 ? ` (found as ${measured.pieces} pieces at the current size)` : ''}, {measured.contrast} x local noise, {measured.polarity === 'light' ? 'lighter' : 'darker'} than the scene.</p>
-      <Button size="sm" className="h-7" onClick={onUseMeasured}>Use for size, polarity and threshold</Button>
-    </div>}
     <Slider id="target-size" label="Target size (px)" value={settings.target_px} min={3} max={MAX_TARGET_PX} onChange={value => set('target_px', value)}
       hint="Click a bat on the paused video to place the red reference circle; after a test, the click also measures it." />
     <Slider id="threshold" label="Contrast threshold (x local noise)" value={settings.threshold} min={1.5} max={12} step={0.5} onChange={value => set('threshold', value)}
@@ -132,6 +129,11 @@ export function SetupPanel({ settings, onChange, drawing, draft, onDraw, onFinis
           {advice.suggestion !== null && <Button size="sm" className="h-7" onClick={() => onChange({ ...settings, target_px: advice.suggestion! })}>Use {advice.suggestion} px and test again</Button>}
         </div>;
       })()}
+      {measureNote && !measured && <p role="status" aria-label="Measure note" className="rounded border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-100">{measureNote}</p>}
+      {measured && <div role="status" aria-label="Measured target" className="space-y-1 rounded border border-sky-500/40 bg-sky-500/10 p-2 text-xs">
+        <p><Ruler className="mr-1 inline h-3 w-3" />Clicked target: about {measured.targetPx} px across{measured.pieces && measured.pieces > 1 ? ` (found as ${measured.pieces} pieces at the current size)` : ''}, {measured.contrast} x local noise, {measured.polarity === 'both' ? 'partly lighter and partly darker' : measured.polarity === 'light' ? 'lighter' : 'darker'} than the scene.</p>
+        <Button size="sm" className="h-7" onClick={onUseMeasured}>Use for size, polarity and threshold</Button>
+      </div>}
       {testWarnings(stats).length > 0 && <ul aria-label="Footage warnings" className="list-disc space-y-1 pl-4 text-[11px] text-amber-200">
         {testWarnings(stats).map(text => <li key={text}>{text}</li>)}</ul>}
       {suggestions.length > 0 && <div className="space-y-1" aria-label="Suggested exclusions">

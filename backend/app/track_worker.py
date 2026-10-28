@@ -35,6 +35,10 @@ def limits(parent_pid: int, db_path: str) -> None:
         raise ValueError("tracking_limits_unavailable")
 
 
+def progress_path(db_path: Path, run_id: str) -> Path:
+    return db_path.parent / f"tracking-{run_id}.progress"
+
+
 def _timing(metadata: dict) -> tuple[float, float]:
     """Frames per second from the decoded frame count and elapsed time, and seconds per source tick."""
     from fractions import Fraction
@@ -59,6 +63,10 @@ def render(payload: dict) -> dict:
     tracking_store.set_state(db, run["id"], "running")
     stats: dict[str, dict] = {}
     total_tracks = total_points = decoded = 0
+    # Progress for the reviewer: frames decoded of the frames the summaries counted, in a small file beside the database.
+    expected = max(1, sum(int(json.loads(segment["metadata_json"]).get("frame_count") or 0)
+                          for segment in (store.segment_by_id(db, item["id"]) for item in summary["sources"]) if segment))
+    progress = progress_path(db, run["id"])
     for snapshot in summary["sources"]:
         current = store.segment_by_id(db, snapshot["id"])
         # Tracks are tied to the exact bytes summarised by the selected run.
@@ -71,6 +79,8 @@ def render(payload: dict) -> dict:
                 decoded += 1
                 if decoded > MAX_FRAMES:
                     raise ValueError("tracking_limit")
+                if decoded % 50 == 0:
+                    progress.write_text(f"{min(decoded, expected)}/{expected}")
                 analyzer.feed(int(frame.pts), frame.to_ndarray(format="gray"))
             finished, events, segment = analyzer.finish()
         total_tracks += len(finished)

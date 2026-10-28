@@ -23,7 +23,7 @@ export const ROOST_PRESETS: { key: string; label: string; settings: Partial<Trac
 
 /** The largest target size the tracker accepts (a bat close to a 1080p trail camera is 100-200 px across). */
 export const MAX_TARGET_PX = 240;
-export interface Measured { targetPx: number; contrast: number; polarity: 'light' | 'dark'; area: number; pieces?: number }
+export interface Measured { targetPx: number; contrast: number; polarity: 'light' | 'dark' | 'both'; area: number; pieces?: number }
 
 /** The test-run detection under (or nearest) a click on the displayed frame, as suggested settings. */
 export function measureAt(result: TrackingTestResult | null | undefined, pts: number, point: Point, targetPx: number): Measured | null {
@@ -51,7 +51,9 @@ export function measureAt(result: TrackingTestResult | null | undefined, pts: nu
     });
   }
   const size = used.size > 1 ? Math.sqrt((union[2] - union[0]) * (union[3] - union[1])) : 2 * Math.sqrt(area / Math.PI);
-  return { area, contrast, polarity: sign > 0 ? 'light' : 'dark', targetPx: Math.min(MAX_TARGET_PX, Math.max(3, Math.round(size))), ...(used.size > 1 ? { pieces: used.size } : {}) };
+  // Pieces of one bat that are partly lighter and partly darker (a blurred wing over a bright wall) keep both polarities.
+  const signs = new Set([...used].map(other => item.measures[other]![2] > 0));
+  return { area, contrast, polarity: signs.size > 1 ? 'both' : sign > 0 ? 'light' : 'dark', targetPx: Math.min(MAX_TARGET_PX, Math.max(3, Math.round(size))), ...(used.size > 1 ? { pieces: used.size } : {}) };
 }
 
 /** Settings from a measured target: its size, its polarity, and a threshold at half its contrast (never above 7). */
@@ -70,7 +72,9 @@ export function sizeAdvice(result: TrackingTestResult | null | undefined, target
   const diameters = (result?.detections ?? []).flatMap(item => item.measures.map(([area]) => 2 * Math.sqrt(area / Math.PI))).sort((a, b) => a - b);
   if (diameters.length < 30) return null;
   const median = diameters[Math.floor(diameters.length / 2)]!;
-  if (median < 0.6 * targetPx) {
+  // The measured diameter is the area above half the peak, well under the visible extent of a blurred bat; dilution
+  // only loses small targets, so the advice to shrink is for clearly smaller and small ones (a 3-4 px swarm at 12 px).
+  if (median < 0.4 * targetPx && median < 16) {
     const suggestion = Math.max(3, Math.round(median));
     return { message: `Most targets measure about ${median.toFixed(1)} px across, much smaller than the ${targetPx} px set: small bats are diluted and missed at this size.`, suggestion };
   }

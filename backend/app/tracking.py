@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import candidate_store, label_store, store, summary_store, tracking_store, workers
 from .imports import ImportErrorResponse, source_state
-from .track_worker import CPU_SECONDS, ERRORS as WORKER_ERRORS, MAX_REQUEST_BYTES, MAX_TEST_RESULT_BYTES, MEMORY_BYTES
+from .track_worker import CPU_SECONDS, ERRORS as WORKER_ERRORS, MAX_REQUEST_BYTES, MAX_TEST_RESULT_BYTES, MEMORY_BYTES, progress_path
 
 WALL_SECONDS = 900
 MAX_RESULT_BYTES = 256 * 1024
@@ -112,6 +112,7 @@ class TrackingJobs:
                 try:
                     tracking_store.set_state(self.db_path, run_id, state, code, stats)
                 finally:
+                    progress_path(self.db_path, run_id).unlink(missing_ok=True)
                     self._run_id = None
                     self._activity_lock.release()
 
@@ -173,6 +174,12 @@ class TrackingJobs:
             raise TrackingError("tracking_missing", 404)
         windows = summary_store.private_run(self.db_path, result["summary_run_id"])["windows"]
         result["window_counts"] = tracking_store.window_counts(self.db_path, run_id, windows)
+        if result["state"] == "running":
+            try:
+                done, total = progress_path(self.db_path, run_id).read_text().split("/")
+                result["progress"] = [int(done), int(total)]
+            except (OSError, ValueError):
+                result["progress"] = None
         return result
 
     def cancel(self, run_id: str) -> dict:

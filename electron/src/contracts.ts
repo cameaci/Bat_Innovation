@@ -143,6 +143,8 @@ export interface TrackingRun {
   started_at_utc: string;
   finished_at_utc: string | null;
   track_counts: Record<string, number>;
+  /** While running: frames decoded of the frames to decode. */
+  progress?: [number, number] | null;
   /** Present on a single-run read: tracks overlapping each summary window ID. */
   window_counts?: Record<string, number>;
 }

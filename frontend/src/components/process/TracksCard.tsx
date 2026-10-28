@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Loader2, Route, Square } from 'lucide-react';
-import { activeRun, activeTracking, useSurvey } from '../../survey';
+import { activeRun, activeTracking, trackingProgress, useSurvey } from '../../survey';
 import { localDate } from '../../lib/time';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -38,7 +38,7 @@ export function TracksCard({ disabled }: { disabled: boolean }) {
       </div>
       {!run && <p className="text-sm text-muted-foreground">Generate motion summaries first; tracks are computed for the selected summary run.</p>}
       {tracking && <div className="space-y-1 rounded-lg border bg-muted/40 p-3 text-sm">
-        <p role="status" className="font-medium">{running ? 'Tracking: following moving objects...' : `Tracking ${tracking.state}: ${total} track${total === 1 ? '' : 's'} (unverified)`}</p>
+        <p role="status" className="font-medium">{running ? `Tracking: ${trackingProgress(tracking)}` : `Tracking ${tracking.state}: ${total} track${total === 1 ? '' : 's'} (unverified)`}</p>
         {tracking.error && !running && <p role="alert" className="text-red-700">{failure[tracking.error] ?? 'Tracking failed. The summary evidence is unchanged.'}</p>}
         {frames > 0 && <p className="flex items-center gap-1 text-xs text-amber-800"><Badge variant="warning">{frames}</Badge>frames with a scene-wide change were gaps for tracking; check those windows by eye.</p>}
         <p className="text-xs text-muted-foreground">{tracking.algorithm_version} · started {localDate(tracking.started_at_utc)} · parameters SHA256 {tracking.parameter_hash.slice(0, 12)}...</p>

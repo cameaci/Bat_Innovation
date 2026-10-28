@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw, ScanSearch, SkipBack, SkipForward } from 'lucide-react';
 import type { Candidate, SampleCheck, TrackLabels, GateCounts, InvalidSpan, SceneEvent, MediaSegment, PlaybackFrames, TrackingSettings, TrackingTest } from '../../../electron/src/contracts';
 import { getAPI } from '../api';
-import { activeRun, activeTracking, useSurvey } from '../survey';
+import { activeRun, activeTracking, trackingProgress, useSurvey } from '../survey';
 import { clock } from '../lib/time';
 import { cn } from '../lib/utils';
 import { Messages } from '../components/layout/Messages';
@@ -99,6 +99,7 @@ export function WatchPage() {
   const [testRange, setTestRange] = useState<{ startMs: number; endMs: number } | null>(null);
   const [ignored, setIgnored] = useState<number[]>([]);
   const [measured, setMeasured] = useState<ReturnType<typeof measureAt>>(null);
+  const [measureNote, setMeasureNote] = useState('');
   const suggestions = (test?.result?.suggested_exclusions ?? []).filter((_, index) => !ignored.includes(index));
   const settingsRun = useRef<string | null>(null);
   useEffect(() => {
@@ -405,7 +406,7 @@ export function WatchPage() {
     setLook(current => current === 'standard' ? 'enhanced' : 'standard');
   }
 
-  function clearTest() { setTest(null); setTestRange(null); setIgnored([]); setMeasured(null); }
+  function clearTest() { setTest(null); setTestRange(null); setIgnored([]); setMeasured(null); setMeasureNote(''); }
 
   function startSample() {
     const frame = lastFrame.current;
@@ -464,7 +465,12 @@ export function WatchPage() {
     else {
       setReference(point);
       const frame = lastFrame.current;
-      setMeasured(frame ? measureAt(test?.result, frame.pts, point, settings.target_px) : null);
+      const found = frame ? measureAt(test?.result, frame.pts, point, settings.target_px) : null;
+      setMeasured(found);
+      // A click that measures nothing says why, rather than only moving the reference circle.
+      setMeasureNote(!test?.result || found ? '' : !test.result.detections.some(item => Number(item.pts) === Math.round(frame?.pts ?? -1))
+        ? 'This frame is outside the tested range: play into the looping range, pause on a bat and click it.'
+        : 'Nothing was detected under the click on this frame. Pause where the bat shows a green box (step with , and .) and click on it.');
     }
   }
 
@@ -649,7 +655,7 @@ export function WatchPage() {
             onApply={() => { clearTest(); void survey.startTracking(settings); }}
             canTest={Boolean(displayed && frames)} canApply={Boolean(survey.run) && !activeRun(survey.run) && !activeTracking(survey.tracking) && !survey.busy}
             applyReason={activeTracking(survey.tracking) ? 'Tracking is running.' : 'Wait for motion summaries and other processing to finish.'}
-            measured={measured} onUseMeasured={() => { if (measured) setSettings(previous => applyMeasured(previous, measured)); setMeasured(null); }}
+            measured={measured} measureNote={measureNote} onUseMeasured={() => { if (measured) setSettings(previous => applyMeasured(previous, measured)); setMeasured(null); }}
             suggestions={suggestions} onExclude={points => { setSettings(previous => ({ ...previous, exclusions: [...previous.exclusions, points].slice(0, 8) }));
               setIgnored(current => [...current, (test?.result?.suggested_exclusions ?? []).findIndex(item => item.points === points)]); }}
             onIgnore={index => setIgnored(current => [...current, (test?.result?.suggested_exclusions ?? []).indexOf(suggestions[index]!)])} />}
@@ -672,7 +678,7 @@ export function WatchPage() {
             actor={actor} onLabel={saveLabel} onUndo={undoLabel}
             onSelectArea={() => { if (drawing === 'select') finishShape(); else { setDrawing('select'); setDraft([]); setFlightMode('tracks'); player.current?.pause(); } }}
             selectingArea={drawing === 'select'} /></div>}
-          {activeTracking(survey.tracking) && <p role="status" className="rounded-lg border border-slate-800 bg-slate-900 p-3 text-sm">Tracking the whole survey with these settings...</p>}
+          {activeTracking(survey.tracking) && <p role="status" aria-label="Tracking progress" className="rounded-lg border border-slate-800 bg-slate-900 p-3 text-sm">Tracking the whole survey with these settings: {trackingProgress(survey.tracking)}. Gates and labels wait until it finishes.</p>}
           <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
             <p className="text-xs uppercase tracking-wide text-slate-400">Tracked now</p>
             <p className="text-4xl font-bold tabular-nums text-red-400" aria-label="Tracks at this frame">{trackingRun ? live : '-'}</p>

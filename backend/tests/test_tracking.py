@@ -440,3 +440,24 @@ def test_database_writing_workers_may_grow_the_survey_database(tmp_path: Path, m
     summary_worker.limits(0, str(database))
     assert applied[resource.RLIMIT_FSIZE] >= 5 * 1024 * 1024 + summary_worker.MAX_RUN_BYTES
 
+
+
+def test_a_running_tracking_run_reports_its_progress_and_leaves_no_file(tmp_path: Path) -> None:
+    from backend.app import track_worker
+
+    source = tmp_path / "two-dots.mp4"
+    encode_frames(source, scenario("two_dots"), [index * 40 for index in range(20)])
+    with TestClient(create_app(Settings(tmp_path / "app-data", TOKEN))) as client:
+        session_id = session(client)
+        assert import_files(client, session_id, [source])["state"] == "complete"
+        summary = client.post("/api/summaries", headers=HEADERS, json={"session_id": session_id, "window_seconds": 30}).json()
+        summary = wait(client, f"/api/summaries/{summary['id']}", ("queued", "running"))
+        run = client.post("/api/tracking", headers=HEADERS, json={"summary_run_id": summary["id"]}).json()
+        run = wait(client, f"/api/tracking/{run['id']}", ("queued", "running"))
+        database = tmp_path / "app-data" / "bat_innovation.sqlite3"
+        assert run["state"] == "complete" and "progress" not in run
+        assert not track_worker.progress_path(database, run["id"]).exists(), "the progress file goes with the run"
+        # While a run is running, the API reads the worker's progress file.
+        tracking_store.set_state(database, run["id"], "running")
+        track_worker.progress_path(database, run["id"]).write_text("50/200")
+        assert client.get(f"/api/tracking/{run['id']}", headers=HEADERS).json()["progress"] == [50, 200]

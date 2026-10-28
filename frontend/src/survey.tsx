@@ -7,6 +7,12 @@ import { settingsOf } from './lib/trackingSettings';
 const unavailable = 'The local backend is unavailable. Retry, or close and reopen the app.';
 export const activeRun = (run: SummaryRun | null | undefined) => run?.state === 'queued' || run?.state === 'running';
 export const CURRENT_SCHEMA = 20;
+
+/** "Tracking: 45 % (1,234 of 2,700 frames)" while a run reports progress. */
+export function trackingProgress(tracking: TrackingRun | null): string {
+  const progress = tracking?.progress;
+  return progress ? `${Math.round(100 * progress[0] / Math.max(1, progress[1]))} % (${progress[0].toLocaleString('en-GB')} of ${progress[1].toLocaleString('en-GB')} frames)` : 'starting';
+}
 export const activeTracking = (run: TrackingRun | null | undefined) => run?.state === 'queued' || run?.state === 'running';
 export const THERMAL_LABEL = 'Rendered thermal - no radiometric temperature analysis';
 

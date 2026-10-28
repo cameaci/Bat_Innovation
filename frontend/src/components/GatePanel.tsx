@@ -47,6 +47,7 @@ export function GatePanel({ segment, actor, draft, setDraft }: {
       {!draft && <Button size="sm" variant="secondary" className="h-7" disabled={!actor.trim() || survey.busy} onClick={() => setDraft({ kind: 'line', points: [] })}><PenLine />Draw a gate</Button>}
     </div>
     {!actor.trim() && <p className="text-slate-400">Enter your name under First review to draw gates.</p>}
+    {actor.trim() && survey.busy && !draft && <p role="status" className="text-slate-400">Gates can be drawn once tracking or processing has finished.</p>}
     {gates.length > 0 && <ul aria-label="Active gates" className="space-y-1">{gates.map(gate => <li key={gate.id} className="flex items-center justify-between gap-2">
       <span>{gate.name} · {gate.kind}{gate.kind === 'line' ? ` · A: ${gate.label_a}, B: ${gate.label_b}` : ''} · entering {gate.entry_direction.replaceAll('_', ' ')} · revision {gate.revision}</span>
       <Button size="icon" variant="ghost" className="h-6 w-6" aria-label={`Retire gate ${gate.name}`} onClick={() => void retire(gate)}><Trash2 /></Button>

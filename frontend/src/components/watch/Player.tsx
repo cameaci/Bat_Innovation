@@ -190,8 +190,10 @@ export const Player = forwardRef<PlayerHandle, {
     if (x >= 0 && y >= 0 && x <= sourceWidth && y <= sourceHeight) onPick([Math.round(x * 10) / 10, Math.round(y * 10) / 10]);
   };
   const label = (text: string) => <span className="pointer-events-none absolute right-2 top-2 rounded bg-slate-950/70 px-2 py-0.5 text-[11px] font-medium text-slate-200">{text}</span>;
+  // Side by side, the main view takes two thirds and the other two stack beside it, so bats stay large enough to see
+  // and to click on an ordinary laptop screen.
   return <div className={layout === 'split' ? 'grid h-full w-full gap-2 xl:grid-cols-3' : 'h-full w-full'}>
-    <section aria-label={`${shown[0]?.label ?? 'Video'} view`} className="relative aspect-video w-full overflow-hidden rounded-lg bg-black">
+    <section aria-label={`${shown[0]?.label ?? 'Video'} view`} className={`relative aspect-video w-full overflow-hidden rounded-lg bg-black ${layout === 'split' ? 'xl:col-span-2 xl:row-span-2' : ''}`}>
       <video ref={video} src={`bat-media://proxy/${frames.id}`} preload="auto" muted playsInline aria-label="Playback copy"
         className="absolute inset-0 h-full w-full object-contain" />
       <canvas ref={canvas} aria-label={onPick ? 'Video drawing area' : undefined} aria-hidden={onPick ? undefined : true}

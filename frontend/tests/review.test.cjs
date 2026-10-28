@@ -197,6 +197,9 @@ test('setup guide measures a clicked detection and warns about badly placed gate
     measures: [[700, 9, 1], [900, 8, 1], [1500, 10, 1], [80, 9, 1]] }] };
   const grouped = guide.measureAt(pieces, 400, [1015, 515], 12);
   assert.equal(grouped.pieces, 3, 'the far piece is another target');
+  assert.equal(grouped.polarity, 'light');
+  const mixed = { detections: [{ ...pieces.detections[0], measures: [[700, 9, 1], [900, 8, -1], [1500, 10, 1], [80, 9, 1]] }] };
+  assert.equal(guide.measureAt(mixed, 400, [1015, 515], 12).polarity, 'both', 'a bat with lighter and darker pieces keeps both');
   assert.equal(grouped.targetPx, Math.round(Math.sqrt(120 * 100)));
   assert.equal(guide.measureAt({ detections: [{ ...pieces.detections[0], accepted: [[0, 0, 600, 600]], measures: [[300000, 9, 1]] }] }, 400, [300, 300], 12).targetPx, guide.MAX_TARGET_PX);
   const settings = { target_px: 12, polarity: 'both', threshold: 7, target_speed: 4 };
@@ -215,6 +218,7 @@ test('setup guide measures a clicked detection and warns about badly placed gate
     measures: Array(40).fill([Math.PI * (diameter / 2) ** 2, 9, 1]) }] });
   assert.deepEqual(guide.sizeAdvice(measuredAt(3.7), 12).suggestion, 4);
   assert.equal(guide.sizeAdvice(measuredAt(10), 12), null);
+  assert.equal(guide.sizeAdvice(measuredAt(74.6), 203), null, 'a blurred large bat measures well under its size: no advice to shrink');
   const larger = guide.sizeAdvice(measuredAt(21), 12);
   assert.equal(larger.suggestion, null);
   assert.match(larger.message, /Click a bat/);
