@@ -18,10 +18,18 @@ MAX_NATIVE_WIDTH, MAX_NATIVE_HEIGHT = 4096, 2160
 
 
 def max_pool(values: np.ndarray, step: int) -> np.ndarray:
-    """Keep tiny native change peaks instead of averaging them out during resize."""
-    return np.maximum.reduceat(np.maximum.reduceat(
-        values, np.arange(0, values.shape[0], step), axis=0),
-        np.arange(0, values.shape[1], step), axis=1)
+    """Keep tiny native change peaks instead of averaging them out during resize. Blocks at the right and bottom edges
+    may be partial; zero padding leaves their maximum unchanged because the values are never negative."""
+    rows, columns = -(-values.shape[0] // step), -(-values.shape[1] // step)
+    padded = np.zeros((rows * step, columns * step), dtype=values.dtype)
+    padded[:values.shape[0], :values.shape[1]] = values
+    # The maximum of step x step strided views: an elementwise pass per offset, much faster than reducing over axes.
+    pooled = padded[0::step, 0::step].copy()
+    for dy in range(step):
+        for dx in range(step):
+            if dy or dx:
+                np.maximum(pooled, padded[dy::step, dx::step], out=pooled)
+    return pooled
 
 
 class Evidence:
@@ -77,7 +85,7 @@ class Evidence:
         if previous.shape != gray.shape:
             raise ValueError("unsupported_codec")
         self.comparison_count += 1
-        difference = np.abs(gray.astype(np.int16) - previous.astype(np.int16)).astype(np.uint8)
+        difference = np.maximum(gray, previous) - np.minimum(gray, previous)  # |gray - previous| without widening
         threshold = self.parameters["threshold"]
         fraction = np.count_nonzero(difference >= threshold) / difference.size
         if fraction >= Fraction(self.parameters["framewide_fraction"]):
