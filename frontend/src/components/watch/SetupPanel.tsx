@@ -3,7 +3,7 @@ import { FlaskConical, Loader2, Play, Ruler, Trash2, X } from 'lucide-react';
 import type { TrackingSettings, TrackingTest } from '../../../../electron/src/contracts';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
-import { MAX_TARGET_PX, ROOST_PRESETS, testWarnings, type Measured } from '../../lib/setupGuide';
+import { MAX_TARGET_PX, ROOST_PRESETS, sizeAdvice, testWarnings, type Measured } from '../../lib/setupGuide';
 
 type Point = [number, number];
 export type DrawKind = 'area' | 'exclusion' | 'select' | null;
@@ -125,6 +125,13 @@ export function SetupPanel({ settings, onChange, drawing, draft, onDraw, onFinis
         Test: {stats.coherent} stable track{stats.coherent === 1 ? '' : 's'}, {stats.uncertain} uncertain, {stats.noise} rejected as noise, {stats.rejected_size} detections rejected by size, {stats.joins} joined.
         {test?.result?.events.length ? ` Scene events: ${test.result.events.map(event => event.kind.replace('_', ' ')).join(', ')}.` : ''}
       </p>}
+      {(() => {
+        const advice = sizeAdvice(test?.result, settings.target_px);
+        return advice && <div role="status" aria-label="Target size advice" className="space-y-1 rounded border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-100">
+          <p>{advice.message}</p>
+          {advice.suggestion !== null && <Button size="sm" className="h-7" onClick={() => onChange({ ...settings, target_px: advice.suggestion! })}>Use {advice.suggestion} px and test again</Button>}
+        </div>;
+      })()}
       {testWarnings(stats).length > 0 && <ul aria-label="Footage warnings" className="list-disc space-y-1 pl-4 text-[11px] text-amber-200">
         {testWarnings(stats).map(text => <li key={text}>{text}</li>)}</ul>}
       {suggestions.length > 0 && <div className="space-y-1" aria-label="Suggested exclusions">

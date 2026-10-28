@@ -210,6 +210,15 @@ test('setup guide measures a clicked detection and warns about badly placed gate
   assert.match(guide.gateWarnings({ ...frame, kind: 'rect', points: [[2, 2], [200, 2], [200, 200], [2, 200]] }, [], []).join(' '), /frame edge/);
   assert.match(guide.gateWarnings(across, [[[300, 150], [340, 150], [340, 190], [300, 190]]], []).join(' '), /excluded zone/);
   assert.equal(guide.testWarnings({ frames: 100, repeated_frames: 32, gain_jumps: 1, limit_frames: 0, static_detections: 0 }).length, 2);
+  // The set size against what the test measured: much smaller targets get a size; much larger ones a request to click.
+  const measuredAt = diameter => ({ detections: [{ pts: '1', rejected: [], accepted: Array(40).fill([0, 0, 1, 1]),
+    measures: Array(40).fill([Math.PI * (diameter / 2) ** 2, 9, 1]) }] });
+  assert.deepEqual(guide.sizeAdvice(measuredAt(3.7), 12).suggestion, 4);
+  assert.equal(guide.sizeAdvice(measuredAt(10), 12), null);
+  const larger = guide.sizeAdvice(measuredAt(21), 12);
+  assert.equal(larger.suggestion, null);
+  assert.match(larger.message, /Click a bat/);
+  assert.equal(guide.sizeAdvice({ detections: [{ pts: '1', rejected: [], accepted: [[0, 0, 1, 1]], measures: [[10, 9, 1]] }] }, 12), null, 'too few detections to judge');
 });
 
 test('the declared recording clock is shown in its own offset', async () => {

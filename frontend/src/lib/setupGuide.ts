@@ -60,6 +60,26 @@ export function applyMeasured(settings: TrackingSettings, measured: Measured): T
   return { ...settings, target_px: measured.targetPx, polarity: measured.polarity, threshold: Math.min(7, Math.max(1.5, Math.round(measured.contrast) / 2)) };
 }
 
+/**
+ * Whether the set target size fits what the test found, from the median measured size of its detections (at least 30).
+ * Much smaller targets are diluted by the matching filter and missed (a dense thermal swarm 3-4 px across against the
+ * 12 px default); much larger ones are found in pieces (a bat close to a trail camera). A smaller size can be read off
+ * the detections; a larger one cannot (only pieces were measured), so the reviewer is asked to click a bat.
+ */
+export function sizeAdvice(result: TrackingTestResult | null | undefined, targetPx: number): { message: string; suggestion: number | null } | null {
+  const diameters = (result?.detections ?? []).flatMap(item => item.measures.map(([area]) => 2 * Math.sqrt(area / Math.PI))).sort((a, b) => a - b);
+  if (diameters.length < 30) return null;
+  const median = diameters[Math.floor(diameters.length / 2)]!;
+  if (median < 0.6 * targetPx) {
+    const suggestion = Math.max(3, Math.round(median));
+    return { message: `Most targets measure about ${median.toFixed(1)} px across, much smaller than the ${targetPx} px set: small bats are diluted and missed at this size.`, suggestion };
+  }
+  if (median > 1.5 * targetPx) {
+    return { message: `Targets measure ${median.toFixed(0)} px or more across, larger than the ${targetPx} px set, so each bat may be found in pieces. Click a bat in the test range to measure it as a whole.`, suggestion: null };
+  }
+  return null;
+}
+
 /** What the test run says about the footage itself, beyond the tracks. */
 export function testWarnings(stats: TrackingTestResult['stats'] | undefined): string[] {
   if (!stats) return [];
