@@ -3,7 +3,9 @@ Camera_Trap (https://github.com/cameaci/Camera_Trap, commit 176451c), which is d
 License below. Camera_Trap's own primitives follow shadcn/ui (MIT). Adapted at the project owner's request
 on 2026-10-22; changes: native <dialog>, <select> and checkbox elements instead of Radix primitives (to keep
 the strict style-src Content Security Policy) and Bat Innovation layouts. The colour theme is Camera_Trap's.
-No WSP logo or other brand asset file is included in this public repository.
+On 2026-10-29 the project owner approved showing the WSP logo (Camera_Trap wsp/brand/wsp-logo-red.svg) in this
+WSP internal tool; it is inlined as an SVG component in ../layout/WspLogo.tsx. The MIT licence below covers code, not
+the WSP trademark (see docs/decisions.md).
 
 MIT License
 

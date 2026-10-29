@@ -59,10 +59,25 @@ export async function addVideos(shell: RunningShell, paths: string[]): Promise<v
   await expect(videos(shell)).toHaveCount(before + paths.length, { timeout: 60_000 });
 }
 
+/** Starting summaries or tracking on the Process page opens the processing window; hide it to use the page. */
+export async function hideProcessing(shell: RunningShell): Promise<void> {
+  const dialog = shell.page.getByRole('dialog', { name: 'Processing', exact: true });
+  await dialog.getByRole('button', { name: 'Hide', exact: true }).click();
+  await expect(dialog).toBeHidden();
+}
+
 /** Generate summaries on the Process page and wait for a terminal run. */
 export async function summarize(shell: RunningShell, state: RegExp = /^Run (complete|incomplete):/): Promise<void> {
   await shell.page.getByRole('button', { name: 'Generate motion summaries', exact: true }).click();
+  await hideProcessing(shell);
   await expect(shell.page.getByRole('status').filter({ hasText: state })).toBeVisible({ timeout: 60_000 });
+}
+
+/** Find tracks on the Process page and wait for the tracking run to complete. */
+export async function findTracks(shell: RunningShell): Promise<void> {
+  await shell.page.getByRole('button', { name: 'Find tracks', exact: true }).click();
+  await hideProcessing(shell);
+  await expect(shell.page.getByRole('status').filter({ hasText: /^Tracking complete:/ })).toBeVisible({ timeout: 60_000 });
 }
 
 export async function goTo(shell: RunningShell, page: 'Process' | 'Watch' | 'Review' | 'Export'): Promise<void> {

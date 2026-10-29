@@ -25,9 +25,10 @@ test('all quiet, quality-flagged and incomplete source windows survive Electron 
     const sessionID = await createSurvey(shell, SURVEY);
     await addVideos(shell, paths);
     await summarize(shell, /^Run incomplete: 7 of 8 windows complete/);
-    // The live results strip shows the run's windows without waiting for the Review page.
-    await expect(page.getByRole('region', { name: 'Results' }).getByRole('button')).toHaveCount(8);
-    await goTo(shell, 'Review');
+    // Process shows the run's status only; the images are looked through on the Review page.
+    await expect(page.getByRole('region', { name: 'Results' })).toHaveCount(0);
+    await page.getByRole('link', { name: 'Review all 8 windows', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Review', exact: true, level: 1 })).toBeVisible();
     await expect(windowCards(shell)).toHaveCount(8);
     await expect(page.getByRole('status').filter({ hasText: /^0 of 8 windows$/ })).toBeVisible();
 

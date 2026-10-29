@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { launch, quit, type RunningShell } from './shell-helpers';
-import { addVideos, cleanupDraftShell, createSurvey, fixtures, goTo, openAt, previewReady, summarize, windowCards } from './ui-helpers';
+import { addVideos, cleanupDraftShell, createSurvey, fixtures, goTo, openAt, previewReady, summarize, windowCards, hideProcessing } from './ui-helpers';
 
 test.skip(process.platform !== 'linux', 'Media processing E2E is verified on Linux only.');
 
@@ -20,7 +20,17 @@ test('tracks are computed from a finished summary run and drawn as trails over t
     await addVideos(shell, [sources.two_dots]);
     await summarize(shell);
     await find.click();
+    // Starting a step opens the processing window; hidden, the step runs on and the sidebar brings it back.
+    const processing = shell.page.getByRole('dialog', { name: 'Processing', exact: true });
+    await expect(processing.getByRole('listitem', { name: 'Motion summaries: Done', exact: true })).toBeVisible();
+    await hideProcessing(shell);
     await expect(shell.page.getByRole('status').filter({ hasText: /^Tracking complete: 2 tracks \(unverified\)$/ })).toBeVisible({ timeout: 60_000 });
+    await shell.page.getByRole('button', { name: /^Processing/ }).click();
+    await expect(processing.getByRole('listitem', { name: 'Tracks: Done', exact: true })).toContainText('2 tracks found (candidates, unverified)');
+    await expect(processing.getByRole('listitem', { name: 'Add videos: Done', exact: true })).toContainText('1 video added');
+    await processing.getByRole('link', { name: 'Open Watch', exact: true }).first().click();
+    await expect(shell.page.getByRole('heading', { name: 'Watch', exact: true, level: 1 })).toBeVisible();
+    await expect(processing).toBeHidden();
     await goTo(shell, 'Review');
     await expect(windowCards(shell).first()).toContainText('2 tracks (unverified)');
     const view = await openAt(shell, 0);

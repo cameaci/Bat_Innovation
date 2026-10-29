@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AlertTriangle, ArrowDown, ArrowRight, ArrowUp, ChevronDown, FilePlus2, Film, Loader2, Play, RefreshCw, Square } from 'lucide-react';
-import type { Continuity, MediaSegment, Modality, SaveMedia, SummaryWindow } from '../../../electron/src/contracts';
+import type { Continuity, MediaSegment, Modality, SaveMedia } from '../../../electron/src/contracts';
 import { activeRun, CURRENT_SCHEMA, THERMAL_LABEL, useSurvey } from '../survey';
-import { clock, localDate, rational, span } from '../lib/time';
+import { clock, localDate, rational } from '../lib/time';
 import { PageBody, PageHeader } from '../components/layout/PageHeader';
 import { Messages } from '../components/layout/Messages';
 import { Button } from '../components/ui/button';
@@ -11,8 +11,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { Badge } from '../components/ui/badge';
 import { Input, Label, Select } from '../components/ui/input';
 import { Progress } from '../components/ui/progress';
-import { SummaryImage } from '../components/SummaryImage';
-import { WindowDialog } from '../components/WindowDialog';
 import { TracksCard } from '../components/process/TracksCard';
 import { AudioCard } from '../components/process/AudioCard';
 
@@ -28,20 +26,18 @@ const sourceProblem: Record<string, string> = {
 
 export function ProcessPage() {
   const survey = useSurvey();
-  const [open, setOpen] = useState<string | null>(null);
   const ready = (survey.media?.schema_version ?? 0) >= CURRENT_SCHEMA;
   return <>
-    <PageHeader title="Process" subtitle="Add the original videos, then generate a motion summary for every time window. Results appear as each window finishes." />
+    <PageHeader title="Process" subtitle="Add the original videos, then generate a motion summary for every time window. Follow each step under Processing in the sidebar." />
     <PageBody>
       <Messages error={survey.error} notice={survey.notice} />
       <div className="grid gap-6 xl:grid-cols-2">
         <VideosCard disabled={!ready} />
-        <SummariesCard disabled={!ready} onOpen={setOpen} />
+        <SummariesCard disabled={!ready} />
         <TracksCard disabled={!ready} />
         <AudioCard disabled={!ready} />
       </div>
     </PageBody>
-    {open && survey.run && <WindowDialog windows={survey.run.windows} initialID={open} onClose={() => setOpen(null)} />}
   </>;
 }
 
@@ -181,7 +177,7 @@ function VideosCard({ disabled }: { disabled: boolean }) {
   </Card>;
 }
 
-function SummariesCard({ disabled, onOpen }: { disabled: boolean; onOpen: (id: string) => void }) {
+function SummariesCard({ disabled }: { disabled: boolean }) {
   const survey = useSurvey();
   const { run, runs } = survey;
   const [windowSeconds, setWindowSeconds] = useState(30);
@@ -189,16 +185,12 @@ function SummariesCard({ disabled, onOpen }: { disabled: boolean; onOpen: (id: s
   const segments = survey.media?.segments ?? [];
   const running = activeRun(run);
   const done = run ? run.counts.complete + run.counts.failed + run.counts.incomplete : 0;
-  const finished = run?.windows.filter(window => window.status !== 'planned' && window.status !== 'running') ?? [];
-  // While processing, the newest results come first so they appear as they finish.
-  const shown: SummaryWindow[] = (running ? [...finished].reverse() : run?.windows ?? []).slice(0, 12);
-  const names = new Map(segments.map(segment => [segment.id, segment.metadata.filename]));
 
   return <Card aria-labelledby="summaries-heading">
     <CardHeader className="flex-row items-start justify-between space-y-0">
       <div className="space-y-1.5">
         <CardTitle id="summaries-heading">Motion summaries</CardTitle>
-        <CardDescription>One image per time window shows where something moved. It is a guide for review, not a bat detection.</CardDescription>
+        <CardDescription>One image per time window shows where something moved; look through them on the Review page. They are a guide for review, not a bat detection, and tracking and playback copies start from them.</CardDescription>
       </div>
     </CardHeader>
     <CardContent className="space-y-4">
@@ -207,7 +199,7 @@ function SummariesCard({ disabled, onOpen }: { disabled: boolean; onOpen: (id: s
           <Select id="window-length" className="w-36" value={windowSeconds} disabled={disabled || survey.busy} onChange={event => setWindowSeconds(Number(event.target.value))}>
             {[15, 30, 60].map(value => <option key={value} value={value}>{value} seconds</option>)}
           </Select></div>
-        <Button disabled={disabled || survey.busy || survey.dirty || starting || segments.length === 0} onClick={async () => { setStarting(true); await survey.startRun(windowSeconds); setStarting(false); }}>
+        <Button disabled={disabled || survey.busy || survey.dirty || starting || segments.length === 0} onClick={async () => { setStarting(true); if (await survey.startRun(windowSeconds)) survey.showProgress(true); setStarting(false); }}>
           <Play />{starting ? 'Starting...' : 'Generate motion summaries'}</Button>
         {running && <Button variant="outline" disabled={survey.cancelling} onClick={() => void survey.cancelRun()}><Square />{survey.cancelling ? 'Cancelling...' : 'Cancel'}</Button>}
       </div>
@@ -232,22 +224,9 @@ function SummariesCard({ disabled, onOpen }: { disabled: boolean; onOpen: (id: s
         {run.error && <p role="alert" className="text-sm text-red-700">{run.error.message}</p>}
         {run.windows.length !== run.counts.planned && <p role="alert" className="text-sm text-red-700">The window list does not match the planned count; this run cannot show complete coverage.</p>}
       </div>}
-      {run && shown.length > 0 && <section aria-label={running ? 'Latest results' : 'Results'} className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold">{running ? 'Latest results' : 'Results'}</h3>
-          {!running && <Link to={`/surveys/${survey.session.id}/review`} className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">Review all {run.windows.length} windows<ArrowRight className="h-4 w-4" /></Link>}
-        </div>
-        <ul className="grid grid-cols-2 gap-2 lg:grid-cols-3">
-          {shown.map(window => <li key={window.id}>
-            <button type="button" onClick={() => onOpen(window.id)} aria-label={`Open window ${span(window.interval.elapsed_start, window.interval.elapsed_end)} of ${names.get(window.segment_id) ?? 'video'}`}
-              className="w-full space-y-1 rounded-lg border bg-white p-1.5 text-left transition-shadow hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              <SummaryImage window={window} enabled={survey.verified} alt={`Motion summary ${span(window.interval.elapsed_start, window.interval.elapsed_end)}`} />
-              <p className="truncate px-1 text-xs"><span className="font-medium">{span(window.interval.elapsed_start, window.interval.elapsed_end)}</span> <span className="text-muted-foreground">{names.get(window.segment_id)}</span></p>
-            </button>
-          </li>)}
-        </ul>
-        {running && <p className="text-xs text-muted-foreground">Open any finished window to look at it now. Review decisions and original-video previews unlock when processing finishes.</p>}
-      </section>}
+      {run && !running && <Link to={`/surveys/${survey.session.id}/review`} className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">
+        Review all {run.windows.length} windows<ArrowRight className="h-4 w-4" /></Link>}
+      {running && <Button variant="link" className="h-auto p-0" onClick={() => survey.showProgress(true)}>Show progress</Button>}
     </CardContent>
   </Card>;
 }

@@ -309,3 +309,38 @@ test('call marks are placed on the anchored video and linked to the tracks alive
     { id: 'after', segmentID: 'v1', first: 5011, last: 6000 }, { id: 'other video', segmentID: 'v2', first: 2400, last: 2600 }, { id: 'second', segmentID: 'v1', first: 5010, last: 5100 }];
   assert.deepEqual([...calls.tracksDuringCalls(tracks, placed)].sort(), ['during', 'second']);
 });
+
+test('the processing window shows each pipeline step with its progress and what it waits for', async () => {
+  const { processingPhases } = await rendererModule('lib/processing');
+  const states = input => processingPhases(input).map(phase => `${phase.key}:${phase.state}`);
+  const empty = { segments: 0, importJob: null, run: null, playback: null, tracking: null };
+  assert.deepEqual(states(empty), ['import:not_started', 'summaries:waiting', 'copies:waiting', 'tracking:waiting']);
+
+  const counts = { planned: 4, pending: 1, complete: 2, running: 1, incomplete: 0, failed: 0 };
+  const running = processingPhases({ ...empty, segments: 2, run: { state: 'running', counts } });
+  assert.deepEqual(running.map(phase => phase.state), ['done', 'running', 'waiting', 'waiting']);
+  assert.equal(running[1].detail, '2 of 4 windows done');
+  assert.equal(running[1].percent, 50);
+
+  const copy = (segment_id, state) => ({ segment_id, state, kind: 'standard' });
+  const copying = processingPhases({ ...empty, segments: 2, run: { state: 'complete', counts: { ...counts, complete: 4, pending: 0, running: 0 } },
+    playback: { active: true, proxies: [copy('a', 'ready'), copy('b', 'running')], enhanced: [] } });
+  assert.deepEqual(copying.map(phase => phase.state), ['done', 'done', 'running', 'not_started']);
+  assert.equal(copying[2].detail, '1 of 2 videos ready');
+
+  // A copy that failed and was later prepared again counts as ready; one that never finished needs attention.
+  const retried = processingPhases({ ...empty, segments: 2, run: { state: 'complete', counts },
+    playback: { active: false, proxies: [copy('a', 'failed'), copy('a', 'ready'), copy('b', 'interrupted')], enhanced: [] } });
+  assert.equal(retried[2].state, 'attention');
+  assert.equal(retried[2].detail, '1 copy did not finish; prepare again on the Watch page.');
+
+  const tracking = processingPhases({ ...empty, segments: 1, run: { state: 'complete', counts }, tracking: { state: 'running', progress: [250, 1000], track_counts: {} } });
+  assert.equal(tracking[3].detail, '250 of 1,000 frames');
+  assert.equal(tracking[3].percent, 25);
+  const tracked = processingPhases({ ...empty, segments: 1, run: { state: 'incomplete', counts }, tracking: { state: 'complete', track_counts: { w1: 2, w2: 1 } } });
+  assert.equal(tracked[1].state, 'attention');
+  assert.equal(tracked[3].detail, '3 tracks found (candidates, unverified)');
+
+  const failedImport = processingPhases({ ...empty, segments: 1, importJob: { state: 'failed', error: { message: 'Unsupported codec.' } } });
+  assert.deepEqual([failedImport[0].state, failedImport[0].detail], ['attention', 'Unsupported codec.']);
+});

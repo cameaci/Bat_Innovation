@@ -5,7 +5,7 @@ import { expect, test } from '@playwright/test';
 import type { BatAPI } from '../src/contracts';
 import { launch, quit, type RunningShell } from './shell-helpers';
 import { cleanupDraftShell, closeWindow as close, digests, expand, fixtures, goTo, latestRun, openAt as open, openSurvey, preparedReview,
-  previewReady, reviewProgress as progress, savedReview, windowCards } from './ui-helpers';
+  previewReady, reviewProgress as progress, savedReview, windowCards, hideProcessing } from './ui-helpers';
 
 type Fixture = 'quiet_65' | 'quiet_9' | 'empty_middle' | 'brightness_9' | 'single';
 const SURVEY = 'Synthetic first review';
@@ -107,6 +107,7 @@ test('explicit first review keeps all quiet and incomplete windows visible with 
     // A new processing run starts with every window unreviewed again.
     await goTo(shell, 'Process');
     await shell.page.getByRole('button', { name: 'Generate motion summaries', exact: true }).click();
+    await hideProcessing(shell!);
     await expect.poll(async () => {
       const latest = await latestRun(shell!, sessionID);
       return latest.id !== run.id && latest.state !== 'running' && latest.state !== 'queued';

@@ -30,7 +30,7 @@ export function TracksCard({ disabled }: { disabled: boolean }) {
     </CardHeader>
     <CardContent className="space-y-3">
       <div className="flex flex-wrap gap-2">
-        <Button disabled={disabled || !run || activeRun(run) || running || survey.busy || survey.dirty} onClick={() => void survey.startTracking()}>
+        <Button disabled={disabled || !run || activeRun(run) || running || survey.busy || survey.dirty} onClick={async () => { if (await survey.startTracking()) survey.showProgress(true); }}>
           {running ? <Loader2 className="animate-spin" /> : <Route />}Find tracks
         </Button>
         {running && <Button variant="outline" onClick={() => void survey.cancelTracking()}><Square />Cancel tracking</Button>}

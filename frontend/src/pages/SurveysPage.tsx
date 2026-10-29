@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Camera, CircleCheck, CircleX, Film, MoonStar, Plus, RefreshCw } from 'lucide-react';
+import { WspLogo } from '../components/layout/WspLogo';
 import type { Health, RecordingSession, SummaryDetail, SummaryRun } from '../../../electron/src/contracts';
 import { getAPI } from '../api';
 import { localDate } from '../lib/time';
@@ -40,7 +41,7 @@ export function SurveysPage() {
   useEffect(() => { void refresh(); }, []);
 
   return <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-    <PageHeader title="Surveys" subtitle="Each survey holds the original videos of one camera and their reviewed motion windows."
+    <PageHeader title="Surveys" leading={<div className="flex items-center gap-2 border-r pr-4"><WspLogo className="h-8" /><span className="text-lg font-bold tracking-tight">Bat Innovation</span></div>} subtitle="Each survey holds the original videos of one camera and their reviewed motion windows."
       actions={<>
         <span role="status" className="flex items-center gap-1.5 text-sm text-muted-foreground">
           {loading ? <><RefreshCw className="h-4 w-4 animate-spin" />Checking backend...</>

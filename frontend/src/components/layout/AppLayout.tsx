@@ -9,6 +9,7 @@ import { CURRENT_SCHEMA, SurveyProvider, useSurvey } from '../../survey';
 import { Button } from '../ui/button';
 import { Sidebar } from './Sidebar';
 import { Messages } from './Messages';
+import { ProcessingDialog } from '../process/ProcessingDialog';
 
 const COLLAPSE_KEY = 'bat:sidebar-collapsed';
 function stored(): boolean { try { return localStorage.getItem(COLLAPSE_KEY) === 'true'; } catch { return false; } }
@@ -38,18 +39,19 @@ export function AppLayout() {
     setCollapsed(previous => { try { localStorage.setItem(COLLAPSE_KEY, String(!previous)); } catch { /* preference only */ } return !previous; });
   }
 
-  const sidebar = (locked: boolean) => <Sidebar surveyID={surveyID} surveyName={session?.display_name ?? 'Loading...'} collapsed={collapsed} locked={locked} onToggle={toggle} />;
+  const sidebar = (locked: boolean, processing?: { active: boolean; onOpen: () => void }) => <Sidebar surveyID={surveyID} surveyName={session?.display_name ?? 'Loading...'} collapsed={collapsed} locked={locked} onToggle={toggle} processing={processing} />;
   return <div className="flex min-h-screen">
     {!session && sidebar(false)}
     <main className={cn('min-w-0 flex-1 bg-gradient-to-br from-slate-50 to-slate-100 transition-[margin] duration-200', collapsed ? 'ml-[72px]' : 'ml-64')}>
       {error && <div className="p-8"><Messages error={error} /></div>}
-      {session && <SurveyProvider key={session.id} session={session}><SurveySidebar render={sidebar} /><NoticeReset /><StorageGate /><Outlet /></SurveyProvider>}
+      {session && <SurveyProvider key={session.id} session={session}><SurveySidebar render={sidebar} /><NoticeReset /><StorageGate /><Outlet /><ProcessingDialog /></SurveyProvider>}
     </main>
   </div>;
 }
 
-function SurveySidebar({ render }: { render: (locked: boolean) => React.ReactNode }) {
-  return <>{render(useSurvey().dirty)}</>;
+function SurveySidebar({ render }: { render: (locked: boolean, processing: { active: boolean; onOpen: () => void }) => React.ReactNode }) {
+  const survey = useSurvey();
+  return <>{render(survey.dirty, { active: survey.busy || survey.playback?.active === true, onOpen: () => survey.showProgress(true) })}</>;
 }
 
 /** A notice reports the last action on its own page; it does not follow the reviewer to another page. */

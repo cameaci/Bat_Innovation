@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { launch, quit, type RunningShell } from './shell-helpers';
-import { addVideos, cleanupDraftShell, createSurvey, fixtures, goTo, summarize } from './ui-helpers';
+import { addVideos, cleanupDraftShell, createSurvey, fixtures, goTo, summarize, findTracks } from './ui-helpers';
 
 test.skip(process.platform !== 'linux', 'Media processing E2E is verified on Linux only.');
 
@@ -17,8 +17,7 @@ test('Watch plays the prepared copy continuously and rings every tracked target 
     await createSurvey(shell, 'Synthetic watch survey');
     await addVideos(shell, [sources.two_dots, sources.crossing]);
     await summarize(shell);
-    await shell.page.getByRole('button', { name: 'Find tracks', exact: true }).click();
-    await expect(shell.page.getByRole('status').filter({ hasText: /^Tracking complete:/ })).toBeVisible({ timeout: 60_000 });
+    await findTracks(shell);
     await goTo(shell, 'Watch');
     const video = shell.page.getByLabel('Playback copy', { exact: true });
     await expect(video).toBeVisible({ timeout: 60_000 });

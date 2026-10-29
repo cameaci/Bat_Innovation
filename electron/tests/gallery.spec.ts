@@ -6,7 +6,7 @@ import { expect, test, type Locator } from '@playwright/test';
 import type { BatAPI, ReviewHistory } from '../src/contracts';
 import { launch, quit, type RunningShell } from './shell-helpers';
 import { cleanupDraftShell, closeWindow, digests, displayedPTS, expand, fixtures, goTo, latestRun, openAt, preparedReview, previewReady,
-  reviewProgress, savedReview as review, windowCards as cards } from './ui-helpers';
+  reviewProgress, savedReview as review, windowCards as cards, hideProcessing } from './ui-helpers';
 
 type Fixture = 'quiet_240' | 'vfr_65' | 'earlier_9' | 'empty_middle' | 'brightness_9';
 type BlobCounts = { live: number; peak: number; created: number; revoked: number; imageLive: number; videoLive: number };
@@ -357,6 +357,7 @@ test('a real processing write failure stays visible and unresolved in the galler
     await goTo(shell, 'Process');
     const status = shell.page.getByRole('status').filter({ hasText: /^Run / });
     await shell.page.getByRole('button', { name: 'Generate motion summaries', exact: true }).click();
+    await hideProcessing(shell);
     await expect(status).toHaveText(/^Run failed: 0 of 1 windows complete$/, { timeout: 60_000 });
     await expect(shell.page.getByText('1 failed', { exact: true })).toBeVisible();
     await goTo(shell, 'Review');
@@ -376,6 +377,7 @@ test('a real processing write failure stays visible and unresolved in the galler
     expect(removed.status, removed.stderr).toBe(0);
     await goTo(shell, 'Process');
     await shell.page.getByRole('button', { name: 'Generate motion summaries', exact: true }).click();
+    await hideProcessing(shell);
     await expect(status).toHaveText(/^Run complete: 1 of 1 windows complete$/, { timeout: 60_000 });
     expect((await history(shell, failed.windows[0]!.id)).events).toEqual([]);
     await quit(shell); shell = undefined;

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { launch, quit, type RunningShell } from './shell-helpers';
-import { addVideos, cleanupDraftShell, closeWindow, createSurvey, fixtures, goTo, openAt, previewReady, selectFiles, summarize } from './ui-helpers';
+import { addVideos, cleanupDraftShell, closeWindow, createSurvey, fixtures, goTo, openAt, previewReady, selectFiles, summarize, findTracks } from './ui-helpers';
 
 test.skip(process.platform !== 'linux', 'Media processing E2E is verified on Linux only.');
 
@@ -54,8 +54,7 @@ test('a detector recording proposes its sync from file clocks only with a declar
     await createSurvey(shell, 'Synthetic call survey');
     await addVideos(shell, [sources.two_dots]);
     await summarize(shell);
-    await shell.page.getByRole('button', { name: 'Find tracks', exact: true }).click();
-    await expect(shell.page.getByRole('status').filter({ hasText: /^Tracking complete:/ })).toBeVisible({ timeout: 60_000 });
+    await findTracks(shell);
     await selectFiles(shell, [sources.call_wav]);
     await shell.page.getByRole('button', { name: 'Add audio (WAV)', exact: true }).click();
     const recording = shell.page.getByRole('listitem', { name: 'Recording detector-calls.wav' });

@@ -34,7 +34,8 @@ export interface Survey {
   run: SummaryDetail | null;
   /** The run manifest was re-read and its sources revalidated by the backend on the last poll. */
   verified: boolean;
-  startRun: (windowSeconds: number) => Promise<void>;
+  /** True once the backend accepted the run. */
+  startRun: (windowSeconds: number) => Promise<boolean>;
   cancelRun: () => Promise<void>;
   cancelling: boolean;
   reloadRun: () => void;
@@ -47,7 +48,7 @@ export interface Survey {
   /** Latest tracking run of the selected summary run, with per-window track counts. */
   tracking: TrackingRun | null;
   /** Track the selected summary run with these settings (default: those of the latest run). */
-  startTracking: (settings?: TrackingSettings) => Promise<void>;
+  startTracking: (settings?: TrackingSettings) => Promise<boolean>;
   cancelTracking: () => Promise<void>;
   /** Counting gates drawn on this survey's scene (all revisions' current state, including retired). */
   gates: Gate[];
@@ -61,6 +62,9 @@ export interface Survey {
   playback: PlaybackStatus | null;
   startPlayback: () => Promise<void>;
   startEnhanced: (segmentID: string) => Promise<void>;
+  /** The processing window (all pipeline steps with their progress) is shown. */
+  progressOpen: boolean;
+  showProgress: (open: boolean) => void;
 }
 
 const SurveyContext = createContext<Survey | null>(null);
@@ -76,6 +80,7 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const clearNotice = useCallback(() => setNotice(''), []);
+  const [progressOpen, showProgress] = useState(false);
   const [importJob, setImportJob] = useState<ImportJob | null>(null);
   const [runs, setRuns] = useState<SummaryRun[]>([]);
   const [runID, setRunID] = useState('');
@@ -315,11 +320,12 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
   }
 
   async function startTracking(settings?: TrackingSettings) {
-    if (!runID) return;
+    if (!runID) return false;
     setError(''); setNotice('');
     const chosen = settings ?? settingsOf(tracking);
     const value = await request(api => api.startTracking(runID, chosen));
     if (value) { setTracking(value); setTrackingRefresh(current => current + 1); }
+    return value !== undefined;
   }
 
   async function cancelTracking() {
@@ -332,6 +338,7 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
     setError(''); setNotice('');
     const value = await request(api => api.startSummaries({ session_id: session.id, window_seconds: windowSeconds }));
     if (value) { setRuns(previous => [value, ...previous.filter(item => item.id !== value.id)]); setRun(value); setRunID(value.id); setRefresh(current => current + 1); }
+    return value !== undefined;
   }
 
   async function cancelRun() {
@@ -347,7 +354,7 @@ export function SurveyProvider({ session, children }: { session: RecordingSessio
     runs, runID, selectRun: id => { setRunID(id); setRefresh(current => current + 1); }, run, verified,
     startRun, cancelRun, cancelling, reloadRun: () => setRefresh(current => current + 1),
     setDraft, dirty, busy, setExportBusy, tracking, startTracking, cancelTracking, gates, saveGate, addGates, audio, reloadAudio,
-    playback, startPlayback, startEnhanced,
+    playback, startPlayback, startEnhanced, progressOpen, showProgress,
   };
   return <SurveyContext.Provider value={value}>{children}</SurveyContext.Provider>;
 }
