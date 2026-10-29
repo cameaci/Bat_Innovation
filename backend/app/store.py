@@ -14,7 +14,30 @@ MEDIA_SCHEMA_VERSION = 2
 SUMMARY_SCHEMA_VERSION = 3
 REVIEW_SCHEMA_VERSION = 4
 QA_SCHEMA_VERSION = 5
-REVIEW_SCHEMA_VERSIONS = (REVIEW_SCHEMA_VERSION, QA_SCHEMA_VERSION)
+# Feature expansion steps (implementation/feature-expansion.md); each requires the previous version.
+MODALITY_SCHEMA_VERSION = 6
+TRACKING_SCHEMA_VERSION = 7
+COUNT_SCHEMA_VERSION = 8
+CANDIDATE_SCHEMA_VERSION = 9
+AUDIO_SCHEMA_VERSION = 10
+PROXY_SCHEMA_VERSION = 11
+TRACKS_V2_SCHEMA_VERSION = 12
+GATE_SPAN_SCHEMA_VERSION = 13
+SAMPLE_CHECK_SCHEMA_VERSION = 14
+TEMPLATE_SCHEMA_VERSION = 15
+ENHANCED_SCHEMA_VERSION = 16
+LABEL_SCHEMA_VERSION = 17
+SUNSET_SCHEMA_VERSION = 18
+RENDER_SCHEMA_VERSION = 19
+AUDIO_LABEL_SCHEMA_VERSION = 20
+EXPANSION_SCHEMA_VERSIONS = (MODALITY_SCHEMA_VERSION, TRACKING_SCHEMA_VERSION, COUNT_SCHEMA_VERSION, CANDIDATE_SCHEMA_VERSION,
+                             AUDIO_SCHEMA_VERSION, PROXY_SCHEMA_VERSION, TRACKS_V2_SCHEMA_VERSION, GATE_SPAN_SCHEMA_VERSION,
+                             SAMPLE_CHECK_SCHEMA_VERSION, TEMPLATE_SCHEMA_VERSION,
+                             ENHANCED_SCHEMA_VERSION, LABEL_SCHEMA_VERSION, SUNSET_SCHEMA_VERSION,
+                             RENDER_SCHEMA_VERSION, AUDIO_LABEL_SCHEMA_VERSION)
+CURRENT_SCHEMA_VERSION = EXPANSION_SCHEMA_VERSIONS[-1]
+QA_SCHEMA_VERSIONS = (QA_SCHEMA_VERSION, *EXPANSION_SCHEMA_VERSIONS)
+REVIEW_SCHEMA_VERSIONS = (REVIEW_SCHEMA_VERSION, *QA_SCHEMA_VERSIONS)
 SUMMARY_SCHEMA_VERSIONS = (SUMMARY_SCHEMA_VERSION, *REVIEW_SCHEMA_VERSIONS)
 MEDIA_SCHEMA_VERSIONS = (MEDIA_SCHEMA_VERSION, *SUMMARY_SCHEMA_VERSIONS)
 
@@ -37,7 +60,7 @@ def initialise(db_path: Path) -> None:
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         if version not in (0, SCHEMA_VERSION, *MEDIA_SCHEMA_VERSIONS):
             raise DatabaseSchemaError(
-                f"Unsupported database schema version {version}; expected 1, 2, 3, 4 or 5"
+                f"Unsupported database schema version {version}; expected 1 to {CURRENT_SCHEMA_VERSION}"
             )
         if version == 0:
             connection.execute("BEGIN IMMEDIATE")
@@ -68,14 +91,45 @@ def initialise(db_path: Path) -> None:
             connection.execute("SELECT window_id, revision, decision, observations_json FROM review_window LIMIT 1")
             connection.execute("SELECT window_id, revision, before_json, after_json FROM review_event LIMIT 1")
 
-        if version == QA_SCHEMA_VERSION:
+        if version in QA_SCHEMA_VERSIONS:
             connection.execute("SELECT window_id, revision, value_json FROM qa_window LIMIT 1")
             connection.execute("SELECT window_id, revision, before_json, after_json FROM qa_event LIMIT 1")
+        if version >= MODALITY_SCHEMA_VERSION:
+            connection.execute("SELECT modality, modality_provenance FROM segment LIMIT 1")
+        if version >= TRACKING_SCHEMA_VERSION:
+            connection.execute("SELECT id, summary_run_id, state FROM tracking_run LIMIT 1")
+            connection.execute("SELECT id, run_id, points FROM track LIMIT 1")
+        if version >= COUNT_SCHEMA_VERSION:
+            connection.execute("SELECT id, revision, value_json FROM gate LIMIT 1")
+            connection.execute("SELECT tracking_run_id, gate_id, revision FROM count_event LIMIT 1")
+        if version >= CANDIDATE_SCHEMA_VERSION:
+            connection.execute("SELECT track_id, revision, decision FROM candidate_event LIMIT 1")
+        if version >= AUDIO_SCHEMA_VERSION:
+            connection.execute("SELECT id, sha256, source_mode FROM audio_source LIMIT 1")
+            connection.execute("SELECT audio_source_id, revision, audio_sample FROM audio_anchor_event LIMIT 1")
+        if version >= SAMPLE_CHECK_SCHEMA_VERSION:
+            connection.execute("SELECT id, presses_json, result_json FROM sample_check LIMIT 1")
+        if version >= TEMPLATE_SCHEMA_VERSION:
+            connection.execute("SELECT id, value_json, retired_utc FROM site_template LIMIT 1")
+        if version >= ENHANCED_SCHEMA_VERSION:
+            connection.execute("SELECT kind FROM proxy LIMIT 1")
+        if version >= LABEL_SCHEMA_VERSION:
+            connection.execute("SELECT id, track_ids_json, undoes FROM track_label_event LIMIT 1")
+        if version >= SUNSET_SCHEMA_VERSION:
+            connection.execute("SELECT session_id, revision, sunset FROM sunset_event LIMIT 1")
+        if version >= RENDER_SCHEMA_VERSION:
+            connection.execute("SELECT id, kind, state, result_json FROM render_job LIMIT 1")
+        if version >= AUDIO_LABEL_SCHEMA_VERSION:
+            connection.execute("SELECT label FROM audio_source LIMIT 1")
 
 
 def schema_version(db_path: Path) -> int:
     with closing(connect(db_path)) as connection:
-        return int(connection.execute("PRAGMA user_version").fetchone()[0])
+        return schema_version_of(connection)
+
+
+def schema_version_of(connection: sqlite3.Connection) -> int:
+    return int(connection.execute("PRAGMA user_version").fetchone()[0])
 
 
 def upgrade_media(db_path: Path) -> None:
@@ -110,6 +164,39 @@ def upgrade_media(db_path: Path) -> None:
         connection.execute(f"PRAGMA user_version={MEDIA_SCHEMA_VERSION}")
 
 
+MODALITIES = ("active_ir", "rendered_thermal")
+THERMAL_LABEL = "Rendered thermal - no radiometric temperature analysis"
+
+
+def upgrade_modality(db_path: Path) -> None:
+    """Explicit v5 -> v6 transition: record each segment's declared visual modality."""
+    if not db_path.is_file():
+        raise DatabaseSchemaError("Modality upgrade requires an existing version 5 database")
+    with closing(connect(db_path)) as connection, connection:
+        connection.execute("BEGIN IMMEDIATE")
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
+        if version >= MODALITY_SCHEMA_VERSION:
+            return
+        if version != QA_SCHEMA_VERSION:
+            raise DatabaseSchemaError("Modality upgrade requires database schema version 5")
+        connection.execute("SELECT window_id FROM qa_window LIMIT 1")
+        connection.execute("""ALTER TABLE segment ADD COLUMN modality TEXT NOT NULL DEFAULT 'active_ir'
+            CHECK(modality IN ('active_ir', 'rendered_thermal'))""")
+        connection.execute("ALTER TABLE segment ADD COLUMN modality_provenance TEXT")
+        connection.execute("UPDATE segment SET modality_provenance='recorded by the IR-only version'")
+        connection.execute(f"PRAGMA user_version={MODALITY_SCHEMA_VERSION}")
+
+
+def upgrade_expansion(db_path: Path) -> None:
+    """Steps after the QA schema, run in order by one explicit storage upgrade action."""
+    from . import audio_store, candidate_store, count_store, flow, label_store, renders, proxy_store, sample_store, template_store, tracking_store
+
+    for step in (upgrade_modality, tracking_store.upgrade, count_store.upgrade, candidate_store.upgrade, audio_store.upgrade,
+                 proxy_store.upgrade, tracking_store.upgrade_v2, count_store.upgrade_spans, sample_store.upgrade,
+                 template_store.upgrade, proxy_store.upgrade_kind, label_store.upgrade, flow.upgrade, renders.upgrade, audio_store.upgrade_label):
+        step(db_path)
+
+
 def session_exists(db_path: Path, session_id: str) -> bool:
     with closing(connect(db_path)) as connection:
         return connection.execute("SELECT 1 FROM recording_session WHERE id=?", (session_id,)).fetchone() is not None
@@ -141,14 +228,17 @@ def clock_anchor(db_path: Path, session_id: str) -> dict | None:
     return json.loads(row[0]) if row and row[0] else None
 
 
-def commit_segments(db_path: Path, session_id: str, sources: list[tuple[Path, dict]]) -> None:
+def commit_segments(db_path: Path, session_id: str, sources: list[tuple[Path, dict]], modality: str = "active_ir") -> None:
     """Commit the whole inspected batch, with duplicate checks inside the transaction."""
     with closing(connect(db_path)) as connection, connection:
         # A busy database must not hold the job/shutdown lock for the default 30 seconds.
         connection.execute("PRAGMA busy_timeout=1000")
         connection.execute("BEGIN IMMEDIATE")
-        if connection.execute("PRAGMA user_version").fetchone()[0] not in MEDIA_SCHEMA_VERSIONS:
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
+        if version not in MEDIA_SCHEMA_VERSIONS:
             raise DatabaseSchemaError("Explicit media schema upgrade is required")
+        if modality not in MODALITIES or (modality != "active_ir" and version < MODALITY_SCHEMA_VERSION):
+            raise DatabaseSchemaError("Explicit storage upgrade is required to record a rendered thermal modality")
         if connection.execute("SELECT 1 FROM recording_session WHERE id=?", (session_id,)).fetchone() is None:
             raise ValueError("Session does not exist")
         existing = connection.execute("SELECT sha256, position, source_path, identity_json, session_id FROM segment").fetchall()
@@ -166,11 +256,16 @@ def commit_segments(db_path: Path, session_id: str, sources: list[tuple[Path, di
             hashes.add(checksum)
             paths.add(str(source_path))
             identities.add(identity_json)
-            connection.execute(
-                """INSERT INTO segment (id, session_id, position, source_path, sha256, identity_json, metadata_json)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (str(uuid4()), session_id, position, str(source_path), checksum, identity_json, json.dumps(metadata)),
-            )
+            values = (str(uuid4()), session_id, position, str(source_path), checksum, identity_json, json.dumps(metadata))
+            if version >= MODALITY_SCHEMA_VERSION:
+                connection.execute(
+                    """INSERT INTO segment (id, session_id, position, source_path, sha256, identity_json, metadata_json,
+                       modality, modality_provenance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'declared at import')""",
+                    (*values, modality))
+            else:
+                connection.execute(
+                    """INSERT INTO segment (id, session_id, position, source_path, sha256, identity_json, metadata_json)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""", values)
             position += 1
         connection.execute("INSERT OR IGNORE INTO session_media (session_id) VALUES (?)", (session_id,))
 

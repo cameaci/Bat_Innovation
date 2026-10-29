@@ -23,7 +23,7 @@ def conflict() -> QAError:
 
 
 def require_schema(connection: sqlite3.Connection) -> None:
-    if connection.execute("PRAGMA user_version").fetchone()[0] != store.QA_SCHEMA_VERSION:
+    if connection.execute("PRAGMA user_version").fetchone()[0] not in store.QA_SCHEMA_VERSIONS:
         raise QAError("qa_schema_required", "Explicit QA schema upgrade is required.", 409)
 
 
@@ -33,7 +33,7 @@ def upgrade(db_path: Path) -> None:
     with closing(store.connect(db_path)) as connection, connection:
         connection.execute("BEGIN IMMEDIATE")
         version = connection.execute("PRAGMA user_version").fetchone()[0]
-        if version == store.QA_SCHEMA_VERSION:
+        if version in store.QA_SCHEMA_VERSIONS:
             return
         if version != store.REVIEW_SCHEMA_VERSION:
             raise store.DatabaseSchemaError("QA upgrade requires database schema version 4")

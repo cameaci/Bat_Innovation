@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const { createHash } = require('node:crypto');
-const { access, mkdtemp, readFile, readdir, rm, symlink } = require('node:fs/promises');
+const { access, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } = require('node:fs/promises');
 const { createServer } = require('node:net');
 const { createServer: httpServer } = require('node:http');
 const { tmpdir } = require('node:os');
@@ -110,6 +110,13 @@ async function availablePort() {
       server.close(error => error ? reject(error) : resolve(address.port));
     });
   });
+}
+
+/** An existing v1 database from before the media upgrade; a brand-new data folder now starts at the current schema. */
+function legacyDatabase(dataDir) {
+  const created = spawnSync(python, ['-c', 'import sys; from pathlib import Path; from backend.app import store; store.initialise(Path(sys.argv[1]) / "bat_innovation.sqlite3")', dataDir],
+    { cwd: repoRoot, encoding: 'utf8', timeout: 15000 });
+  assert.equal(created.status, 0, created.stderr);
 }
 
 function expectFailure(result, code) {
@@ -265,6 +272,7 @@ test('binary preview transport admits only one in-flight content response', { ti
 
 test('summary bridge requires explicit storage upgrade and rejects paths, invalid durations and unauthorized routes', { timeout: 30000 }, async t => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'bat-summary-contract-'));
+  legacyDatabase(dataDir);
   const runtime = new BackendRuntime();
   t.after(async () => { await runtime.stop(); await rm(dataDir, { recursive: true, force: true }); });
   const port = await availablePort();
@@ -363,6 +371,7 @@ test('real PyAV summaries and PNG evidence survive runtime restart after a media
   assert.equal(generated.status, 0, generated.stderr);
   const source = JSON.parse(generated.stdout).quiet_9;
   const original = await readFile(source);
+  legacyDatabase(dataDir);
   assert.equal((await first.start({ python, repoRoot, dataDir })).ok, true);
   assert.deepEqual(await first.upgradeMedia(), { ok: true, value: { schema_version: 2 } });
   const created = await first.createSession({ display_name: 'Synthetic summary persistence', camera_ref: 'Synthetic camera' });
@@ -432,6 +441,7 @@ test('real PyAV summaries and PNG evidence survive runtime restart after a media
 
 test('review bridge bounds IDs, fields, source PTS and history cursors and authenticates every route', { timeout: 30000 }, async t => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'bat-review-contract-'));
+  legacyDatabase(dataDir);
   const runtime = new BackendRuntime();
   t.after(async () => { await runtime.stop(); await rm(dataDir, { recursive: true, force: true }); });
   const port = await availablePort();
@@ -516,6 +526,7 @@ test('real provisional review retains source spans and audit revisions across re
   assert.equal(generated.status, 0, generated.stderr);
   const source = JSON.parse(generated.stdout).quiet_9;
   const original = await readFile(source);
+  legacyDatabase(dataDir);
   assert.equal((await first.start({ python, repoRoot, dataDir })).ok, true);
   assert.equal((await first.upgradeMedia()).ok, true);
   const created = await first.createSession({ display_name: 'Synthetic review persistence', camera_ref: 'Synthetic camera' });
@@ -665,6 +676,34 @@ test('missing Python produces an explicit startup failure and leaves no child', 
   assert.match(result.error.message, /could not start.*Python/i);
   assert.equal(runtime.pid, undefined);
   expectFailure(await runtime.health(), 'unavailable');
+});
+
+test('missing packaged backend produces an explicit reinstall failure and leaves no child', { timeout: 10000 }, async t => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'bat-packaged-missing-'));
+  const runtime = new BackendRuntime();
+  t.after(async () => { await runtime.stop(); await rm(dataDir, { recursive: true, force: true }); });
+  const result = await runtime.start({ packaged: path.join(dataDir, 'missing-backend.exe'), repoRoot, dataDir });
+  expectFailure(result, 'unavailable');
+  assert.match(result.error.message, /Reinstall Bat Innovation/);
+  assert.equal(runtime.pid, undefined);
+});
+
+test('packaged launch runs the frozen executable with its own working directory and stops with it', { timeout: 30000, skip: process.platform === 'win32' }, async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'bat-packaged-'));
+  const dataDir = path.join(directory, 'data');
+  // Stand-in for the frozen executable: a launcher script that runs the same backend module.
+  const install = path.join(directory, 'install');
+  await mkdir(install);
+  const executable = path.join(install, 'bat-backend');
+  await writeFile(executable, `#!/bin/sh\ncd "${repoRoot}" && exec "${python}" -m backend.app\n`, { mode: 0o755 });
+  const runtime = new BackendRuntime();
+  t.after(async () => { await runtime.stop(); await rm(directory, { recursive: true, force: true }); });
+  const result = await runtime.start({ packaged: executable, repoRoot: install, dataDir });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const pid = runtime.pid;
+  assert.ok(pid);
+  await runtime.stop();
+  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
 });
 
 test('data directory symlink into the repository is rejected without creating app data', { timeout: 10000 }, async t => {

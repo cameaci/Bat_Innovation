@@ -49,9 +49,9 @@ test('real export runtime saves bounded three-file snapshot atomically, private 
   // inside the hashed manifest.json without a recursive hash).
   const disk=JSON.parse(await readFile(path.join(destination,saved.value.folder_name,'manifest.json'),'utf8'));
   assert.equal(validExportDiskManifest(disk,run.id),true);
-  assert.deepEqual(Object.keys(disk.files).sort(),['audit','observations']);
+  assert.deepEqual(Object.keys(disk.files).sort(),['audit','counts','observations','tracks']);
   assert.equal(validExportManifest(disk,run.id),false);
-  for(const kind of ['audit','observations']) {
+  for(const kind of ['audit','observations','tracks','counts']) {
     assert.deepEqual(disk.files[kind],done.manifest.files[kind]);
   }
   assert.equal(validExportDiskManifest({...disk,files:{...disk.files,manifest:done.manifest.files.manifest}},run.id),false);
@@ -79,7 +79,7 @@ for (const mode of ['wrong-mime','wrong-length','wrong-hash','truncated','oversi
 }
 
 function manifest(run) {
-  return {schema_version:'bat-provisional-csv-v1',provisional_label:'PROVISIONAL — NOT ECOLOGICALLY FINALISED',run_id:run,
+  return {schema_version:'bat-provisional-csv-v4',provisional_label:'PROVISIONAL — NOT ECOLOGICALLY FINALISED',run_id:run,
     files:Object.fromEntries(Object.entries(EXPORT_FILES).map(([key,name])=>[key,{name,bytes:10,sha256:'0'.repeat(64)}]))};
 }
 for(const mode of ['enospc','rename-obstruction','cancel']) {

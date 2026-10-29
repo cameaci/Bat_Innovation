@@ -184,3 +184,163 @@ test('malformed or out-of-range displayed source evidence is ineligible', async 
   assert.equal(displayedPTSFor({ ...frame, timeBase: { num: '1', den: '0' } }, selected, binding, 'preview-a', 'start'), null);
   assert.equal(displayedPTSFor(frame, selected, { ...binding, interval: { ...binding.interval, start_pts: { num: '0', den: '1' } } }, 'preview-a', 'start'), null);
 });
+
+test('setup guide measures a clicked detection and warns about badly placed gates', async () => {
+  const guide = await rendererModule('lib/setupGuide');
+  const result = { detections: [{ pts: '400', accepted: [[100, 100, 110, 110], [300, 50, 304, 54]], rejected: [], measures: [[78, 14.2, 1], [12, 30, -1]] }] };
+  const measured = guide.measureAt(result, 400, [104, 106], 12);
+  assert.deepEqual(measured, { area: 78, contrast: 14.2, polarity: 'light', targetPx: 10 });
+  assert.equal(guide.measureAt(result, 440, [104, 106], 12), null, 'only the displayed frame is measured');
+  assert.equal(guide.measureAt(result, 400, [600, 600], 12), null, 'a click far from any detection measures nothing');
+  // A bat much larger than the set size is found as several pieces: one click measures the group, not one piece.
+  const pieces = { detections: [{ pts: '400', rejected: [], accepted: [[1000, 500, 1030, 530], [1040, 520, 1070, 560], [1080, 540, 1120, 600], [1500, 100, 1510, 110]],
+    measures: [[700, 9, 1], [900, 8, 1], [1500, 10, 1], [80, 9, 1]] }] };
+  const grouped = guide.measureAt(pieces, 400, [1015, 515], 12);
+  assert.equal(grouped.pieces, 3, 'the far piece is another target');
+  assert.equal(grouped.polarity, 'light');
+  const mixed = { detections: [{ ...pieces.detections[0], measures: [[700, 9, 1], [900, 8, -1], [1500, 10, 1], [80, 9, 1]] }] };
+  assert.equal(guide.measureAt(mixed, 400, [1015, 515], 12).polarity, 'both', 'a bat with lighter and darker pieces keeps both');
+  assert.equal(grouped.targetPx, Math.round(Math.sqrt(120 * 100)));
+  assert.equal(guide.measureAt({ detections: [{ ...pieces.detections[0], accepted: [[0, 0, 600, 600]], measures: [[300000, 9, 1]] }] }, 400, [300, 300], 12).targetPx, guide.MAX_TARGET_PX);
+  const settings = { target_px: 12, polarity: 'both', threshold: 7, target_speed: 4 };
+  assert.deepEqual(guide.applyMeasured(settings, measured), { ...settings, target_px: 10, polarity: 'light', threshold: 7 });
+  assert.equal(guide.applyMeasured(settings, { ...measured, contrast: 6.4 }).threshold, 3);
+  const frame = { frame_w: 640, frame_h: 360 };
+  const across = { ...frame, kind: 'line', points: [[320, 20], [320, 340]] };
+  const rightwards = Array.from({ length: 10 }, () => [100, 3]);
+  assert.deepEqual(guide.gateWarnings(across, [], rightwards), []);
+  assert.match(guide.gateWarnings({ ...frame, kind: 'line', points: [[20, 180], [600, 180]] }, [], rightwards).join(' '), /along this line/);
+  assert.match(guide.gateWarnings({ ...frame, kind: 'rect', points: [[2, 2], [200, 2], [200, 200], [2, 200]] }, [], []).join(' '), /frame edge/);
+  assert.match(guide.gateWarnings(across, [[[300, 150], [340, 150], [340, 190], [300, 190]]], []).join(' '), /excluded zone/);
+  assert.equal(guide.testWarnings({ frames: 100, repeated_frames: 32, gain_jumps: 1, limit_frames: 0, static_detections: 0 }).length, 2);
+  // The set size against what the test measured: much smaller targets get a size; much larger ones a request to click.
+  const measuredAt = diameter => ({ detections: [{ pts: '1', rejected: [], accepted: Array(40).fill([0, 0, 1, 1]),
+    measures: Array(40).fill([Math.PI * (diameter / 2) ** 2, 9, 1]) }] });
+  assert.deepEqual(guide.sizeAdvice(measuredAt(3.7), 12).suggestion, 4);
+  assert.equal(guide.sizeAdvice(measuredAt(10), 12), null);
+  assert.equal(guide.sizeAdvice(measuredAt(74.6), 203), null, 'a blurred large bat measures well under its size: no advice to shrink');
+  const larger = guide.sizeAdvice(measuredAt(21), 12);
+  assert.equal(larger.suggestion, null);
+  assert.match(larger.message, /Click a bat/);
+  assert.equal(guide.sizeAdvice({ detections: [{ pts: '1', rejected: [], accepted: [[0, 0, 1, 1]], measures: [[10, 9, 1]] }] }, 12), null, 'too few detections to judge');
+});
+
+test('the declared recording clock is shown in its own offset', async () => {
+  const time = await rendererModule('lib/time');
+  assert.equal(time.anchoredClock('2026-08-10T21:08:13.584+01:00', 1.5), '21:08:15.084');
+  assert.equal(time.anchoredClock('2026-08-10T23:59:59.900Z', 0.2), '00:00:00.100');
+  assert.equal(time.anchoredClock('not a time', 1), null);
+});
+
+test('the track table joins labels and gate crossings, filters and selects by area', async () => {
+  const table = await rendererModule('lib/trackTable');
+  const segment = (id, first) => ({ id, metadata: { time_base: { num: '1', den: '1000' }, first_pts: String(first) } });
+  const segments = [segment('s1', 0), segment('s2', 5000)];
+  const candidate = (id, segment_id, index, first, last, quality, points = 10) => ({ track_id: id, segment_id, track_index: index, first_pts: String(first),
+    last_pts: String(last), point_count: points, quality, window_id: null, revision: 0, decision: null });
+  const candidates = [candidate('b', 's2', 0, 6000, 6500, 'uncertain', 4), candidate('a', 's1', 1, 2000, 4000, 'coherent', 30), candidate('n', 's1', 0, 1000, 1100, 'noise')];
+  const labels = { events: [], custom: [], categories: ['exit'], tracks: { a: { category: 'exit', species: 'Pipistrellus pygmaeus', comment: '', actor: 'R', utc: '', event_id: 'e' } } };
+  const crossings = [{ track_id: 'a', direction: 'A_to_B' }, { track_id: 'b', direction: 'B_to_A' }];
+  const rows = table.trackRows(candidates, labels, crossings, 'B_to_A', segments);
+  assert.deepEqual(rows.map(row => row.id), ['n', 'a', 'b'], 'survey order: video, then time');
+  assert.deepEqual(rows.map(row => row.crossings), [[], ['out'], ['in']]);
+  assert.equal(rows[1].seconds, 2);
+  assert.equal(rows[2].start, 1, 'seconds from the start of its own video');
+  assert.equal(rows[1].category, 'exit');
+  const all = { quality: 'all', label: 'all', crossed: false, video: null };
+  assert.deepEqual(table.filterRows(rows, { ...all, label: 'unlabelled' }, 'time').map(row => row.id), ['n', 'b']);
+  assert.deepEqual(table.filterRows(rows, { ...all, crossed: true, video: 's1' }, 'time').map(row => row.id), ['a']);
+  assert.deepEqual(table.filterRows(rows, all, 'points').map(row => row.id), ['a', 'n', 'b']);
+  const square = [[0, 0], [10, 0], [10, 10], [0, 10]];
+  assert.equal(table.inside([5, 5], square), true);
+  assert.equal(table.inside([15, 5], square), false);
+  assert.deepEqual(table.tracksInArea([{ id: 'in', x: [20, 5], y: [20, 5] }, { id: 'out', x: [20, 30], y: [5, 5] }], square), ['in']);
+  assert.equal(table.categoryName('fly_by'), 'fly-by');
+});
+
+test('the emergence profile has a column per minute of each video and a running net', async () => {
+  const profile = await rendererModule('lib/profile');
+  const layer = { bins: [{ segment_id: 'v1', minute: 1, entered: 1, exited: 4 }, { segment_id: 'v2', minute: 0, entered: 0, exited: 2 }],
+    first_exit: null, last_exit: null, peak_minute: null, peak_exits_per_second: 0 };
+  const columns = profile.profileColumns(layer, [{ id: 'v1', minutes: 3 }, { id: 'v2', minutes: 1 }]);
+  assert.deepEqual(columns.map(column => [column.video, column.minute, column.exited, column.entered, column.net]),
+    [[1, 0, 0, 0, 0], [1, 1, 4, 1, 3], [1, 2, 0, 0, 3], [2, 0, 2, 0, 5]]);
+  assert.equal(columns.reduce((sum, column) => sum + column.exited, 0), 6, 'columns add up to the layer');
+  // The declared clock is stored in UTC; the typed sunset carries its own offset.
+  assert.equal(profile.sunsetMinute('2026-08-10T19:50:30Z', '21:04+01:00'), 13.5);
+  assert.equal(profile.sunsetMinute('2026-08-10T23:10:00Z', '21:04+01:00'), -186, 'a clock after midnight refers to the evening before');
+  assert.equal(profile.sunsetMinute('2026-08-10T19:50:30Z', '21:04'), null, 'no offset, no position');
+  assert.equal(profile.sunsetMinute('not a clock', '21:04+01:00'), null);
+});
+
+test('the evidence report has every section, the provisional banner and escapes every entry', async () => {
+  const report = await rendererModule('lib/report');
+  const segment = { id: 's1', position: 0, continuity: 'unknown', continuity_provenance: null, source_state: 'ready', modality: 'active_ir',
+    metadata: { filename: '<img src=x onerror=1>.mp4', sha256: 'a'.repeat(64), width: 128, height: 96, time_base: { num: '1', den: '1000' }, first_pts: '0',
+      elapsed_end: { num: '125', den: '1' }, elapsed_last_time: { num: '124', den: '1' } } };
+  const layer = { bins: [{ segment_id: 's1', minute: 0, entered: 1, exited: 3 }], first_exit: { segment_id: 's1', seconds: 12 }, last_exit: { segment_id: 's1', seconds: 50 },
+    peak_minute: { segment_id: 's1', minute: 0, exited: 3 }, peak_exits_per_second: 1 };
+  const counts = { gate: { id: 'g1', name: 'Gable <b>', kind: 'line', points: [[64, 0], [64, 96]], frame_w: 128, frame_h: 96, revision: 2, entry_direction: 'B_to_A', hysteresis_px: 3 },
+    algorithm_version: 'gate-hysteresis-v2-m2', invalid_spans: [], profile: { layers: { algorithm: layer, reviewer: layer, qa: null }, sunset: { sunset: '21:04+01:00', source: 'almanac', actor: 'R', revision: 1, utc: '' },
+      clock_segment_id: null, minutes_after_sunset: null, note: '' },
+    layers: { algorithm: { entered: 1, exited: 3, net: 2, coherent: 4, uncertain: 1 }, reviewer: { entered: 1, exited: 3, net: 2, state: 'accepted', unresolved: 0, accepted: { actor: 'R', current: true } }, qa: null } };
+  const html = report.reportHTML({ generatedUTC: '2026-10-28T00:00:00Z', session: { display_name: 'Survey "1"', camera_ref: 'cam' }, segments: [segment], anchor: null,
+    review: { total: 5, reviewed: 2, unreviewed: 3 }, windows: 5, tracking: { id: 't', algorithm_version: 'tracks-v3', parameter_hash: 'h', parameters: { settings: {} }, track_counts: { s1: 1 }, finished_at_utc: 'x' },
+    counts: [counts], sampleChecks: {}, labels: { events: [], custom: [], categories: [], tracks: { k: { category: 'exit', species: 'Myotis <i>', comment: '', actor: 'R', utc: '', event_id: 'e' } } },
+    tracks: [{ segmentID: 's1', shown: 1, total: 1, paths: [{ index: 0, uncertain: false, points: [[1, 2], [3, 4]] }] }] });
+  for (const name of report.REPORT_SECTIONS) assert.ok(html.includes(`<h2>${name}</h2>`), name);
+  assert.match(html, /PROVISIONAL - NOT ECOLOGICALLY FINALISED/);
+  assert.ok(!html.includes('<img') && !html.includes('Gable <b>') && html.includes('Gable &lt;b&gt;') && !html.includes('<i>') && !/<script/i.test(html), 'entries are escaped and the page has no script');
+  assert.match(html, /2 of 5 planned windows have a first review/);
+  assert.match(html, /Sunset 21:04\+01:00/);
+  assert.match(html, /3 exits in minute 1 of video 1/);
+});
+
+test('call marks are placed on the anchored video and linked to the tracks alive during them', async () => {
+  const calls = await rendererModule('lib/calls');
+  const segment = { id: 'v1', metadata: { time_base: { num: '1', den: '1000' }, first_pts: '0', last_pts: '10000' } };
+  const source = { id: 'a1', anchor: { segment_id: 'v1', video_pts: '2000', audio_sample: 0 } };
+  const activity = { sample_rate: 1000, marks: [[500, 520, 20], [3000, 3010, 15], [20000, 20010, 15]] };
+  const placed = calls.callsInVideo(activity, source, segment);
+  assert.deepEqual(placed.map(call => [call.start, call.end]), [[2500, 2520], [5000, 5010]], 'audio time 0 is video 2 s; the mark past the video is left out');
+  assert.deepEqual(calls.callsInVideo(activity, { ...source, anchor: null }, segment), [], 'no anchor, no marks');
+  assert.deepEqual(calls.callsInVideo(activity, source, { ...segment, id: 'v2' }), [], 'only the anchored video');
+  const tracks = [{ id: 'during', segmentID: 'v1', first: 2400, last: 2510 }, { id: 'before', segmentID: 'v1', first: 1000, last: 2499 },
+    { id: 'after', segmentID: 'v1', first: 5011, last: 6000 }, { id: 'other video', segmentID: 'v2', first: 2400, last: 2600 }, { id: 'second', segmentID: 'v1', first: 5010, last: 5100 }];
+  assert.deepEqual([...calls.tracksDuringCalls(tracks, placed)].sort(), ['during', 'second']);
+});
+
+test('the processing window shows each pipeline step with its progress and what it waits for', async () => {
+  const { processingPhases } = await rendererModule('lib/processing');
+  const states = input => processingPhases(input).map(phase => `${phase.key}:${phase.state}`);
+  const empty = { segments: 0, importJob: null, run: null, playback: null, tracking: null };
+  assert.deepEqual(states(empty), ['import:not_started', 'summaries:waiting', 'copies:waiting', 'tracking:waiting']);
+
+  const counts = { planned: 4, pending: 1, complete: 2, running: 1, incomplete: 0, failed: 0 };
+  const running = processingPhases({ ...empty, segments: 2, run: { state: 'running', counts } });
+  assert.deepEqual(running.map(phase => phase.state), ['done', 'running', 'waiting', 'waiting']);
+  assert.equal(running[1].detail, '2 of 4 windows done');
+  assert.equal(running[1].percent, 50);
+
+  const copy = (segment_id, state) => ({ segment_id, state, kind: 'standard' });
+  const copying = processingPhases({ ...empty, segments: 2, run: { state: 'complete', counts: { ...counts, complete: 4, pending: 0, running: 0 } },
+    playback: { active: true, proxies: [copy('a', 'ready'), copy('b', 'running')], enhanced: [] } });
+  assert.deepEqual(copying.map(phase => phase.state), ['done', 'done', 'running', 'not_started']);
+  assert.equal(copying[2].detail, '1 of 2 videos ready');
+
+  // A copy that failed and was later prepared again counts as ready; one that never finished needs attention.
+  const retried = processingPhases({ ...empty, segments: 2, run: { state: 'complete', counts },
+    playback: { active: false, proxies: [copy('a', 'failed'), copy('a', 'ready'), copy('b', 'interrupted')], enhanced: [] } });
+  assert.equal(retried[2].state, 'attention');
+  assert.equal(retried[2].detail, '1 copy did not finish; prepare again on the Watch page.');
+
+  const tracking = processingPhases({ ...empty, segments: 1, run: { state: 'complete', counts }, tracking: { state: 'running', progress: [250, 1000], track_counts: {} } });
+  assert.equal(tracking[3].detail, '250 of 1,000 frames');
+  assert.equal(tracking[3].percent, 25);
+  const tracked = processingPhases({ ...empty, segments: 1, run: { state: 'incomplete', counts }, tracking: { state: 'complete', track_counts: { w1: 2, w2: 1 } } });
+  assert.equal(tracked[1].state, 'attention');
+  assert.equal(tracked[3].detail, '3 tracks found (candidates, unverified)');
+
+  const failedImport = processingPhases({ ...empty, segments: 1, importJob: { state: 'failed', error: { message: 'Unsupported codec.' } } });
+  assert.deepEqual([failedImport[0].state, failedImport[0].detail], ['attention', 'Unsupported codec.']);
+});

@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { _electron, expect, test, type ElectronApplication } from '@playwright/test';
 import type { BatAPI } from '../src/contracts';
 import { backendChildren, cleanup, launch, launchEnvironment, quit, type RunningShell } from './shell-helpers';
+import { createSurvey } from './ui-helpers';
 
 test.skip(process.platform !== 'linux', 'Linux /proc verifies backend credentials and process cleanup; Windows is unverified.');
 
@@ -15,7 +16,7 @@ test('real backend readiness, SQLite session persistence and narrow renderer bri
     const { page } = shell;
     await expect(page.getByText('SQLite storage ready.', { exact: true })).toBeVisible();
     await expect(page.getByText(/FFmpeg and ffprobe available/)).toHaveCount(0);
-    expect(page.url()).toBe('app://bat/index.html');
+    expect(page.url()).toMatch(/^app:\/\/bat\/index\.html(#\/)?$/);
     expect(await page.evaluate(() => ({
       nodeProcess: typeof (globalThis as { process?: unknown }).process,
       nodeRequire: typeof (globalThis as { require?: unknown }).require,
@@ -24,7 +25,7 @@ test('real backend readiness, SQLite session persistence and narrow renderer bri
     }))).toEqual({
       nodeProcess: 'undefined',
       nodeRequire: 'undefined',
-      bridge: ['cancelExport', 'cancelImport', 'cancelPreview', 'cancelSummaries', 'chooseMedia', 'createSession', 'exportStatus', 'getMedia', 'getWindowQA', 'getWindowReview', 'health', 'importStatus', 'listSessions', 'listSummaryRuns', 'previewContent', 'previewStatus', 'qaHistory', 'reviewHistory', 'saveExportBundle', 'saveMedia', 'saveQA', 'saveReview', 'setDraftDirty', 'startExport', 'startPreview', 'startSummaries', 'summaryImage', 'summaryRun', 'upgradeMedia', 'upgradeQA', 'upgradeReviews', 'upgradeSummaries'],
+      bridge: ['applyTemplate', 'audioContent', 'callActivity', 'cancelExport', 'cancelImport', 'cancelPlayback', 'cancelPreview', 'cancelRender', 'cancelSummaries', 'cancelTracking', 'chooseAudio', 'chooseMedia', 'createSession', 'decideCandidate', 'deriveAudio', 'exportStatus', 'exportTemplate', 'getCounts', 'getFlightMap', 'getMedia', 'getSunset', 'getTracks', 'getWindowQA', 'getWindowReview', 'health', 'importStatus', 'importTemplate', 'listAudio', 'listCandidates', 'listGates', 'listLabels', 'listRenders', 'listSampleChecks', 'listSessions', 'listSummaryRuns', 'listTemplates', 'listTracking', 'markWatched', 'playbackFrames', 'playbackStatus', 'previewContent', 'previewStatus', 'proposeAnchor', 'qaHistory', 'reconfirmGate', 'retireTemplate', 'reviewHistory', 'saveCountQA', 'saveCountReview', 'saveExportBundle', 'saveGate', 'saveLabel', 'saveMedia', 'saveQA', 'saveRender', 'saveReport', 'saveReview', 'saveSampleCheck', 'saveSunset', 'saveTemplate', 'setAudioAnchor', 'setAudioLabel', 'setDraftDirty', 'startEnhanced', 'startExport', 'startPlayback', 'startPreview', 'startRender', 'startSummaries', 'startTracking', 'startTrackingTest', 'summaryImage', 'summaryRun', 'trackingEvents', 'trackingRun', 'trackingTest', 'undoLabel', 'upgradeMedia', 'upgradeQA', 'upgradeReviews', 'upgradeStorage', 'upgradeSummaries'],
       bridgeFrozen: true,
     });
     expect(await page.evaluate(() => new Promise<string>((resolve) => {
@@ -38,20 +39,22 @@ test('real backend readiness, SQLite session persistence and narrow renderer bri
     expect(await page.evaluate(() => window.open('https://example.invalid') === null)).toBe(true);
     expect(await shell.application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1);
 
-    await page.getByLabel('Display name', { exact: true }).fill('Synthetic persistence survey');
-    await page.getByLabel('Camera reference', { exact: true }).fill('Synthetic camera A');
-    await page.getByRole('button', { name: 'Create session', exact: true }).click();
-    await expect(page.getByRole('row', { name: /Synthetic persistence survey.*Synthetic camera A/ })).toBeVisible();
+    const survey = page.getByRole('link', { name: 'Open survey Synthetic persistence survey', exact: true });
+    await createSurvey(shell, 'Synthetic persistence survey', 'Synthetic camera A');
+    // A brand-new database starts at the current schema: no storage upgrade is offered.
+    await expect(page.getByRole('region', { name: 'Storage upgrade' })).toHaveCount(0);
+    await page.getByRole('link', { name: 'Back to surveys' }).click();
+    await expect(survey).toContainText('Synthetic camera A');
     await page.reload();
     await expect(page.getByText('Backend ready', { exact: true })).toBeVisible();
-    await expect(page.getByRole('row', { name: /Synthetic persistence survey.*Synthetic camera A/ })).toBeVisible();
+    await expect(survey).toContainText('Synthetic camera A');
 
     const firstTokenDigest = shell.tokenDigest;
     await quit(shell);
     shell = undefined;
     shell = await launch(dataDir);
     expect(shell.tokenDigest, 'Each app launch gets a fresh credential').not.toBe(firstTokenDigest);
-    await expect(shell.page.getByRole('row', { name: /Synthetic persistence survey.*Synthetic camera A/ })).toBeVisible();
+    await expect(shell.page.getByRole('link', { name: 'Open survey Synthetic persistence survey', exact: true })).toContainText('Synthetic camera A');
     await quit(shell);
     shell = undefined;
   } finally {

@@ -17,7 +17,8 @@ from threading import Event, Lock, Thread
 import time
 from uuid import UUID
 
-from . import store, summary_store
+from . import store, summary_store, workers
+from .summary_worker import MAX_REQUEST_BYTES
 from .imports import ImportErrorResponse, source_state
 
 WALL_SECONDS = 600
@@ -34,7 +35,7 @@ ERRORS = {
     "summary_upgrade_required": "Upgrade the local summary database explicitly before generating summaries.",
     "summary_no_sources": "Import original recordings before generating summaries.",
     "summary_limit": "Summary generation exceeded a configured time, memory, frame, segment, image or storage limit.",
-    "summary_limits_unavailable": "Hard summary process limits are unavailable. Only Linux development execution is verified.",
+    "summary_limits_unavailable": "Hard summary process limits are unavailable on this platform. Only Linux and Windows are supported.",
     "summary_failed": "Summary generation failed. Completed windows remain available; incomplete coverage is recorded.",
     "summary_image_missing": "The generated summary image is missing. Its original window remains in the manifest.",
     "summary_image_invalid": "The generated summary image failed its integrity check. Generate a new run to replace it.",
@@ -70,8 +71,8 @@ def summary_image_path(directory: Path, row: dict) -> Path:
         raise SummaryError("summary_image_invalid")
     folder = directory / row["run_id"]
     candidate = folder / f"{row['id']}.png"
-    if (row.get("image_path") != str(candidate) or directory.is_symlink()
-            or folder.is_symlink() or candidate.is_symlink()):
+    if (row.get("image_path") != str(candidate) or workers.is_link(directory)
+            or workers.is_link(folder) or workers.is_link(candidate)):
         raise SummaryError("summary_image_invalid")
     try:
         if not candidate.is_file():
@@ -88,7 +89,7 @@ class SummaryJobs:
         self.db_path, self.data_dir = db_path, data_dir.absolute()
         self.directory = self.data_dir / "summaries"
         self.directory.mkdir(parents=True, exist_ok=True)
-        if self.directory.is_symlink():
+        if workers.is_link(self.directory):
             raise RuntimeError("Managed summary directory must not be a symbolic link")
         self._lock, self._activity_lock = Lock(), activity_lock
         self._run_id: str | None = None
@@ -106,7 +107,7 @@ class SummaryJobs:
             info = reserve.lstat()
         except FileNotFoundError:
             return
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+        if not stat.S_ISREG(info.st_mode) or not workers.owned_by_user(info):
             raise RuntimeError("Managed metadata reserve must be a regular owned file")
         reserve.unlink()
 
@@ -134,10 +135,10 @@ class SummaryJobs:
     def _used_bytes(self) -> int:
         amount = 0
         for folder in self.directory.iterdir():
-            if _uuid(folder.name) and folder.is_dir() and not folder.is_symlink():
+            if _uuid(folder.name) and folder.is_dir() and not workers.is_link(folder):
                 for path in folder.iterdir():
                     if re.fullmatch(r"[0-9a-f-]{36}\.png(?:\.part)?", path.name):
-                        if path.is_symlink() or not path.is_file():
+                        if workers.is_link(path) or not path.is_file():
                             raise SummaryError("summary_image_invalid")
                         amount += path.stat().st_size
         return amount
@@ -182,7 +183,7 @@ class SummaryJobs:
             return summary_store.list_runs(self.db_path, session_id)
 
     def start(self, session_id: str, window_seconds: int = 30) -> dict:
-        if sys.platform != "linux":
+        if not workers.supported():
             raise SummaryError("summary_limits_unavailable")
         if store.schema_version(self.db_path) not in store.SUMMARY_SCHEMA_VERSIONS:
             raise SummaryError("summary_upgrade_required")
@@ -208,11 +209,10 @@ class SummaryJobs:
                     raise SummaryError("summary_limit")
                 # Release after reaping (or on restart) so ENOSPC image failures still
                 # leave space for the durable terminal SQLite transaction.
-                descriptor = os.open(self.directory / ".manifest-reserve",
-                                     os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+                descriptor = workers.open_no_follow(self.directory / ".manifest-reserve",
+                                                    os.O_CREAT | os.O_EXCL | os.O_WRONLY)
                 try:
-                    os.posix_fallocate(descriptor, 0, METADATA_RESERVE_BYTES)
-                    os.fsync(descriptor)
+                    workers.reserve_bytes(descriptor, METADATA_RESERVE_BYTES)
                 finally:
                     os.close(descriptor)
                 try:
@@ -320,6 +320,21 @@ class SummaryJobs:
             if thread.is_alive():
                 raise RuntimeError("Summary worker shutdown did not complete")
 
+    @staticmethod
+    def _contained(payload: dict, cancelled: Event) -> dict:
+        """Windows: one worker in a Job Object (1 GiB, 300 CPU seconds, one process) with a parent wall deadline."""
+        from . import winjob
+
+        limits = winjob.Limits(1024 ** 3, 300, 1, WALL_SECONDS)
+        try:
+            status, result = workers.run_contained("summary_worker", payload, limits, cancelled.is_set,
+                                                   MAX_REQUEST_BYTES, MAX_RESULT_BYTES)
+        except workers.WorkerFailed:
+            raise SummaryError("summary_failed") from None
+        if status != "ok":
+            raise SummaryError("cancelled" if status == "cancelled" else "summary_limit")
+        return result
+
     def _run(self, run_id: str, cancelled: Event) -> None:
         process = None
         code: str | None = "summary_failed"
@@ -328,33 +343,36 @@ class SummaryJobs:
                 raise SummaryError("cancelled")
             payload = {"parent_pid": os.getpid(), "db_path": str(self.db_path),
                        "data_dir": str(self.data_dir), "run_id": run_id}
-            environment = {key: value for key, value in os.environ.items() if key != "BAT_API_TOKEN"}
-            environment.update(OPENBLAS_NUM_THREADS="1", OMP_NUM_THREADS="1")
-            process = subprocess.Popen([sys.executable, "-m", "backend.app.summary_worker"],
-                                       cwd=Path(__file__).resolve().parents[2], stdin=subprocess.PIPE,
-                                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=environment)
-            with self._lock:
-                self._process = process
-            incoming = json.dumps(payload).encode("utf-8")
-            deadline = time.monotonic() + WALL_SECONDS
-            while True:
+            if sys.platform == "win32":
+                result = self._contained(payload, cancelled)
+            else:
+                environment = {key: value for key, value in os.environ.items() if key != "BAT_API_TOKEN"}
+                environment.update(OPENBLAS_NUM_THREADS="1", OMP_NUM_THREADS="1")
+                process = subprocess.Popen(workers.command("summary_worker"),
+                                           cwd=workers.working_directory(), stdin=subprocess.PIPE,
+                                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=environment)
+                with self._lock:
+                    self._process = process
+                incoming = json.dumps(payload).encode("utf-8")
+                deadline = time.monotonic() + WALL_SECONDS
+                while True:
+                    if cancelled.is_set():
+                        raise SummaryError("cancelled")
+                    if time.monotonic() >= deadline:
+                        raise SummaryError("summary_limit")
+                    try:
+                        output, _ = process.communicate(input=incoming, timeout=0.05)
+                        break
+                    except subprocess.TimeoutExpired:
+                        incoming = None
                 if cancelled.is_set():
                     raise SummaryError("cancelled")
-                if time.monotonic() >= deadline:
+                if process.returncode:
+                    limited = process.returncode in (-signal.SIGKILL, -signal.SIGXCPU, -signal.SIGXFSZ)
+                    raise SummaryError("summary_limit" if limited else "summary_failed")
+                if len(output) > MAX_RESULT_BYTES:
                     raise SummaryError("summary_limit")
-                try:
-                    output, _ = process.communicate(input=incoming, timeout=0.05)
-                    break
-                except subprocess.TimeoutExpired:
-                    incoming = None
-            if cancelled.is_set():
-                raise SummaryError("cancelled")
-            if process.returncode:
-                limited = process.returncode in (-signal.SIGKILL, -signal.SIGXCPU, -signal.SIGXFSZ)
-                raise SummaryError("summary_limit" if limited else "summary_failed")
-            if len(output) > MAX_RESULT_BYTES:
-                raise SummaryError("summary_limit")
-            result = json.loads(output)
+                result = json.loads(output)
             if set(result) != {"error"} or (result["error"] is not None and result["error"] not in ERRORS):
                 raise SummaryError("summary_failed")
             code = result["error"]
