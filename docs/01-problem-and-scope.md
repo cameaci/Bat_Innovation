@@ -41,7 +41,7 @@ These are provisional project terms. A qualified ecological lead must approve th
 - Species-level identification from video alone.
 - Substitution for a suitably qualified bat ecologist.
 - Uploading client videos to unapproved external services.
-- Acoustic identification, **all thermal video support in v1**, thermal radiometry or 3-D flight reconstruction as required features.
+- Acoustic species identification, thermal radiometry or 3-D flight reconstruction as required features. (Rendered thermal video and synchronised full-spectrum audio as review aids were brought into scope by the owner on 2026-10-22; see the [feature expansion plan](../implementation/feature-expansion.md).)
 
 ## Hypothesised processing workflow
 

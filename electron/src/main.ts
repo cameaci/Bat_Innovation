@@ -1,12 +1,23 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, type IpcMainInvokeEvent } from 'electron';
-import { readFileSync, mkdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
+import { existsSync, readFileSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { createReadStream } from 'node:fs';
+import { copyFile, rename, rm } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { BackendRuntime, invalid, isExternalDataDirectory, isPreviewRequest, isSummaryRequest, isReviewChange, isQAChange, isReviewCursor, isSaveMedia, isUUID, isModality, isPTS, isGateChange, isCountReviewInput, isCountQAInput, isSampleCheckInput, isTrackLabelInput, isSunsetInput, isRenderInput, UTC_OFFSET, isNewTemplateInput, isApplyTemplateInput, isCandidateDecision, isAudioMode, isAudioAnchor, isAudioDerive, isTrackingSettings, isTrackingTestInput, isReconfirmInput, isWatchedInput, MAX_PREVIEW_BYTES, MAX_SUMMARY_BYTES } from './backend';
 import { ExportSaver } from './export_saver';
 import type { NewSession } from './contracts';
 
 const UI_URL = 'app://bat/index.html';
+const MAX_REPORT_CHARS = 32 * 1024 * 1024;
+/** The UI document, ignoring only the in-page route fragment (#/...) used by the renderer's hash router. */
+const isUI = (url: string) => url === UI_URL || url.startsWith(`${UI_URL}#`);
 const repoRoot = resolve(__dirname, '../..');
+// A packaged build keeps the frozen backend and the built UI beside the executable, never in the checkout.
+const installRoot = app.isPackaged ? dirname(process.execPath) : repoRoot;
+const uiRoot = app.isPackaged ? join(process.resourcesPath, 'frontend') : join(repoRoot, 'frontend/dist');
+const packagedBackend = join(process.resourcesPath, 'backend', process.platform === 'win32' ? 'bat-backend.exe' : 'bat-backend');
 const backend = new BackendRuntime();
 let exportSaver: ExportSaver | undefined;
 let window: BrowserWindow | undefined;
@@ -31,14 +42,31 @@ function confirmDiscard(force = false): boolean {
   return true;
 }
 
-protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } },
+  // Playback copies only: streamed with byte ranges so the player can seek (Phase 2 W1).
+  { scheme: 'bat-media', privileges: { standard: true, secure: true, stream: true } },
+]);
+
+/** Packaged data stays on the local machine (not the roaming profile): reviews, derived images and Chromium state. */
+function localData(): string | undefined {
+  const local = process.env.LOCALAPPDATA;
+  return app.isPackaged && process.platform === 'win32' && local && isAbsolute(local) ? join(local, 'Bat Innovation') : undefined;
+}
 
 // Trusted process configuration only. No renderer operation accepts a path.
 const configuredData = process.env.BAT_APP_DATA_DIR;
 let configError: string | undefined;
+const packagedHome = configuredData === undefined ? localData() : undefined;
+if (packagedHome !== undefined) {
+  try {
+    mkdirSync(join(packagedHome, 'shell'), { recursive: true });
+    app.setPath('userData', join(packagedHome, 'shell'));
+  } catch { configError = 'The application data directory is not writable.'; }
+}
 if (configuredData !== undefined) {
-  if (!isExternalDataDirectory(repoRoot, configuredData)) {
-    configError = 'BAT_APP_DATA_DIR must be an absolute directory outside the repository.';
+  if (!isExternalDataDirectory(installRoot, configuredData)) {
+    configError = 'BAT_APP_DATA_DIR must be an absolute directory outside the installation or repository.';
   } else {
     try {
       const shellData = join(configuredData, 'shell');
@@ -49,7 +77,7 @@ if (configuredData !== undefined) {
 }
 
 function trusted(event: IpcMainInvokeEvent): void {
-  if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== UI_URL) {
+  if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || !isUI(event.senderFrame.url)) {
     throw new Error('IPC is restricted to the application main frame.');
   }
 }
@@ -67,13 +95,13 @@ async function open(): Promise<void> {
     app.quit();
     return;
   }
-  if (app.isPackaged) {
-    dialog.showErrorBox('Development shell only', 'A packaged Python runtime is not configured. Windows installer work belongs to Slice 5.');
+  if (app.isPackaged && !existsSync(packagedBackend)) {
+    dialog.showErrorBox('Installation incomplete', 'The Bat Innovation backend is missing. Reinstall the application.');
     app.quit();
     return;
   }
-  const dataDir = configuredData ?? join(app.getPath('userData'), 'data');
-  exportSaver = new ExportSaver(backend, repoRoot, dataDir);
+  const dataDir = configuredData ?? join(localData() ?? app.getPath('userData'), 'data');
+  exportSaver = new ExportSaver(backend, installRoot, dataDir);
   await exportSaver.recover();
   // Same fixed origin for development and eventual packaging. Serve only built UI assets.
   protocol.handle('app', (request) => {
@@ -83,19 +111,27 @@ async function open(): Promise<void> {
       return new Response('Not found', { status: 404 });
     }
     try {
-      const content = readFileSync(join(repoRoot, 'frontend/dist', url.pathname));
+      const content = readFileSync(join(uiRoot, url.pathname));
       return new Response(content, { headers: {
         'Content-Type': url.pathname.endsWith('.js') ? 'text/javascript' : url.pathname.endsWith('.css') ? 'text/css' : 'text/html',
-        'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'",
+        'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src blob: bat-media:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'",
         'X-Content-Type-Options': 'nosniff',
       } });
     } catch { return new Response('Built UI missing. Run npm run build.', { status: 404 }); }
+  });
+  // bat-media://proxy/<id> serves one ready playback copy by ID; the renderer never names a path.
+  protocol.handle('bat-media', (request) => {
+    const url = new URL(request.url);
+    const match = /^\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.exec(url.pathname);
+    if (request.method !== 'GET' || url.host !== 'proxy' || url.search || match === null) return new Response('Not found', { status: 404 });
+    return backend.playbackVideo(match[1], request.headers.get('Range'));
   });
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   session.defaultSession.setPermissionCheckHandler(() => false);
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
     const previewBlob = ['media', 'image'].includes(details.resourceType) && /^blob:app:\/\/bat\/[0-9a-f-]+$/.test(details.url);
-    callback({ cancel: !details.url.startsWith('app://bat/') && !previewBlob });
+    const playback = details.resourceType === 'media' && /^bat-media:\/\/proxy\/[0-9a-f-]{36}$/.test(details.url);
+    callback({ cancel: !details.url.startsWith('app://bat/') && !previewBlob && !playback });
   });
   session.defaultSession.on('will-download', (event) => event.preventDefault());
   Menu.setApplicationMenu(null);
@@ -105,8 +141,8 @@ async function open(): Promise<void> {
     webPreferences: { preload: join(__dirname, 'preload.js'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, webviewTag: false, spellcheck: false },
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  window.webContents.on('will-navigate', (event, url) => { if (url !== UI_URL) event.preventDefault(); });
-  window.webContents.on('will-frame-navigate', (event) => { if (!event.isMainFrame || event.url !== UI_URL) event.preventDefault(); });
+  window.webContents.on('will-navigate', (event, url) => { if (!isUI(url)) event.preventDefault(); });
+  window.webContents.on('will-frame-navigate', (event) => { if (!event.isMainFrame || !isUI(event.url)) event.preventDefault(); });
   window.webContents.on('will-redirect', (event) => event.preventDefault());
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
   window.on('close', event => { if (!confirmDiscard()) event.preventDefault(); });
@@ -171,8 +207,155 @@ async function open(): Promise<void> {
     const result = await backend.summaryImage(id);
     return result.ok && result.value.bytes.byteLength > MAX_SUMMARY_BYTES ? invalid('Summary image exceeds its byte limit.') : result;
   });
-  handle('bat:choose-media', 1, async ([id]) => {
+  handle('bat:upgrade-storage', 0, () => backend.upgradeStorage());
+  handle('bat:list-gates', 1, ([id]) => isUUID(id) ? backend.listGates(id) : invalid('Select a valid survey ID.'));
+  handle('bat:save-gate', 3, ([session, gate, change]) => isUUID(session) && (gate === null || isUUID(gate)) && isGateChange(change)
+    ? backend.saveGate(session, gate, change) : invalid('Use a valid gate: name, kind, 2 to 32 points, labels, direction and hysteresis.'));
+  handle('bat:reconfirm-gate', 3, ([run, gate, input]) => isUUID(run) && isUUID(gate) && isReconfirmInput(input) ? backend.reconfirmGate(run, gate, input) : invalid('Check the gate reconfirmation.'));
+  handle('bat:get-counts', 2, ([run, gate]) => isUUID(run) && isUUID(gate) ? backend.getCounts(run, gate) : invalid());
+  handle('bat:get-sunset', 1, ([session]) => isUUID(session) ? backend.getSunset(session) : invalid());
+  handle('bat:save-sunset', 2, ([session, input]) => isUUID(session) && isSunsetInput(input) ? backend.saveSunset(session, input) : invalid('Enter the local sunset as HH:MM with its UTC offset, and its source.'));
+  handle('bat:list-templates', 0, () => backend.listTemplates());
+  handle('bat:save-template', 1, ([input]) => isNewTemplateInput(input) ? backend.saveTemplate(input) : invalid('Check the template name, settings and gates.'));
+  handle('bat:apply-template', 2, ([id, input]) => isUUID(id) && isApplyTemplateInput(input) ? backend.applyTemplate(id, input) : invalid('Choose a template and a survey.'));
+  handle('bat:retire-template', 1, ([id]) => isUUID(id) ? backend.retireTemplate(id) : invalid('Choose a template.'));
+  handle('bat:export-template', 1, async ([id]) => {
+    if (!isUUID(id)) return invalid('Choose a template.');
+    const owner = window;
+    if (!owner || owner.isDestroyed()) return invalid('The application window is closed.');
+    const template = await backend.getTemplate(id);
+    if (!template.ok) return template;
+    const selected = await dialog.showSaveDialog(owner, { title: 'Save site template', defaultPath: `${template.value.name.replace(/[^\w -]/g, '_')}.json`,
+      filters: [{ name: 'Site template', extensions: ['json'] }] }).catch(() => null);
+    if (!selected) return { ok: false, error: { code: 'picker_failed', message: 'The native file dialog could not open.' } };
+    if (selected.canceled || !selected.filePath) return { ok: true, value: null };
+    const { id: _id, actor: _actor, utc: _utc, retired: _retired, ...portable } = template.value;
+    try { writeFileSync(selected.filePath, JSON.stringify(portable, null, 2), { flag: 'w' }); }
+    catch { return { ok: false, error: { code: 'template_write_failed', message: 'The template file could not be written there.' } }; }
+    return { ok: true, value: template.value.name };
+  });
+  handle('bat:set-audio-label', 2, ([id, label]) => isUUID(id) && typeof label === 'string' && label.length <= 60 ? backend.setAudioLabel(id, label) : invalid('Use a label of up to 60 characters.'));
+  handle('bat:propose-anchor', 2, ([id, offset]) => isUUID(id) && (offset === null || (typeof offset === 'string' && UTC_OFFSET.test(offset))) ? backend.proposeAnchor(id, offset) : invalid('Enter the UTC offset as +01:00.'));
+  handle('bat:call-activity', 1, ([id]) => isUUID(id) ? backend.callActivity(id) : invalid());
+  handle('bat:list-renders', 1, ([session]) => isUUID(session) ? backend.listRenders(session) : invalid());
+  handle('bat:start-render', 1, ([input]) => isRenderInput(input) ? backend.startRender(input) : invalid('Choose a video and a completed tracking run.'));
+  handle('bat:cancel-render', 1, ([id]) => isUUID(id) ? backend.cancelRender(id) : invalid());
+  handle('bat:save-render', 1, async ([id]) => {
+    if (!isUUID(id)) return invalid('Choose a rendered video.');
+    const owner = window;
+    if (!owner || owner.isDestroyed()) return invalid('The application window is closed.');
+    const file = await backend.renderFile(id);
+    if (!file.ok) return file;
+    if (file.value.file_name !== `${id}.webm`) return invalid('The rendered file could not be identified.');
+    const selected = await dialog.showSaveDialog(owner, { title: 'Save PROVISIONAL rendered video', defaultPath: `bat-provisional-${id.slice(0, 8)}.webm`,
+      filters: [{ name: 'WebM video', extensions: ['webm'] }] }).catch(() => null);
+    if (!selected) return { ok: false, error: { code: 'picker_failed', message: 'The native file dialog could not open.' } };
+    if (selected.canceled || !selected.filePath) return { ok: true, value: null };
+    if (resolve(selected.filePath).startsWith(resolve(dataDir))) return invalid('Save the video outside the application data folder.');
+    // Copy beside the target, check the bytes against the recorded hash, then move it into place.
+    const partial = `${selected.filePath}.partial`;
+    try {
+      await copyFile(join(dataDir, 'renders', file.value.file_name), partial);
+      const digest = await new Promise<string>((done, fail) => {
+        const hash = createHash('sha256');
+        createReadStream(partial).on('data', chunk => hash.update(chunk)).on('end', () => done(hash.digest('hex'))).on('error', fail);
+      });
+      if (digest !== file.value.sha256) throw new Error('hash');
+      await rename(partial, selected.filePath);
+    } catch {
+      await rm(partial, { force: true });
+      return { ok: false, error: { code: 'render_save_failed', message: 'The video could not be saved there completely. Nothing was left behind.' } };
+    }
+    return { ok: true, value: selected.filePath };
+  });
+  handle('bat:save-report', 1, async ([html]) => {
+    if (typeof html !== 'string' || !html.startsWith('<!doctype html>') || html.length > MAX_REPORT_CHARS) return invalid('The report could not be prepared.');
+    const owner = window;
+    if (!owner || owner.isDestroyed()) return invalid('The application window is closed.');
+    const selected = await dialog.showSaveDialog(owner, { title: 'Save PROVISIONAL evidence report', defaultPath: 'bat-provisional-report.pdf',
+      filters: [{ name: 'PDF', extensions: ['pdf'] }] }).catch(() => null);
+    if (!selected) return { ok: false, error: { code: 'picker_failed', message: 'The native file dialog could not open.' } };
+    if (selected.canceled || !selected.filePath) return { ok: true, value: null };
+    if (resolve(selected.filePath).startsWith(resolve(dataDir))) return invalid('Save the report outside the application data folder.');
+    // The page is printed in its own in-memory session with scripts off; it may load nothing but itself.
+    const page = join(dataDir, `report-${randomUUID()}.html`);
+    const partial = `${selected.filePath}.partial`;
+    const printer = new BrowserWindow({ show: false, webPreferences: { javascript: false, sandbox: true, contextIsolation: true, nodeIntegration: false,
+      webSecurity: true, spellcheck: false, partition: `report-${randomUUID()}` } });
+    printer.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: details.url !== pathToFileURL(page).href }));
+    printer.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    printer.webContents.on('will-navigate', event => event.preventDefault());
+    try {
+      writeFileSync(page, html, { flag: 'wx' });
+      await printer.loadFile(page);
+      const pdf = await printer.webContents.printToPDF({ printBackground: true, pageSize: 'A4' });
+      writeFileSync(partial, pdf, { flag: 'w' });
+      await rename(partial, selected.filePath);
+    } catch {
+      await rm(partial, { force: true });
+      return { ok: false, error: { code: 'report_save_failed', message: 'The report could not be saved there completely. Nothing was left behind.' } };
+    } finally {
+      printer.destroy();
+      await rm(page, { force: true });
+    }
+    return { ok: true, value: selected.filePath };
+  });
+  handle('bat:import-template', 1, async ([actor]) => {
+    if (typeof actor !== 'string' || !actor.trim() || actor.length > 120) return invalid('Enter your name first.');
+    const owner = window;
+    if (!owner || owner.isDestroyed()) return invalid('The application window is closed.');
+    const selected = await dialog.showOpenDialog(owner, { properties: ['openFile'], filters: [{ name: 'Site template', extensions: ['json'] }] }).catch(() => null);
+    if (!selected) return { ok: false, error: { code: 'picker_failed', message: 'The native file dialog could not open.' } };
+    if (selected.canceled || selected.filePaths.length !== 1) return { ok: true, value: null };
+    let data: unknown;
+    try {
+      if (statSync(selected.filePaths[0]!).size > 256 * 1024) return invalid('A site template file is at most 256 KB.');
+      data = JSON.parse(readFileSync(selected.filePaths[0]!, 'utf8'));
+    } catch { return invalid('This is not a site template file.'); }
+    return backend.importTemplateData(actor, data);
+  });
+  handle('bat:list-sample-checks', 2, ([run, gate]) => isUUID(run) && isUUID(gate) ? backend.listSampleChecks(run, gate) : invalid('Use a tracking run and gate.'));
+  handle('bat:save-sample-check', 3, ([run, gate, input]) => isUUID(run) && isUUID(gate) && isSampleCheckInput(input) ? backend.saveSampleCheck(run, gate, input) : invalid('Use a valid sample check.'));
+  handle('bat:save-count-review', 3, ([run, gate, input]) => isUUID(run) && isUUID(gate) && isCountReviewInput(input) ? backend.saveCountReview(run, gate, input) : invalid('Use a valid count review action.'));
+  handle('bat:save-count-qa', 3, ([run, gate, input]) => isUUID(run) && isUUID(gate) && isCountQAInput(input) ? backend.saveCountQA(run, gate, input) : invalid('Use a valid count QA action.'));
+  handle('bat:list-audio', 1, ([id]) => isUUID(id) ? backend.listAudio(id) : invalid());
+  handle('bat:set-audio-anchor', 2, ([id, input]) => isUUID(id) && isAudioAnchor(input) ? backend.setAudioAnchor(id, input) : invalid('Use a video frame and an audio sample inside both recordings.'));
+  handle('bat:derive-audio', 2, ([id, input]) => isUUID(id) && isAudioDerive(input) ? backend.deriveAudio(id, input) : invalid('Use a 1 to 12 s span and a 10 to 150 kHz tuning.'));
+  handle('bat:audio-content', 2, async ([id, kind]) => isUUID(id) && (kind === 'spectrogram' || kind === 'heterodyne') ? backend.audioContent(id, kind) : invalid());
+  handle('bat:choose-audio', 3, async ([id, mode, channel]) => {
+    if (!isUUID(id) || !isAudioMode(mode) || typeof channel !== 'number' || !Number.isInteger(channel) || channel < 0 || channel > 7) return invalid('Choose a survey, a source mode and a channel.');
+    const owner = window;
+    if (!owner || owner.isDestroyed()) return invalid('The application window is closed.');
+    const selected = await dialog.showOpenDialog(owner, { properties: ['openFile', 'multiSelections'], filters: [{ name: 'Full-spectrum WAV', extensions: ['wav'] }] }).catch(() => null);
+    if (!selected) return { ok: false, error: { code: 'picker_failed', message: 'The native file picker could not open. Check desktop permissions and reopen the app.' } };
+    if (selected.canceled || selected.filePaths.length === 0) return { ok: true, value: null };
+    return backend.addSelectedAudio(id, selected.filePaths, mode, channel);
+  });
+  handle('bat:get-flight-map', 2, ([run, segment]) => isUUID(run) && isUUID(segment) ? backend.getFlightMap(run, segment) : invalid());
+  handle('bat:list-candidates', 1, ([id]) => isUUID(id) ? backend.listCandidates(id) : invalid());
+  handle('bat:list-labels', 1, ([id]) => isUUID(id) ? backend.listLabels(id) : invalid());
+  handle('bat:save-label', 2, ([run, input]) => isUUID(run) && isTrackLabelInput(input) ? backend.saveLabel(run, input) : invalid('Use a valid track label.'));
+  handle('bat:undo-label', 3, ([run, event, actor]) => isUUID(run) && isUUID(event) && typeof actor === 'string' && actor.trim().length > 0 && actor.length <= 120
+    ? backend.undoLabel(run, event, actor) : invalid('Use a valid label action and your name.'));
+  handle('bat:mark-watched', 1, ([input]) => isWatchedInput(input) ? backend.markWatched(input) : invalid('Check the watched windows.'));
+  handle('bat:decide-candidate', 3, ([run, track, input]) => isUUID(run) && isUUID(track) && isCandidateDecision(input) ? backend.decideCandidate(run, track, input) : invalid('Use a valid candidate decision.'));
+  handle('bat:start-enhanced', 2, ([id, segment]) => isUUID(id) && isUUID(segment) ? backend.startEnhanced(id, segment) : invalid('Select a valid survey and video.'));
+  handle('bat:start-playback', 1, ([id]) => isUUID(id) ? backend.startPlayback(id) : invalid('Select a valid survey.'));
+  handle('bat:playback-status', 1, ([id]) => isUUID(id) ? backend.playbackStatus(id) : invalid('Select a valid survey.'));
+  handle('bat:cancel-playback', 1, ([id]) => isUUID(id) ? backend.cancelPlayback(id) : invalid('Select a valid survey.'));
+  handle('bat:playback-frames', 1, ([id]) => isUUID(id) ? backend.playbackFrames(id) : invalid('Select a valid playback copy.'));
+  handle('bat:start-tracking', 2, ([id, settings]) => isUUID(id) && isTrackingSettings(settings) ? backend.startTracking(id, settings) : invalid('Check the tracking settings.'));
+  handle('bat:start-tracking-test', 1, ([input]) => isTrackingTestInput(input) ? backend.startTrackingTest(input) : invalid('Check the tracking settings and test range.'));
+  handle('bat:tracking-test', 1, ([id]) => isUUID(id) ? backend.trackingTest(id) : invalid('Select a valid test run.'));
+  handle('bat:tracking-events', 1, ([id]) => isUUID(id) ? backend.trackingEvents(id) : invalid('Select a valid tracking run ID.'));
+  handle('bat:tracking-run', 1, ([id]) => isUUID(id) ? backend.trackingRun(id) : invalid('Select a valid tracking run ID.'));
+  handle('bat:list-tracking', 1, ([id]) => isUUID(id) ? backend.listTracking(id) : invalid('Select a valid summary run ID.'));
+  handle('bat:cancel-tracking', 1, ([id]) => isUUID(id) ? backend.cancelTracking(id) : invalid('Select a valid tracking run ID.'));
+  handle('bat:get-tracks', 5, ([run, segment, start, end, noise]) => isUUID(run) && isUUID(segment) && isPTS(start) && (end === null || isPTS(end)) && typeof noise === 'boolean'
+    ? backend.getTracks(run, segment, start, end, noise) : invalid('Use a tracking run, segment and integer source PTS range.'));
+  handle('bat:choose-media', 2, async ([id, modality]) => {
     if (!isUUID(id)) return invalid('Select a valid session ID.');
+    if (!isModality(modality)) return invalid('Choose active IR or rendered thermal.');
     const media = await backend.getMedia(id);
     if (!media.ok) return media;
     if (media.value.schema_version < 2) return { ok: false, error: { code: 'schema_upgrade_required', message: 'Use Upgrade media storage before choosing original videos.' } };
@@ -185,10 +368,10 @@ async function open(): Promise<void> {
     if (!selected) return { ok: false, error: { code: 'picker_failed', message: 'The native file picker could not open. Check desktop permissions and reopen the app.' } };
     if (selected.canceled || selected.filePaths.length === 0) return { ok: true, value: null };
     // Raw native selections remain in this trusted closure and the authenticated local backend.
-    return backend.importSelectedMedia(id, selected.filePaths);
+    return backend.importSelectedMedia(id, selected.filePaths, modality);
   });
   void backend.start({
-    repoRoot, dataDir, python: process.env.BAT_PYTHON ?? 'python',
+    repoRoot: installRoot, dataDir, ...(app.isPackaged ? { packaged: packagedBackend } : { python: process.env.BAT_PYTHON ?? 'python' }),
     port: process.env.BAT_API_PORT === undefined ? undefined : Number(process.env.BAT_API_PORT),
   });
   await window.loadURL(UI_URL);
@@ -199,7 +382,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', () => { window?.show(); window?.focus(); });
   void app.whenReady().then(open).catch(() => {
-    dialog.showErrorBox('Startup failed', 'The development shell could not load. Run npm run build and check the local data directory.');
+    dialog.showErrorBox('Startup failed', 'Bat Innovation could not load. Check that the local data directory is writable, then restart. A development checkout needs npm run build first.');
     app.quit();
   });
 }

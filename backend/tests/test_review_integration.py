@@ -6,6 +6,7 @@ from fractions import Fraction
 import json
 from pathlib import Path
 import sqlite3
+import sys
 import time
 from types import SimpleNamespace
 from uuid import uuid4
@@ -498,3 +499,44 @@ def test_restoring_metadata_of_image_less_failed_window_requires_another_explici
                          decision="reviewed_no_discernible_event", preview_id=fresh_receipt["id"])
         assert renewed["effective_decision"] == "reviewed_no_discernible_event"
         assert renewed["revision"] == 2 and not renewed["needs_reverification"]
+
+
+def test_review_write_during_running_real_preview_is_refused_then_accepted_after_release(
+    tmp_path: Path, originals: dict[str, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A preview holds the shared media reservation; a concurrent review write is refused, never queued or faked."""
+    from backend.app import main as main_module
+    from backend.tests import held_worker
+    from backend.tests.test_preview import stopped_worker, wait_job
+
+    created: list = []
+
+    class RecordedPreviews(main_module.PreviewJobs):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            created.append(self)
+
+    monkeypatch.setattr(main_module, "PreviewJobs", RecordedPreviews)
+    database, session_id = prepare(tmp_path / "data", [originals["quiet_65"]])
+    markers = tmp_path / "held"
+    with TestClient(create_app(Settings(database.parent, TOKEN))) as client:
+        upgrade(client)
+        row = run_summary(client, session_id)["windows"][0]
+        if sys.platform == "win32":
+            held_worker.hold(monkeypatch, markers)  # the summary has already run with its real worker
+        started = client.post("/api/media/preview", headers=HEADERS,
+                              json={"segment_id": row["segment_id"], "source_pts": row["preview_pts"]})
+        assert started.status_code == 202, started.text
+        reaped = stopped_worker(created[0], markers)
+        before = event_count(database)
+        busy = client.post(f"/api/summary-windows/{row['id']}/review-actions", headers=HEADERS,
+                           json={"actor": ACTOR, "expected_revision": 0, "action": "unable_to_assess",
+                                 "note": "Synthetic write during preview"})
+        assert busy.status_code == 409 and busy.json()["detail"]["code"] == "review_busy", busy.text
+        assert event_count(database) == before and current(client, row["id"])["revision"] == 0
+        cancelled = client.post(f"/api/media/preview/{started.json()['id']}/cancel", headers=HEADERS, json={})
+        assert cancelled.status_code == 200, cancelled.text
+        assert wait_job(created[0].get, started.json()["id"])["state"] == "cancelled"
+        assert reaped()
+        saved = action(client, row["id"], 0, "unable_to_assess", note="Synthetic write after preview")
+        assert saved["revision"] == 1 and saved["effective_decision"] == "unreviewed"

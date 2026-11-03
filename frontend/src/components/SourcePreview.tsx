@@ -1,0 +1,384 @@
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight, Loader2, RotateCcw } from 'lucide-react';
+import type { ReactNode } from 'react';
+import type { MediaSegment, PreviewFrame, PreviewJob } from '../../../electron/src/contracts';
+import { getAPI, whileBusy } from '../api';
+import { readMediaBytes } from '../binary';
+import type { DisplayedSourceFrame } from '../sourceFrame';
+import { clock, ptsAfter, ptsSeconds, rational } from '../lib/time';
+import { Button } from './ui/button';
+
+const unavailable = 'The local backend is unavailable. Close the window and retry after checking the backend.';
+const SPEEDS = [0.25, 0.5, 1, 1.5, 2] as const;
+export type ClipSeconds = 2 | 6 | 12;
+
+/** Keyboard-reachable player controls for the window dialog. */
+export interface SourcePreviewHandle {
+  togglePlay: () => void; step: (direction: 1 | -1) => void; toggleLoop: () => void; setSpeed: (index: number) => void;
+  /** Play from the current position at normal speed (for listening alongside); returns the clip time in seconds. */
+  playAtNormalSpeed: () => number | null;
+}
+
+/**
+ * Two-second derived WebM preview of the original, started at `initialPTS` when `enabled`. Displayed frames are
+ * mapped to exact original PTS through the preview manifest (requestVideoFrameCallback), never a browser timer.
+ */
+export const SourcePreview = forwardRef<SourcePreviewHandle, {
+  segment: MediaSegment;
+  initialPTS: string;
+  /** Stepping stays inside this window: [minPTS, maxPTS). */
+  minPTS: string;
+  maxPTS: string | null;
+  enabled: boolean;
+  disabledReason: string;
+  onReady?: (previewID: string | null) => void;
+  onDisplayedFrame?: (frame: DisplayedSourceFrame | null) => void;
+  /** Drawn over the loaded preview, given the displayed original source PTS (tracks, gates, gate drawing). */
+  overlay?: (displayedPTS: string | null) => ReactNode;
+  /** Initial clip length; 6 and 12 s are highlight blocks. */
+  initialSeconds?: ClipSeconds;
+  /** The loaded clip: first original source PTS and its duration in milliseconds. */
+  onClip?: (clip: { startPTS: string; durationMs: number } | null) => void;
+}>(function SourcePreview({ segment, initialPTS, minPTS, maxPTS, enabled, disabledReason, onReady, onDisplayedFrame, overlay, initialSeconds = 2, onClip }, handle) {
+  const [clipSeconds, setClipSeconds] = useState<ClipSeconds>(initialSeconds);
+  const [speed, setSpeedIndex] = useState(2);
+  const [looping, setLooping] = useState(false);
+  const [sourcePTS, setSourcePTS] = useState(initialPTS);
+  const [exact, setExact] = useState(initialPTS);
+  const [job, setJob] = useState<PreviewJob | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [pendingCancellation, setPendingCancellation] = useState<string | null>(null);
+  const [url, setURL] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [displayed, setDisplayed] = useState<PreviewFrame | null>(null);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const video = useRef<HTMLVideoElement>(null);
+  const generation = useRef(0);
+  const activeJob = useRef<string | null>(null);
+  const clipURL = useRef<string | null>(null);
+  const readyCallback = useRef(onReady);
+  readyCallback.current = onReady;
+  const frameCallback = useRef(onDisplayedFrame);
+  frameCallback.current = onDisplayedFrame;
+  const contentRead = useRef<AbortController | null>(null);
+
+  function clearDisplayed() {
+    setDisplayed(null);
+    frameCallback.current?.(null);
+  }
+
+  function clearClip() {
+    readyCallback.current?.(null);
+    contentRead.current?.abort();
+    if (video.current) {
+      video.current.pause();
+      video.current.removeAttribute('src');
+      video.current.load();
+    }
+    if (clipURL.current) URL.revokeObjectURL(clipURL.current);
+    clipURL.current = null;
+    setURL(null);
+    setLoaded(false);
+    clearDisplayed();
+  }
+
+  function releaseJob() {
+    const id = activeJob.current;
+    activeJob.current = null;
+    if (id) void getAPI()?.cancelPreview(id).catch(() => undefined);
+  }
+
+  function invalidate() {
+    generation.current += 1;
+    clearClip();
+    releaseJob();
+    setJob(null);
+    setStarting(false);
+    setPendingCancellation(null);
+  }
+
+  function fail(message: string) {
+    invalidate();
+    setError(message);
+    setNotice('');
+  }
+
+  useEffect(() => {
+    return () => {
+      readyCallback.current?.(null);
+      frameCallback.current?.(null);
+      contentRead.current?.abort();
+      generation.current += 1;
+      releaseJob();
+      if (clipURL.current) URL.revokeObjectURL(clipURL.current);
+      clipURL.current = null;
+    };
+  }, []);
+
+  async function start(requested: string, seconds: ClipSeconds = clipSeconds) {
+    invalidate();
+    setError(''); setNotice('');
+    setSourcePTS(requested); setExact(requested);
+    const ticket = generation.current;
+    setStarting(true);
+    try {
+      const api = getAPI();
+      if (!api) { fail(unavailable); return; }
+      // Moving to another window cancels the previous preview, whose worker may still be stopping.
+      // Wait a bounded time for that release instead of failing the new window's preview.
+      const result = await whileBusy('preview_busy', () => api.startPreview({ segment_id: segment.id, source_pts: requested, ...(seconds === 2 ? {} : { clip_seconds: seconds }) }), () => ticket !== generation.current);
+      if (ticket !== generation.current) {
+        if (result.ok) void api.cancelPreview(result.value.id).catch(() => undefined);
+        return;
+      }
+      if (!result.ok) { fail(result.error.message); return; }
+      if (result.value.segment_id !== segment.id) { fail('The preview response does not match the selected source.'); return; }
+      activeJob.current = result.value.id;
+      setJob(result.value);
+      setStarting(false);
+    } catch { if (ticket === generation.current) fail(unavailable); }
+  }
+
+  useEffect(() => { if (enabled) void start(initialPTS); }, [enabled]);
+
+  // Status revalidates source identity even after bytes have been loaded into the player.
+  useEffect(() => {
+    if (!job) return;
+    const id = job.id;
+    const ticket = generation.current;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const controller = new AbortController();
+    contentRead.current = controller;
+    const current = () => active && ticket === generation.current;
+    async function poll() {
+      try {
+        const api = getAPI();
+        if (!api) { if (current()) fail(unavailable); return; }
+        const result = await api.previewStatus(id);
+        if (!current()) return;
+        if (!result.ok) { fail(result.error.message); return; }
+        const value = result.value;
+        if (value.segment_id !== segment.id) { fail('The preview no longer matches the selected source.'); return; }
+        if (value.state === 'failed' || value.state === 'cancelled') {
+          fail(value.error?.message ?? (value.state === 'cancelled' ? 'Preview cancelled or expired. Create a new preview to continue.' : 'Preview generation failed. Check the selected source.'));
+          return;
+        }
+        setJob(value);
+        if (value.state === 'ready' && !clipURL.current) {
+          if (!value.manifest || value.manifest.segment_id !== segment.id || value.manifest.source_sha256 !== segment.metadata.sha256) {
+            fail('The preview identity does not match the imported original. Refresh the session media.'); return;
+          }
+          const content = await readMediaBytes(() => api.previewContent(id), { signal: controller.signal, priority: 2 });
+          if (!current()) return;
+          if (!content?.ok) { fail(content?.error.message ?? unavailable); return; }
+          const bytes = new Uint8Array(content.value.bytes);
+          if (bytes.byteLength < 1 || bytes.byteLength > 32 * 1024 * 1024) { fail('The preview content is empty or exceeds its 32 MiB limit.'); return; }
+          clipURL.current = URL.createObjectURL(new Blob([bytes.buffer], { type: 'video/webm' }));
+          setURL(clipURL.current);
+        }
+        if (current()) timer = setTimeout(() => void poll(), value.state === 'ready' ? 1000 : 500);
+      } catch { if (current()) fail(unavailable); }
+    }
+    void poll();
+    return () => {
+      active = false; clearTimeout(timer); controller.abort();
+      if (contentRead.current === controller) contentRead.current = null;
+    };
+  }, [job?.id]);
+
+  useEffect(() => {
+    if (!pendingCancellation) return;
+    const ticket = generation.current;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    async function check() {
+      try {
+        const result = await getAPI()?.previewStatus(pendingCancellation!);
+        if (!active || ticket !== generation.current) return;
+        if (!result?.ok) setError(result?.error.message ?? unavailable);
+        else if (result.value.state === 'cancelled' || result.value.state === 'failed') {
+          activeJob.current = null;
+          setPendingCancellation(null);
+          setError('');
+          setNotice('Preview stopped. No preview is displayed.');
+          return;
+        }
+      } catch { if (active && ticket === generation.current) setError(unavailable); }
+      if (active && ticket === generation.current) timer = setTimeout(() => void check(), 1000);
+    }
+    timer = setTimeout(() => void check(), 500);
+    return () => { active = false; clearTimeout(timer); };
+  }, [pendingCancellation]);
+
+  const manifest = job?.manifest;
+  useLayoutEffect(() => {
+    const player = video.current;
+    if (!url || !player || !manifest) return;
+    if (typeof player.requestVideoFrameCallback !== 'function') {
+      fail('This browser cannot identify displayed preview frames reliably. Source-time playback is unavailable.');
+      return;
+    }
+    let active = true;
+    let callback: number;
+    let pending: PreviewFrame | null = null;
+    const clipGeneration = generation.current;
+    const previewID = job!.id;
+    const current = () => active && generation.current === clipGeneration && activeJob.current === previewID;
+    function publish(mapped: PreviewFrame) {
+      setDisplayed(mapped);
+      frameCallback.current?.({ previewID, segmentID: manifest!.segment_id,
+        sourceSHA256: manifest!.source_sha256, timeBase: manifest!.time_base, sourcePTS: mapped.source_pts });
+    }
+    function matchesPosition(mapped: PreviewFrame) {
+      const index = manifest!.frames.indexOf(mapped);
+      const end = manifest!.frames[index + 1]?.preview_ms ?? manifest!.preview_duration_ms;
+      const position = player!.currentTime * 1000;
+      // Preview position only rejects stale callbacks; only rVFC supplies a source-PTS candidate.
+      return index >= 0 && mapped.preview_ms <= position && position < end;
+    }
+    function seeking() {
+      clearDisplayed();
+      // A presented-frame callback may precede the seeking event for this same target.
+      if (pending && !matchesPosition(pending)) pending = null;
+    }
+    function seeked() {
+      if (current() && !player!.seeking && pending && matchesPosition(pending)) publish(pending);
+      pending = null;
+    }
+    function frame(_now: number, metadata: VideoFrameCallbackMetadata) {
+      if (!current() || !player) return;
+      const milliseconds = metadata.mediaTime * 1000;
+      const mapped = manifest!.frames.find(value => Math.abs(value.preview_ms - milliseconds) <= 0.5001);
+      if (!mapped) { fail('The displayed frame could not be matched to an original source PTS. Create a new preview.'); return; }
+      if (player.seeking) {
+        clearDisplayed();
+        pending = mapped;
+      } else {
+        pending = null;
+        publish(mapped);
+      }
+      callback = player.requestVideoFrameCallback(frame);
+    }
+    player.addEventListener('seeking', seeking);
+    player.addEventListener('seeked', seeked);
+    callback = player.requestVideoFrameCallback(frame);
+    return () => {
+      active = false; pending = null; player.cancelVideoFrameCallback(callback);
+      player.removeEventListener('seeking', seeking); player.removeEventListener('seeked', seeked);
+    };
+    // A ready clip's ledger is immutable; status polling must not drop an in-progress seek candidate.
+  }, [url, job?.id]);
+
+  async function cancel() {
+    const id = activeJob.current;
+    if (!pendingCancellation) generation.current += 1;
+    clearClip(); setJob(null); setStarting(false);
+    setPendingCancellation(id);
+    const ticket = generation.current;
+    setError(''); setNotice('Cancellation requested. No preview is displayed.');
+    if (id) {
+      try {
+        const result = await getAPI()?.cancelPreview(id);
+        if (ticket === generation.current) {
+          if (!result?.ok) setError(result?.error.message ?? unavailable);
+          else if (result.value.state === 'running') setNotice('Cancellation is in progress. No preview is displayed.');
+          else {
+            activeJob.current = null; setPendingCancellation(null);
+            setNotice('Preview cancelled. No preview is displayed.');
+          }
+        }
+      } catch { if (ticket === generation.current) setError(unavailable); }
+    }
+  }
+
+  const timeBase = segment.metadata.time_base;
+  const clipStart = manifest?.actual_pts ?? sourcePTS;
+  const previous = ptsAfter(clipStart, -clipSeconds * 1000, timeBase);
+  const next = ptsAfter(clipStart, clipSeconds * 1000, timeBase);
+  const canPrevious = BigInt(clipStart) > BigInt(minPTS);
+  const canNext = maxPTS === null ? BigInt(next) <= BigInt(segment.metadata.last_pts) : BigInt(next) < BigInt(maxPTS);
+  const busy = starting || job?.state === 'running' || pendingCancellation !== null;
+  const offset = (pts: string) => clock(ptsSeconds(pts, minPTS, timeBase));
+
+  useEffect(() => { if (video.current) video.current.playbackRate = SPEEDS[speed]!; }, [speed, url]);
+  const clipCallback = useRef(onClip);
+  clipCallback.current = onClip;
+  useEffect(() => { clipCallback.current?.(loaded && manifest ? { startPTS: manifest.actual_pts, durationMs: manifest.preview_duration_ms } : null); }, [loaded, manifest?.actual_pts]);
+  useEffect(() => { if (video.current) video.current.loop = looping; }, [looping, url]);
+  /** Seek to the middle of the neighbouring manifest frame; the frame callback then confirms its exact source PTS. */
+  function step(direction: 1 | -1) {
+    const player = video.current;
+    if (!player || !manifest || !loaded) return;
+    player.pause();
+    const frames = manifest.frames;
+    const index = displayed ? frames.findIndex(frame => frame.source_pts === displayed.source_pts) : 0;
+    const target = Math.max(0, Math.min(frames.length - 1, index + direction));
+    const end = frames[target + 1]?.preview_ms ?? manifest.preview_duration_ms;
+    player.currentTime = (frames[target]!.preview_ms + end) / 2000;
+  }
+  useImperativeHandle(handle, () => ({
+    togglePlay: () => { const player = video.current; if (player) { if (player.paused) void player.play().catch(() => undefined); else player.pause(); } },
+    step, toggleLoop: () => setLooping(value => !value), setSpeed: index => { if (SPEEDS[index] !== undefined) setSpeedIndex(index); },
+    playAtNormalSpeed: () => {
+      const player = video.current;
+      if (!player || !loaded) return null;
+      setSpeedIndex(2); player.playbackRate = 1; void player.play().catch(() => undefined);
+      return player.currentTime;
+    },
+  }));
+
+  return <section aria-label="Original video" className="flex shrink-0 flex-col gap-2">
+    <div className="relative flex min-h-[180px] flex-1 items-center justify-center overflow-hidden rounded-md bg-black">
+      {url ? <video ref={video} src={url} controls preload="auto" aria-label="Derived source preview" className="h-full max-h-[60vh] w-full object-contain"
+        onLoadedData={() => { setLoaded(true); if (job?.state === 'ready') readyCallback.current?.(job.id); }} onSeeking={clearDisplayed}
+        onError={() => fail('The preview could not be played. Close the window and retry.')} />
+        : <p className="flex items-center gap-2 px-4 text-center text-sm text-slate-300" role="status">
+          {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+          {!enabled ? disabledReason : starting ? 'Creating preview...' : job?.state === 'running' ? `Creating preview: ${job.phase}` : error ? 'Preview unavailable.' : notice || 'Preview not loaded.'}
+        </p>}
+      {url && loaded && overlay?.(displayed?.source_pts ?? null)}
+    </div>
+    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300">
+      <div className="flex items-center gap-1">
+        <Button size="sm" variant="secondary" className="h-8" disabled={!enabled || busy || !canPrevious} onClick={() => void start(BigInt(previous) < BigInt(minPTS) ? minPTS : previous)}><ChevronLeft />{clipSeconds} s back</Button>
+        <Button size="sm" variant="secondary" className="h-8" disabled={!enabled || busy || !canNext} onClick={() => void start(next)}>{clipSeconds} s on<ChevronRight /></Button>
+        <Button size="sm" variant="secondary" className="h-8" disabled={!enabled || busy} onClick={() => void start(initialPTS)}><RotateCcw />Window start</Button>
+        {(starting || job) && <Button size="sm" variant="ghost" className="h-8 text-slate-200" onClick={() => void cancel()}>Cancel preview</Button>}
+      </div>
+      <div className="flex flex-wrap items-center gap-1" aria-label="Player controls">
+        <select aria-label="Clip length" className="h-8 rounded-md border border-slate-600 bg-slate-900 px-1 text-slate-100" value={clipSeconds} disabled={!enabled || busy}
+          onChange={event => { const seconds = Number(event.target.value) as ClipSeconds; setClipSeconds(seconds); void start(clipStart, seconds); }}>
+          <option value={2}>2 s clip</option><option value={6}>6 s block</option><option value={12}>12 s block</option>
+        </select>
+        <select aria-label="Playback speed" className="h-8 rounded-md border border-slate-600 bg-slate-900 px-1 text-slate-100" value={speed} onChange={event => setSpeedIndex(Number(event.target.value))}>
+          {SPEEDS.map((value, index) => <option key={value} value={index}>{value}x</option>)}
+        </select>
+        <label className="flex items-center gap-1"><input type="checkbox" checked={looping} onChange={event => setLooping(event.target.checked)} />Loop</label>
+        <Button size="sm" variant="secondary" className="h-8 px-2" aria-label="Previous frame" title="Previous frame (,)" disabled={!loaded} onClick={() => step(-1)}><ChevronLeft /></Button>
+        <Button size="sm" variant="secondary" className="h-8 px-2" aria-label="Next frame" title="Next frame (.)" disabled={!loaded} onClick={() => step(1)}><ChevronRight /></Button>
+      </div>
+      <span role="status">{url && <span>{loaded ? 'Preview ready' : 'Loading preview...'}</span>}{manifest && <span> · clip {offset(manifest.actual_pts)} to {clock(ptsSeconds(manifest.actual_pts, minPTS, timeBase) + manifest.preview_duration_ms / 1000)} of this window</span>}</span>
+    </div>
+    {displayed && <p aria-label="Displayed original frame" className="text-xs text-slate-200">Displayed frame: {offset(displayed.source_pts)} into the window · <span className="font-mono">Displayed source PTS {displayed.source_pts}</span> · source time {rational(displayed.source_time)} s</p>}
+    {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
+    <details className="text-xs text-slate-300">
+      <summary className="cursor-pointer text-slate-400">Exact position</summary>
+      <form className="mt-2 flex flex-wrap items-end gap-2" onSubmit={event => { event.preventDefault(); if (/^-?\d+$/.test(exact.trim())) void start(exact.trim()); else setError('Enter an integer source PTS.'); }}>
+        <label className="space-y-1"><span className="block">Source PTS</span>
+          <input value={exact} onChange={event => setExact(event.target.value)} inputMode="numeric" autoComplete="off" className="h-8 w-48 rounded-md border border-slate-600 bg-slate-900 px-2 font-mono text-slate-100" /></label>
+        <Button type="submit" size="sm" variant="secondary" className="h-8" disabled={!enabled || busy}>Create preview</Button>
+        <span className="text-slate-400">Timebase {rational(timeBase)} s; this window starts at PTS {minPTS}. A PTS between frames shows the next frame.</span>
+      </form>
+      {manifest && <dl className="mt-2 grid grid-cols-[auto,1fr] gap-x-3 gap-y-0.5">
+        <dt className="text-slate-400">Requested / actual first source PTS</dt><dd>{manifest.requested_pts} / {manifest.actual_pts}</dd>
+        <dt className="text-slate-400">Seek delta (seconds)</dt><dd>{rational(manifest.seek_error)}</dd>
+        <dt className="text-slate-400">Clip source start / end (seconds)</dt><dd>{rational(manifest.source_start)} / {rational(manifest.source_end)}</dd>
+        {displayed && <><dt className="text-slate-400">Displayed segment elapsed (seconds)</dt><dd>{rational(displayed.elapsed)}</dd></>}
+      </dl>}
+    </details>
+    {manifest && manifest.warnings.length > 0 && <details className="text-xs text-slate-400"><summary className="cursor-pointer">About this preview ({manifest.warnings.length} notes)</summary>
+      <ul aria-label="Preview fidelity warnings" className="mt-1 list-disc pl-4">{manifest.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul></details>}
+  </section>;
+});

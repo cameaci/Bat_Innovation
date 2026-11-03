@@ -8,7 +8,7 @@ export interface RunningShell {
   application: ElectronApplication;
   page: Page;
   backendPid: number;
-  tokenDigest: string;
+  tokenDigest: string | null;
 }
 
 export function launchEnvironment(dataDir: string): Record<string, string> {
@@ -32,6 +32,15 @@ function isRunning(pid: number): boolean {
 }
 
 export function backendChildren(parentPid: number): number[] {
+  if (process.platform === 'win32') {
+    if (!Number.isSafeInteger(parentPid) || parentPid <= 0) throw new Error('Invalid parent PID.');
+    const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+      `Get-CimInstance Win32_Process -Filter "ParentProcessId = ${parentPid}" | Where-Object { $_.CommandLine -match '\\s-m\\s+backend\\.app(?:\\s|$)' } | ForEach-Object { $_.ProcessId }`],
+    { encoding: 'utf8', windowsHide: true, timeout: 10_000 });
+    if (result.error) throw result.error;
+    if (result.status !== 0) throw new Error('Could not inspect Electron child processes.');
+    return result.stdout.trim() ? result.stdout.trim().split(/\s+/).map(Number) : [];
+  }
   const result = spawnSync('ps', ['--ppid', String(parentPid), '-o', 'pid=,args='], {
     encoding: 'utf8',
   });
@@ -56,17 +65,21 @@ export async function launch(dataDir: string): Promise<RunningShell> {
     const children = backendChildren(mainPid);
     expect(children, 'The shell must own exactly one Python backend').toHaveLength(1);
     const backendPid = children[0]!;
-    const childEnvironment = (await readFile(`/proc/${backendPid}/environ`, 'utf8')).split('\0');
-    const tokenEntry = childEnvironment.find((entry) => entry.startsWith('BAT_API_TOKEN='));
-    expect(Boolean(tokenEntry), 'Backend receives a generated launch token').toBe(true);
-    const token = tokenEntry!.slice('BAT_API_TOKEN='.length);
-    expect(token.length >= 32, 'Launch token has at least 32 characters').toBe(true);
+    let tokenDigest: string | null = null;
+    if (process.platform === 'linux') {
+      const childEnvironment = (await readFile(`/proc/${backendPid}/environ`, 'utf8')).split('\0');
+      const tokenEntry = childEnvironment.find((entry) => entry.startsWith('BAT_API_TOKEN='));
+      expect(Boolean(tokenEntry), 'Backend receives a generated launch token').toBe(true);
+      const token = tokenEntry!.slice('BAT_API_TOKEN='.length);
+      expect(token.length >= 32, 'Launch token has at least 32 characters').toBe(true);
+      // Compare hashes, so a failed assertion never prints a launch credential.
+      tokenDigest = createHash('sha256').update(token).digest('hex');
+    }
     return {
       application,
       page,
       backendPid,
-      // Compare hashes, so a failed assertion never prints a launch credential.
-      tokenDigest: createHash('sha256').update(token).digest('hex'),
+      tokenDigest,
     };
   } catch (error) {
     await application.close();

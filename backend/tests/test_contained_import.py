@@ -81,10 +81,12 @@ def test_worker_error_text_is_replaced_with_fixed_messages(supervisor, code):
     assert not supervisor.scratch.exists()
 
 
+# Explicit ids: a node ID that embeds the oversize body exceeds the 32767-character Windows environment limit
+# that pytest's PYTEST_CURRENT_TEST variable must fit in.
 @pytest.mark.parametrize('body', [
     b'{not json', b'{"ok": NaN}', b'{"ok":{},"ok":{}}', b'{"ok":{}}',
     b'[' * 2000 + b']' * 2000, b'x' * (subject.MAX_RESPONSE_BYTES + 1),
-])
+], ids=['not-json', 'nan', 'duplicate-key', 'empty-ok', 'deep-nesting', 'oversize'])
 def test_bad_response_is_sanitized_and_scratch_is_removed(supervisor, body):
     supervisor.body = body
     progress = []
@@ -145,8 +147,7 @@ def test_response_must_be_a_regular_file_before_open(tmp_path, kind):
         subject._read_bounded(path, subject.MAX_RESPONSE_BYTES)
 
 
-@pytest.mark.skipif(sys.platform != 'linux', reason='Real decoding is verified on Linux only')
-def test_real_linux_inspector_metadata_and_immutable_sources(tmp_path):
+def test_real_inspector_metadata_and_immutable_sources(tmp_path):
     import hashlib
     from backend.tests.media_fixtures import generate_media
     fixtures = generate_media(tmp_path)

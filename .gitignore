@@ -40,3 +40,7 @@ summaries/
 /test-results/
 /playwright-report/
 /work/
+
+# Windows packaging output
+/.build/
+/build/

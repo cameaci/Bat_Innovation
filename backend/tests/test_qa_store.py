@@ -168,7 +168,6 @@ def test_history_pagination_is_bounded_and_ordered(tmp_path):
     assert len(json.dumps(page)) < 256000
 
 
-@pytest.mark.skipif(sys.platform != 'linux', reason='Actual process-kill recovery exercised on Linux only')
 def test_killed_writer_recovers_prior_qa_projection_and_history(tmp_path):
     db, _, _, row = prepared(tmp_path)
     apply(db, row)
@@ -177,20 +176,21 @@ def test_killed_writer_recovers_prior_qa_projection_and_history(tmp_path):
         c.execute("CREATE TRIGGER qa_test_interrupt BEFORE UPDATE ON qa_window BEGIN SELECT qa_test_kill(); END")
     # Only an OS failure is injected. The real production transaction has already
     # inserted its event when the projection's trigger kills the whole writer.
-    script = '''import json,os,signal,sys
+    # 9 is SIGKILL on POSIX; on Windows os.kill calls TerminateProcess with exit code 9.
+    script = '''import json,os,sys
 from pathlib import Path
 from backend.app import store,qa_store
 original=store.connect
 def connect(path):
     c=original(path)
-    c.create_function('qa_test_kill',0,lambda:os.kill(os.getpid(),signal.SIGKILL))
+    c.create_function('qa_test_kill',0,lambda:os.kill(os.getpid(),9))
     return c
 store.connect=connect
 qa_store.apply(Path(sys.argv[1]),sys.argv[2],json.loads(sys.argv[3]),'fp',{'fingerprint':'fp'})
 '''
     result = subprocess.run([sys.executable, '-c', script, str(db), row['id'], json.dumps(change(expected_revision=1))],
                             capture_output=True, timeout=10)
-    assert result.returncode == -9, result.stderr.decode()
+    assert result.returncode == (9 if sys.platform == 'win32' else -9), result.stderr.decode()
     store.initialise(db)
     assert (qa_store.get(db,row['id']),qa_store.history(db,row['id'])) == before
     with sqlite3.connect(db) as c:

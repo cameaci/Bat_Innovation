@@ -6,15 +6,17 @@ import json
 from pathlib import Path
 import shutil
 import sqlite3
-from threading import Event, Lock
+import sys
+from threading import Event, Lock, Thread
 import time
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
 import pytest
 
-from backend.app import imports, media, store
+from backend.app import imports, media, store, workers
 from backend.app.main import Settings, create_app
+from backend.tests import held_worker
 from backend.tests.media_fixtures import generate_media
 
 TOKEN = "synthetic-private-per-launch-token-long-enough"
@@ -35,7 +37,8 @@ def session(client: TestClient) -> str:
 
 def upgraded(client: TestClient) -> None:
     response = client.post("/api/media/upgrade", headers=HEADERS)
-    assert response.status_code == 200 and response.json() == {"schema_version": 2}
+    # Idempotent: a new database already starts at the current schema.
+    assert response.status_code == 200 and response.json()["schema_version"] in store.MEDIA_SCHEMA_VERSIONS
 
 
 def inventory(client: TestClient, session_id: str) -> dict:
@@ -115,8 +118,22 @@ def test_upgrade_rolls_back_every_ddl_statement_when_a_later_statement_fails(tmp
         assert connection.execute("SELECT * FROM session_media").fetchall() == [("preserve",)]
 
 
+def test_new_database_starts_at_the_current_schema(tmp_path: Path) -> None:
+    settings = Settings(tmp_path / "app-data", TOKEN)
+    with TestClient(create_app(settings)) as client:
+        session_id = session(client)
+        assert inventory(client, session_id)["schema_version"] == store.CURRENT_SCHEMA_VERSION
+        # The explicit upgrade routes stay safe to call on a current database (the frozen smoke test does).
+        for route in ("/api/media/upgrade", "/api/summaries/upgrade", "/api/reviews/upgrade", "/api/qa/upgrade", "/api/storage/upgrade"):
+            response = client.post(route, headers=HEADERS)
+            assert response.status_code == 200, (route, response.json())
+        assert inventory(client, session_id)["schema_version"] == store.CURRENT_SCHEMA_VERSION
+
+
 def test_real_import_reorder_and_anchor_survive_restart_without_invented_time(tmp_path: Path, videos: dict[str, Path]) -> None:
     settings = Settings(tmp_path / "app-data", TOKEN)
+    # An existing version 1 database is never upgraded silently on startup.
+    store.initialise(settings.data_dir / "bat_innovation.sqlite3")
     with TestClient(create_app(settings)) as client:
         session_id = session(client)
         assert inventory(client, session_id) == {"session_id": session_id, "schema_version": 1,
@@ -194,6 +211,24 @@ def test_missing_and_changed_originals_are_visible_without_replacing_metadata(tm
 
 def blocking_inspection(monkeypatch: pytest.MonkeyPatch) -> Event:
     entered = Event()
+    if sys.platform == "win32":
+        # Windows inspects in a contained worker; a sleeping synthetic worker stands in for a long decode.
+        from backend.app import contained_import
+
+        contained = contained_import.inspect_source
+
+        def sleeping(path: Path, progress, cancelled):
+            def command(scratch: Path) -> list[str]:
+                def started() -> None:
+                    while not (scratch / "started.marker").exists() and not cancelled():
+                        time.sleep(0.005)
+                    entered.set()
+                Thread(target=started, daemon=True).start()
+                return [sys.executable, str(held_worker.WORKER), "sleep", str(scratch)]
+            return contained(path, progress, cancelled, command)
+
+        monkeypatch.setattr(contained_import, "inspect_source", sleeping)
+        return entered
     inspect = media.inspect_source
 
     def blocked(path: Path, progress, cancelled):
@@ -390,7 +425,7 @@ def test_terminal_import_status_releases_processing_reservation_atomically(
     if outcome != "complete":
         def unsuccessful(*args, **kwargs):
             raise media.MediaError("cancelled" if outcome == "cancelled" else "decode_failed", "Synthetic failure")
-        monkeypatch.setattr(media, "inspect_source", unsuccessful)
+        monkeypatch.setattr(imports, "inspect", unsuccessful)
     try:
         job = jobs.start(session_id, [str(videos["short_mp4"])])
         deadline = time.monotonic() + 3
@@ -428,9 +463,7 @@ def test_import_thread_start_failure_leaves_no_running_job_or_reservation(
     jobs.close()
 
 
-@pytest.mark.parametrize('platform_name', ['win32', 'darwin'])
-def test_import_limits_guard_precedes_sources_workers_and_reservation(tmp_path, monkeypatch, platform_name):
-    from types import SimpleNamespace
+def test_import_limits_guard_precedes_sources_workers_and_reservation(tmp_path, monkeypatch):
     from unittest.mock import Mock
 
     database = tmp_path / 'data' / 'bat_innovation.sqlite3'
@@ -440,8 +473,8 @@ def test_import_limits_guard_precedes_sources_workers_and_reservation(tmp_path, 
     original = database.read_bytes()
     reservation = Lock()
     jobs = imports.ImportJobs(database, database.parent, reservation)
-    # Replace only this module's platform view, never the host Python platform.
-    monkeypatch.setattr(imports, 'sys', SimpleNamespace(platform=platform_name))
+    # Model an unsupported platform (neither Linux nor Windows) without touching the host Python platform.
+    monkeypatch.setattr(workers, 'supported', lambda: False)
     forbidden = Mock(side_effect=AssertionError('Import must reject before source access or worker creation'))
     monkeypatch.setattr(imports, 'selected_sources', forbidden)
     monkeypatch.setattr(imports, 'Thread', forbidden)
@@ -468,7 +501,6 @@ def test_import_limits_guard_precedes_sources_workers_and_reservation(tmp_path, 
 def test_windows_authenticated_import_api_is_fail_closed_and_preserves_records(
     tmp_path, videos, monkeypatch, existing_media,
 ):
-    from types import SimpleNamespace
     from unittest.mock import Mock
 
     settings = Settings(tmp_path / 'data', TOKEN)
@@ -481,8 +513,8 @@ def test_windows_authenticated_import_api_is_fail_closed_and_preserves_records(
         before = inventory(client, session_id)
         original_database = database.read_bytes()
         with monkeypatch.context() as patch:
-            patch.setattr(imports, 'sys', SimpleNamespace(platform='win32'))
-            forbidden = Mock(side_effect=AssertionError('Windows import reached source or worker code'))
+            patch.setattr(workers, 'supported', lambda: False)
+            forbidden = Mock(side_effect=AssertionError('Unsupported-platform import reached source or worker code'))
             patch.setattr(imports, 'selected_sources', forbidden)
             patch.setattr(imports, 'Thread', forbidden)
             patch.setattr(imports, 'Event', forbidden)
@@ -496,7 +528,7 @@ def test_windows_authenticated_import_api_is_fail_closed_and_preserves_records(
                 assert response.status_code == 409, response.text
                 assert response.json()['detail'] == {
                     'code': 'import_limits_unavailable',
-                    'message': 'Media import process limits are unavailable on this platform. Only Linux development imports are verified.',
+                    'message': 'Media import process limits are unavailable on this platform. Only Linux and Windows are supported.',
                 }
                 assert str(tmp_path) not in response.text and 'synthetic-private' not in response.text
             forbidden.assert_not_called()

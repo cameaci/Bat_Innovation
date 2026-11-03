@@ -1,0 +1,52 @@
+name: Build Windows installer
+
+# Unsigned internal-beta installer. The same script a developer runs locally builds it, so CI adds no extra steps.
+# workflow_dispatch: installer kept as a workflow artifact (14 days).
+# Tag v*: also published as a GitHub pre-release. Review docs/18-windows-beta.md (codec licences) before tagging.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Backend tests (Windows Job Objects included)
+        shell: pwsh
+        run: |
+          python -m pip install -r backend/requirements-dev.txt
+          winget install --id Gyan.FFmpeg --silent --accept-source-agreements --accept-package-agreements
+          python -m pytest backend/tests -q -rs
+      - name: Build, smoke-test and package
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: |
+            electron/dist-build/Bat-Innovation-Setup-*.exe
+            electron/dist-build/SHA256SUMS.txt
+          retention-days: 14
+      - name: Publish pre-release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" electron/dist-build/Bat-Innovation-Setup-*.exe electron/dist-build/SHA256SUMS.txt \
+            --prerelease --title "Bat Innovation ${GITHUB_REF_NAME} (internal beta, unsigned)" \
+            --notes "Unsigned internal beta. Exports are PROVISIONAL; no ecological validation or finalisation. See docs/18-windows-beta.md for limits and the codec licence notice."

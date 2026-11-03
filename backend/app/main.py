@@ -18,13 +18,18 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from . import store, summary_store
+from . import qa_store, review_store, store, summary_store
 from .imports import ImportErrorResponse, ImportJobs, source_state
 from .preview import PreviewJobs
 from .summary_jobs import SummaryJobs
 from .reviews import ReviewService, install_routes as install_review_routes
 from .qa import QAService, install_routes as install_qa_routes
 from .export_jobs import ExportJobs
+from .tracking import TrackingJobs, install_routes as install_tracking_routes
+from .counts import install_routes as install_count_routes
+from .audio import AudioService, install_routes as install_audio_routes
+from .proxies import ProxyJobs, install_routes as install_proxy_routes
+from .renders import RenderJobs, install_routes as install_render_routes
 
 
 @dataclass(frozen=True)
@@ -70,6 +75,7 @@ class NewImport(BaseModel):
     model_config = ConfigDict(extra="forbid")
     session_id: UUID
     paths: list[str] = Field(min_length=1, max_length=64)
+    modality: Literal["active_ir", "rendered_thermal"] = "active_ir"
 
 
 class EmptyRequest(BaseModel):
@@ -91,6 +97,7 @@ class NewPreview(BaseModel):
     model_config = ConfigDict(extra="forbid")
     segment_id: UUID
     source_pts: str = Field(pattern=r"^-?\d{1,19}$", max_length=20)
+    clip_seconds: Literal[2, 6, 12] = 2
 
     @field_validator("source_pts")
     @classmethod
@@ -161,19 +168,32 @@ def create_app(settings: Settings) -> FastAPI:
     if len(settings.api_token) < 32:
         raise RuntimeError("A per-launch API token of at least 32 characters is required")
     db_path = settings.data_dir / "bat_innovation.sqlite3"
+    fresh = not db_path.exists()
     store.initialise(db_path)
+    if fresh:
+        # A database created by this launch holds nothing to preserve, so it starts at the current schema.
+        # An existing database is only ever upgraded by an explicit user action.
+        for upgrade in (store.upgrade_media, summary_store.upgrade, review_store.upgrade, qa_store.upgrade, store.upgrade_expansion):
+            upgrade(db_path)
     activity_lock = Lock()
     jobs = ImportJobs(db_path, settings.data_dir, activity_lock)
     previews = PreviewJobs(db_path, settings.data_dir, activity_lock)
     summaries = SummaryJobs(db_path, settings.data_dir, activity_lock)
-    reviews = ReviewService(db_path, summaries, previews, activity_lock)
+    proxies = ProxyJobs(db_path, settings.data_dir)
+    renders = RenderJobs(db_path, settings.data_dir)
+    reviews = ReviewService(db_path, summaries, previews, activity_lock, proxies)
     qa = QAService(reviews)
     exports = ExportJobs(db_path, settings.data_dir)
+    tracking = TrackingJobs(db_path, activity_lock)
+    audio = AudioService(db_path, settings.data_dir, activity_lock)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         yield
         exports.close()
+        renders.close()
+        proxies.close()
+        tracking.close()
         summaries.close()
         previews.close()
         jobs.close()
@@ -223,6 +243,7 @@ def create_app(settings: Settings) -> FastAPI:
         return {"session_id": session_id, "schema_version": store.schema_version(db_path),
                 "segments": [{"id": row["id"], "position": row["position"], "continuity": row["continuity"],
                               "continuity_provenance": row["continuity_provenance"], "source_state": source_state(row),
+                              "modality": row.get("modality", "active_ir"), "modality_provenance": row.get("modality_provenance"),
                               "metadata": json.loads(row["metadata_json"])}
                              for row in store.private_segments(db_path, session_id)],
                 "clock_anchor": store.clock_anchor(db_path, session_id), "active_import": jobs.active(session_id)}
@@ -233,6 +254,21 @@ def create_app(settings: Settings) -> FastAPI:
             store.upgrade_media(db_path)
         except (store.DatabaseSchemaError, sqlite3.DatabaseError):
             raise ImportErrorResponse("schema_upgrade_failed", "The media schema upgrade failed; the existing database was preserved.", 409) from None
+        return {"schema_version": store.schema_version(db_path)}
+
+    @app.post("/api/storage/upgrade", dependencies=[Depends(authenticate)])
+    def upgrade_storage(_payload: EmptyRequest = Body(default_factory=EmptyRequest)) -> dict[str, int]:
+        """Feature-expansion steps after the QA schema, each its own transaction."""
+        if store.schema_version(db_path) not in store.QA_SCHEMA_VERSIONS:
+            raise ImportErrorResponse("schema_upgrade_required", "Upgrade media, summary, review and QA storage first.", 409)
+        if not activity_lock.acquire(blocking=False):
+            raise ImportErrorResponse("storage_busy", "Wait for the active media operation before upgrading storage.", 409)
+        try:
+            store.upgrade_expansion(db_path)
+        except (store.DatabaseSchemaError, sqlite3.DatabaseError):
+            raise ImportErrorResponse("storage_upgrade_failed", "The storage upgrade failed; the existing database was preserved.", 409) from None
+        finally:
+            activity_lock.release()
         return {"schema_version": store.schema_version(db_path)}
 
     @app.get("/api/sessions/{session_id}/media", dependencies=[Depends(authenticate)])
@@ -257,7 +293,9 @@ def create_app(settings: Settings) -> FastAPI:
         session = str(payload.session_id)
         require_session(session)
         require_media_schema()
-        return jobs.start(session, payload.paths)
+        if payload.modality != "active_ir" and store.schema_version(db_path) < store.MODALITY_SCHEMA_VERSION:
+            raise ImportErrorResponse("schema_upgrade_required", "Upgrade storage before importing rendered thermal video.", 409)
+        return jobs.start(session, payload.paths, payload.modality)
 
     @app.get("/api/media/import/{job_id}", dependencies=[Depends(authenticate)])
     def get_import(job_id: UUID) -> dict:
@@ -269,7 +307,7 @@ def create_app(settings: Settings) -> FastAPI:
 
     @app.post("/api/media/preview", status_code=202, dependencies=[Depends(authenticate)])
     def post_preview(payload: NewPreview) -> dict:
-        return previews.start(str(payload.segment_id), payload.source_pts)
+        return previews.start(str(payload.segment_id), payload.source_pts, payload.clip_seconds)
 
     @app.get("/api/media/preview/{preview_id}", dependencies=[Depends(authenticate)])
     def get_preview(preview_id: UUID) -> dict:
@@ -330,11 +368,16 @@ def create_app(settings: Settings) -> FastAPI:
         return exports.cancel(str(job_id))
 
     @app.get("/api/exports/{job_id}/files/{kind}", dependencies=[Depends(authenticate)])
-    def export_content(job_id: UUID, kind: Literal["observations", "audit", "manifest"]):
+    def export_content(job_id: UUID, kind: Literal["observations", "audit", "tracks", "counts", "manifest"]):
         chunks, size = exports.content(str(job_id), kind)
         mime = "application/json" if kind == "manifest" else "text/csv; charset=utf-8"
         return StreamingResponse(chunks, media_type=mime, headers={"Content-Length": str(size), "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
     install_review_routes(app, reviews, authenticate)
     install_qa_routes(app, qa, authenticate)
+    install_tracking_routes(app, tracking, authenticate, previews, proxies)
+    install_count_routes(app, db_path, authenticate, proxies)
+    install_audio_routes(app, audio, authenticate)
+    install_proxy_routes(app, proxies, authenticate)
+    install_render_routes(app, renders, authenticate)
     return app

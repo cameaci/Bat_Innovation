@@ -2,9 +2,8 @@
 
 The backend remains the only SQLite writer. The worker receives a bounded request file, inspects the
 original read-only through backend.app.media, and serializes one size-checked response file. These
-logical JSON limits are not a scratch/disk capacity boundary. Windows media
-import is still rejected by the ImportJobs platform guard, so no application request reaches this
-path until separate native-media and scratch-capacity acceptance passes.
+logical JSON limits are not a scratch/disk capacity boundary. ImportJobs uses this path on Windows,
+where the Job Object bounds memory, CPU and process count; the budgets below are provisional.
 """
 
 from __future__ import annotations
@@ -14,11 +13,13 @@ from fractions import Fraction
 import os
 from pathlib import Path
 import re
-import stat
 import sys
 import tempfile
 from collections.abc import Callable, Sequence
 from typing import Any
+
+from .workers import (Rejected, command as _command, no_constants as _no_constants, read_bounded as _read_bounded,
+                      unique_object as _unique_object, working_directory, write_bounded as _write_bounded)
 
 MAX_REQUEST_BYTES = 16 * 1024
 MAX_RESPONSE_BYTES = 1024 * 1024
@@ -38,12 +39,8 @@ ERROR_MESSAGES = {
     "unreadable_metadata": "The source cannot be read. Check the recording and local file permissions.",
     "unsupported_codec": "The source container or codec is unsupported by this local decoder.",
 }
-# Provisional budgets, not measured on real media: Windows import stays disabled until they are validated.
+# Provisional budgets, not measured on real media. Release notes must say so until native timings exist.
 IMPORT_MEMORY_BYTES, IMPORT_CPU_SECONDS, IMPORT_WALL_SECONDS = 1024 ** 3, 1800, 3600
-
-
-class Rejected(Exception):
-    """A malformed or oversize worker response."""
 
 
 def _rational(value: Any, nullable: bool = False) -> Fraction | None:
@@ -118,39 +115,8 @@ def validate_inspection(path: Path, result: Any) -> dict[str, Any]:
     return result
 
 
-def _no_constants(_: str) -> None:
-    raise Rejected
-
-
-def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result = dict(pairs)
-    if len(result) != len(pairs):
-        raise Rejected
-    return result
-
-
-def _write_bounded(path: Path, body: Any, limit: int) -> None:
-    data = bytearray()
-    for chunk in json.JSONEncoder(allow_nan=False).iterencode(body):
-        encoded = chunk.encode("utf-8")
-        if len(data) + len(encoded) > limit:
-            raise Rejected
-        data.extend(encoded)
-    path.write_bytes(data)
-
-
-def _read_bounded(path: Path, limit: int) -> bytes:
-    if not stat.S_ISREG(path.lstat().st_mode):
-        raise Rejected
-    with path.open("rb") as source:
-        data = source.read(limit + 1)
-    if len(data) > limit:
-        raise Rejected
-    return data
-
-
 def default_command(scratch: Path) -> list[str]:
-    return [sys.executable, "-m", "backend.app.contained_import", str(scratch)]
+    return [*_command("contained_import"), str(scratch)]
 
 
 def inspect_source(path: Path, progress: Callable[[str, int], None], cancelled: Callable[[], bool],
@@ -167,7 +133,7 @@ def inspect_source(path: Path, progress: Callable[[str, int], None], cancelled: 
         scratch = Path(private)
         try:
             _write_bounded(scratch / "request.json", {"source_path": str(path)}, MAX_REQUEST_BYTES)
-            outcome = winjob.run(command(scratch), Path(__file__).resolve().parents[2], limits, cancelled)
+            outcome = winjob.run(command(scratch), working_directory(), limits, cancelled)
         except (winjob.ContainmentError, OSError, ValueError, Rejected):
             raise failed from None
         if outcome.state == "cancelled" or cancelled():

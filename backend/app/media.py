@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from fractions import Fraction
 import hashlib
 import os
@@ -42,8 +43,10 @@ def _check_cancelled(cancelled: Cancelled) -> None:
 def _identity(status: os.stat_result) -> dict[str, int]:
     if not stat.S_ISREG(status.st_mode):
         raise MediaError("missing_source", "Select an existing regular source video file.")
+    # On Windows, fstat().st_ctime is not stable against stat(); birthtime is.
+    ctime_ns = getattr(status, "st_birthtime_ns", status.st_ctime_ns)
     return {"device": status.st_dev, "inode": status.st_ino, "size_bytes": status.st_size,
-            "mtime_ns": status.st_mtime_ns, "ctime_ns": status.st_ctime_ns}
+            "mtime_ns": status.st_mtime_ns, "ctime_ns": ctime_ns}
 
 
 def identity_info(path: Path) -> dict[str, int]:
@@ -227,3 +230,36 @@ def inspect_source(path: Path, progress: Progress = _no_progress,
     _check_cancelled(cancelled)
     return {"filename": path.name, "size_bytes": before["size_bytes"], "sha256": digest,
             **metadata, "_identity": before}
+
+
+@contextmanager
+def open_verified_source(source: dict) -> Iterator[tuple[Any, Any, dict]]:
+    """Open one imported segment row for a worker after re-checking identity and SHA-256.
+
+    Raises ValueError with a stable code ("changed_source", "unsupported_codec") rather than native text.
+    """
+    import json
+
+    metadata = json.loads(source["metadata_json"])
+    path = Path(source["source_path"])
+    if path.suffix.lower() not in {".mp4", ".mts"}:
+        raise ValueError("unsupported_codec")
+    identity = json.loads(source["identity_json"])
+    if identity_info(path) != identity:
+        raise ValueError("changed_source")
+    with path.open("rb") as original:
+        if _identity(os.fstat(original.fileno())) != identity or _hash_file(original, _no_progress, _not_cancelled) != source["sha256"]:
+            raise ValueError("changed_source")
+        original.seek(0)
+        with av.open(original, format="mp4" if path.suffix.lower() == ".mp4" else "mpegts", options={
+            "protocol_whitelist": "file,pipe", "format_whitelist": "mov,mpegts", "err_detect": "explode",
+            "enable_drefs": "0", "use_absolute_path": "0",
+        }) as container:
+            if len(container.streams.video) != 1:
+                raise ValueError("unsupported_codec")
+            stream = container.streams.video[0]
+            time_base = metadata["time_base"]
+            if stream.time_base != Fraction(int(time_base["num"]), int(time_base["den"])):
+                raise ValueError("unknown_timing")
+            stream.codec_context.thread_count = 1
+            yield container, stream, metadata

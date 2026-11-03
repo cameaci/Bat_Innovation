@@ -258,6 +258,15 @@ def run(argv: Sequence[str], cwd: Path, limits: Limits, cancelled: Callable[[], 
             _close(thread, process, job)
 
 
+def enforced() -> bool:
+    """Worker side: True when this process runs in a job carrying the limits and kill-on-close flag run() installs."""
+    info = _Extended()
+    if not _K.QueryInformationJobObject(None, 9, ctypes.byref(info), ctypes.sizeof(info), None):
+        return False
+    required = LIMIT_KILL_ON_JOB_CLOSE | LIMIT_JOB_MEMORY | LIMIT_JOB_TIME | LIMIT_ACTIVE_PROCESS
+    return info.Basic.LimitFlags & required == required
+
+
 def _close(*handles: int | None) -> None:
     for handle in handles:
         if handle:

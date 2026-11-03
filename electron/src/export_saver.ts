@@ -6,14 +6,16 @@ import { isExternalDataDirectory, isUUID } from './backend';
 import type { BackendRuntime } from './backend';
 import type { ApiResult, ExportManifest, ExportDiskManifest, ExportSaved, ExportKind } from './contracts';
 
-export const EXPORT_FILES = { observations: 'provisional-observations.csv', audit: 'technical-window-audit.csv', manifest: 'manifest.json' } as const;
+export const EXPORT_FILES = { observations: 'provisional-observations.csv', audit: 'technical-window-audit.csv', tracks: 'provisional-tracks.csv',
+  counts: 'provisional-counts.csv', manifest: 'manifest.json' } as const;
+const PAYLOADS = ['observations', 'audit', 'tracks', 'counts'] as const;
 const failure = () => ({ ok: false, error: { code: 'export_write_failed', message: 'The provisional bundle could not be saved completely. Check storage and retry; no partial CSV bundle was published.' } }) as const;
 const empty = { cancelled: true, folder_name: '', files: [] };
 
 export function validExportManifest(value: ExportManifest | null, runID: string): value is ExportManifest {
-  return !!value && value.schema_version === 'bat-provisional-csv-v1' && value.run_id === runID &&
+  return !!value && value.schema_version === 'bat-provisional-csv-v4' && value.run_id === runID &&
     value.provisional_label === 'PROVISIONAL — NOT ECOLOGICALLY FINALISED' && !!value.files &&
-    Object.keys(value.files).length === 3 && (Object.keys(EXPORT_FILES) as ExportKind[]).every(kind => {
+    Object.keys(value.files).length === 5 && (Object.keys(EXPORT_FILES) as ExportKind[]).every(kind => {
       const file = value.files[kind];
       return !!file && file.name === EXPORT_FILES[kind] && Number.isSafeInteger(file.bytes) && file.bytes > 0 &&
         file.bytes <= (kind === 'manifest' ? 65536 : 8 * 1024 * 1024) && /^[0-9a-f]{64}$/.test(file.sha256);
@@ -25,14 +27,14 @@ export function validExportManifest(value: ExportManifest | null, runID: string)
 export function validExportDiskManifest(value: unknown, runID: string): value is ExportDiskManifest {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const row = value as Record<string, unknown>;
-  if (row.schema_version !== 'bat-provisional-csv-v1' || row.run_id !== runID ||
+  if (row.schema_version !== 'bat-provisional-csv-v4' || row.run_id !== runID ||
       row.provisional_label !== 'PROVISIONAL — NOT ECOLOGICALLY FINALISED' ||
       typeof row.as_of_utc !== 'string' || !row.as_of_utc ||
       typeof row.manifest_complete !== 'boolean' || typeof row.processing_complete !== 'boolean' ||
       !row.counts || typeof row.counts !== 'object' || Array.isArray(row.counts) ||
       !row.files || typeof row.files !== 'object' || Array.isArray(row.files)) return false;
   const files = row.files as Record<string, unknown>;
-  return Object.keys(files).length === 2 && (['observations', 'audit'] as const).every(kind => {
+  return Object.keys(files).length === PAYLOADS.length && PAYLOADS.every(kind => {
     const file = files[kind];
     if (!file || typeof file !== 'object' || Array.isArray(file)) return false;
     const entry = file as Record<string, unknown>;
@@ -42,6 +44,30 @@ export function validExportDiskManifest(value: unknown, runID: string): value is
       typeof entry.rows === 'number' && Number.isSafeInteger(entry.rows) &&
       entry.rows >= 0 && entry.rows <= 50000;
   });
+}
+
+/** NTFS journals directory metadata itself and Windows cannot flush a directory handle, so only POSIX syncs directories. */
+async function syncDirectory(path: string): Promise<void> {
+  if (process.platform === 'win32') return;
+  const directory = await open(path, 'r');
+  try { await directory.sync(); } finally { await directory.close(); }
+}
+
+/** Windows refuses to rename a directory while any file in it is open, which a virus scanner or search indexer
+ * reading a just-written file causes for a moment, so only that denial is retried, briefly. Node reports an
+ * existing target as EPERM too, and that is refused at once. */
+export async function renameDirectory(source: string, target: string, signal: AbortSignal, milliseconds = 5000): Promise<void> {
+  const deadline = Date.now() + milliseconds;
+  for (let delay = 10; ; delay = Math.min(delay * 2, 500)) {
+    try { await rename(source, target); return; }
+    catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (process.platform !== 'win32' || (code !== 'EPERM' && code !== 'EACCES' && code !== 'EBUSY') ||
+          Date.now() + delay > deadline || await lstat(target).then(() => true, () => false)) throw error;
+    }
+    signal.throwIfAborted();
+    await new Promise(resolve => setTimeout(resolve, delay));
+  }
 }
 
 export class ExportSaver {
@@ -103,16 +129,18 @@ export class ExportSaver {
       try { await journal.writeFile(JSON.stringify({ parent, nonce })); await journal.sync(); }
       finally { await journal.close(); }
       await rename(this.journal + '.part', this.journal); intentOwned = false; journalOwned = true;
-      const intentDirectory = await open(this.dataDir, 'r');
-      try { await intentDirectory.sync(); } finally { await intentDirectory.close(); }
+      await syncDirectory(this.dataDir);
       await mkdir(stage, { mode: 0o700 }); stageOwned = true;
-      await mkdir(target, { mode: 0o700 }); targetOwned = true; // exclusive reservation; never overwrite an existing name
+      // POSIX rename replaces an empty directory, so reserve the name first. Windows rename never replaces a
+      // directory, so the final rename itself refuses an existing name and no reservation is needed.
+      if (process.platform !== 'win32') { await mkdir(target, { mode: 0o700 }); targetOwned = true; }
       timeout = setTimeout(() => this.controller?.abort(), 30000);
       for (const kind of Object.keys(EXPORT_FILES) as ExportKind[]) {
         signal.throwIfAborted();
         const path = join(stage, EXPORT_FILES[kind]);
         await this.backend.downloadExportFile(id, kind, state.value.manifest.files[kind], path, signal);
-        const file = await open(path, 'r');
+        // Windows FlushFileBuffers needs write access: fsync on a read-only handle fails with EPERM.
+        const file = await open(path, 'r+');
         try { await file.sync(); } finally { await file.close(); }
       }
       signal.throwIfAborted();
@@ -121,18 +149,16 @@ export class ExportSaver {
       const disk = JSON.parse(await readFile(join(stage, EXPORT_FILES.manifest), 'utf8')) as unknown;
       if (!validExportDiskManifest(disk, state.value.run_id) ||
           disk.as_of_utc !== state.value.manifest.as_of_utc ||
-          (['observations', 'audit'] as const).some(kind => {
+          PAYLOADS.some(kind => {
             const declared = state.value.manifest!.files[kind];
             const actual = disk.files[kind];
             return declared.name !== actual.name || declared.bytes !== actual.bytes ||
               declared.sha256 !== actual.sha256 || declared.rows !== actual.rows;
           })) throw new Error('Saved manifest does not match verified CSV descriptors');
-      const directory = await open(stage, 'r');
-      try { await directory.sync(); } finally { await directory.close(); }
-      await rename(stage, target); // replaces only the empty directory we just reserved
+      await syncDirectory(stage);
+      await renameDirectory(stage, target, signal); // replaces only the empty directory we just reserved (POSIX) or a missing name (Windows)
       stage = undefined;
-      const directoryParent = await open(parent, 'r');
-      try { await directoryParent.sync(); } finally { await directoryParent.close(); }
+      await syncDirectory(parent);
       published = true;
       await unlink(this.journal); journalOwned = false;
       return { ok: true, value: { cancelled: false, folder_name: `bat-provisional-${nonce}`, files: Object.values(EXPORT_FILES) } };

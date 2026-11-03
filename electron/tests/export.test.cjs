@@ -1,13 +1,13 @@
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const { createHash, randomUUID } = require('node:crypto');
-const { mkdtemp, mkdir, readdir, readFile, rm, writeFile } = require('node:fs/promises');
+const { mkdtemp, mkdir, open, readdir, readFile, rm, writeFile } = require('node:fs/promises');
 const { createServer } = require('node:http');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
 const { BackendClient, BackendRuntime } = require('../dist/backend.js');
-const { ExportSaver, EXPORT_FILES, validExportManifest, validExportDiskManifest } = require('../dist/export_saver.js');
+const { ExportSaver, EXPORT_FILES, renameDirectory, validExportManifest, validExportDiskManifest } = require('../dist/export_saver.js');
 const repoRoot=path.resolve(__dirname,'../..'), python=process.env.BAT_PYTHON || 'python';
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
 async function terminal(read, active) {
@@ -49,9 +49,9 @@ test('real export runtime saves bounded three-file snapshot atomically, private 
   // inside the hashed manifest.json without a recursive hash).
   const disk=JSON.parse(await readFile(path.join(destination,saved.value.folder_name,'manifest.json'),'utf8'));
   assert.equal(validExportDiskManifest(disk,run.id),true);
-  assert.deepEqual(Object.keys(disk.files).sort(),['audit','observations']);
+  assert.deepEqual(Object.keys(disk.files).sort(),['audit','counts','observations','tracks']);
   assert.equal(validExportManifest(disk,run.id),false);
-  for(const kind of ['audit','observations']) {
+  for(const kind of ['audit','observations','tracks','counts']) {
     assert.deepEqual(disk.files[kind],done.manifest.files[kind]);
   }
   assert.equal(validExportDiskManifest({...disk,files:{...disk.files,manifest:done.manifest.files.manifest}},run.id),false);
@@ -79,7 +79,7 @@ for (const mode of ['wrong-mime','wrong-length','wrong-hash','truncated','oversi
 }
 
 function manifest(run) {
-  return {schema_version:'bat-provisional-csv-v1',provisional_label:'PROVISIONAL — NOT ECOLOGICALLY FINALISED',run_id:run,
+  return {schema_version:'bat-provisional-csv-v4',provisional_label:'PROVISIONAL — NOT ECOLOGICALLY FINALISED',run_id:run,
     files:Object.fromEntries(Object.entries(EXPORT_FILES).map(([key,name])=>[key,{name,bytes:10,sha256:'0'.repeat(64)}]))};
 }
 for(const mode of ['enospc','rename-obstruction','cancel']) {
@@ -99,6 +99,24 @@ for(const mode of ['enospc','rename-obstruction','cancel']) {
     assert.deepEqual(await readdir(data),[]);
   });
 }
+
+test('directory publication waits briefly only for a Windows file held open, never for an existing name',async t=>{
+  const directory=await mkdtemp(path.join(tmpdir(),'bat-export-rename-'));t.after(()=>rm(directory,{recursive:true,force:true}));
+  const stage=path.join(directory,'stage'),taken=path.join(directory,'taken'),signal=new AbortController().signal;
+  await mkdir(stage);await writeFile(path.join(stage,'rows.csv'),'x');await mkdir(taken);await writeFile(path.join(taken,'kept'),'x');
+  const began=Date.now();await assert.rejects(renameDirectory(stage,taken,signal));assert.ok(Date.now()-began<1000);
+  if(process.platform==='win32') {
+    const handle=await open(path.join(stage,'rows.csv'),'r'),aborted=new AbortController();aborted.abort();
+    try {
+      await assert.rejects(renameDirectory(stage,path.join(directory,'held'),signal,200),{code:'EPERM'});
+      await assert.rejects(renameDirectory(stage,path.join(directory,'held'),aborted.signal),{name:'AbortError'});
+      setTimeout(()=>void handle.close(),300);
+      await renameDirectory(stage,path.join(directory,'final'),signal);
+    } finally { await handle.close().catch(()=>undefined); }
+  } else await renameDirectory(stage,path.join(directory,'final'),signal);
+  assert.equal(await readFile(path.join(directory,'final','rows.csv'),'utf8'),'x');
+  assert.deepEqual((await readdir(directory)).sort(),['final','taken']);
+});
 
 test('native restart cleans interrupted stages and empty reservations, preserves atomic completed bundle',async t=>{
   const directory=await mkdtemp(path.join(tmpdir(),'bat-export-recover-')),data=path.join(directory,'data');await mkdir(data);
