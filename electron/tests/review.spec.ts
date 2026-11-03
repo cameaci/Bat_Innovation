@@ -133,6 +133,9 @@ test('dirty review drafts survive stale saves and cancelled native close, reload
     const sessionID = await prepared(shell, [sources.quiet_65]);
     const first = (await latestRun(shell, sessionID)).windows[0]!;
     const view = await open(shell, 0);
+    // Opening a window starts its original-source preview, which holds the shared media reservation.
+    // The external write below bypasses the UI busy retry, so it must follow the real preview completion.
+    await previewReady(view);
     await view.getByLabel('Reviewer', { exact: true }).fill('Synthetic draft reviewer');
     await view.getByRole('button', { name: /^Add observation/ }).click();
     await expand(view, 'Exact source PTS');

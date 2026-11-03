@@ -319,3 +319,27 @@ The remaining failure is `review.spec.ts` / "dirty review drafts survive stale s
 Watch startup passed in the final run, but its earlier failure has no established root cause. Run the entire enabled suite sequentially on Windows after the dirty-draft fix. Do not silently add retries to turn an intermittent startup failure green.
 
 The complete backend suite was not rerun after the final preview change; only the full preview file and relevant Node/UI tests were rerun. No installer was rebuilt, no all-26-file campaign ran, and no ecological conclusion was made. These boundaries are intentional and should travel with this commit.
+
+## Cloud continuation results (2026-11-03, Linux)
+
+The dirty-draft `review_busy` failure has an established cause. Opening a window starts its original-source preview, and a running preview holds the shared media reservation (`activity_lock`). The test's external `batAPI.saveReview` call deliberately bypasses the renderer's `whileBusy` retry, so on Windows, where the contained preview worker starts more slowly, it reached the backend while the preview was still running.
+
+Reproduction: a temporary, uncommitted six-second sleep at the start of `preview_worker.main` made the unchanged Linux test fail with exactly `{"ok":false,"error":{"code":"review_busy",...}}`. With the fix below and the same slowed worker, the test passed.
+
+Changes:
+
+- `electron/tests/review.spec.ts`: the dirty-draft test waits for `previewReady` after opening the window, before the draft edits, native close/reload/quit and the external write. No sleep, retry, timeout increase or production guard change.
+- `backend/tests/test_review_integration.py`: a new test keeps separate coverage of a genuine busy write. A real preview worker is held (SIGSTOP on POSIX, the held sleeper inside the real Job Object on Windows); a review action returns 409 `review_busy` and writes no event; after cancellation and reaping the same action is accepted as revision 1.
+
+Linux results in the cloud checkout (Python 3.13 virtual environment from the pinned requirements, Node 22, Xvfb, root user):
+
+| Run | Result |
+| --- | --- |
+| `npm run typecheck` | Passed |
+| `npm test` | 67 passed, 0 failed |
+| `pytest backend/tests` | 477 passed, 48 skipped (Windows Job Object tests and the non-root permission test) |
+| `npx playwright test`, sequential | 28 passed, 1 skipped (unreadable-original test needs a non-root user) |
+
+An earlier Playwright run executed while the full backend suite was running in parallel on the same machine and stopped after one pass; its failure was not captured and did not recur in the sequential run. Treat it as unexplained contention, not as evidence either way.
+
+None of this is Windows evidence. The owner's local return checklist above still applies, starting with the full sequential Windows Electron suite.
