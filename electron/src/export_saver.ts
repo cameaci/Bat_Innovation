@@ -53,6 +53,23 @@ async function syncDirectory(path: string): Promise<void> {
   try { await directory.sync(); } finally { await directory.close(); }
 }
 
+/** Windows refuses to rename a directory while any file in it is open, which a virus scanner or search indexer
+ * reading a just-written file causes for a moment, so only that denial is retried, briefly. Node reports an
+ * existing target as EPERM too, and that is refused at once. */
+export async function renameDirectory(source: string, target: string, signal: AbortSignal, milliseconds = 5000): Promise<void> {
+  const deadline = Date.now() + milliseconds;
+  for (let delay = 10; ; delay = Math.min(delay * 2, 500)) {
+    try { await rename(source, target); return; }
+    catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (process.platform !== 'win32' || (code !== 'EPERM' && code !== 'EACCES' && code !== 'EBUSY') ||
+          Date.now() + delay > deadline || await lstat(target).then(() => true, () => false)) throw error;
+    }
+    signal.throwIfAborted();
+    await new Promise(resolve => setTimeout(resolve, delay));
+  }
+}
+
 export class ExportSaver {
   private operation?: Promise<ApiResult<ExportSaved>>;
   private controller?: AbortController;
@@ -122,7 +139,8 @@ export class ExportSaver {
         signal.throwIfAborted();
         const path = join(stage, EXPORT_FILES[kind]);
         await this.backend.downloadExportFile(id, kind, state.value.manifest.files[kind], path, signal);
-        const file = await open(path, 'r');
+        // Windows FlushFileBuffers needs write access: fsync on a read-only handle fails with EPERM.
+        const file = await open(path, 'r+');
         try { await file.sync(); } finally { await file.close(); }
       }
       signal.throwIfAborted();
@@ -138,7 +156,7 @@ export class ExportSaver {
               declared.sha256 !== actual.sha256 || declared.rows !== actual.rows;
           })) throw new Error('Saved manifest does not match verified CSV descriptors');
       await syncDirectory(stage);
-      await rename(stage, target); // replaces only the empty directory we just reserved (POSIX) or a missing name (Windows)
+      await renameDirectory(stage, target, signal); // replaces only the empty directory we just reserved (POSIX) or a missing name (Windows)
       stage = undefined;
       await syncDirectory(parent);
       published = true;

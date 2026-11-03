@@ -58,7 +58,7 @@ The job is killed when the backend exits, and the backend exits when the desktop
 
 - **Disk is not bounded by the Job Object.** Logical output budgets and a free-space check before summaries apply, but a full disk during a preview or export fails with an explicit error rather than being prevented. Summaries reserve metadata space by writing it up front.
 - Job memory and CPU limits are enforced with measurable overshoot (earlier native tests saw about 7% memory and up to a few times the CPU limit), which is why the wall-clock deadline is independent.
-- The shell stops the backend by terminating it. A summary run interrupted this way is recorded as interrupted on the next start; this recovery path was exercised on Linux only.
+- On Windows the shell closes a dedicated stdin pipe to request graceful backend shutdown, with forced termination after three seconds if it has not exited. Interrupted summary recovery and Job Object owner-death cleanup now have native Windows tests; this is not power-loss or packaged-build acceptance. See the [Windows handover](19-windows-cloud-handover.md) for measured coverage and open UI failures.
 - An owner death between suspended process creation and job assignment can leave a suspended worker. This window is tiny and was not closed.
 - Import budgets are provisional and unmeasured on real media.
 - Rotation is not applied and interlaced video is not deinterlaced; warnings stay visible. Camera originals from the Canon XA, Sony AX53 and Nightfox cameras have not been tested.

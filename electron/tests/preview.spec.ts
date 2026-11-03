@@ -93,7 +93,7 @@ async function requestMarker(view: Locator, sourcePTS: string, expectedIndex: nu
   expect(decoded.duration).toBeLessThanOrEqual(2.001);
 }
 
-test.skip(process.platform !== 'linux', 'Preview resource guards and Electron lifecycle are currently verified on Linux only.');
+test.skip(!['linux', 'win32'].includes(process.platform), 'Desktop acceptance requires Linux or Windows.');
 
 test('window previews display real marker frames with exact VFR and nonzero-origin mapping', async () => {
   test.setTimeout(120_000);
@@ -203,6 +203,7 @@ test('invalid requests, cancellation and changed or missing originals clear disp
 });
 
 test('unreadable originals and unknown final timing produce explicit preview errors', async () => {
+  test.skip(process.platform !== 'linux', 'chmod permission removal requires POSIX; Windows backend tests cover access refusal.');
   test.skip(process.getuid?.() === 0, 'The real permission check requires an unprivileged Linux user; backend injection coverage also runs as root.');
   test.setTimeout(120_000);
   const directory = await mkdtemp(join(tmpdir(), 'bat-preview-permissions-'));
@@ -236,6 +237,7 @@ test('unreadable originals and unknown final timing produce explicit preview err
 });
 
 test('a running preview can be cancelled and Electron shutdown reaps its worker', async () => {
+  test.skip(process.platform !== 'linux', 'Stopping a live worker with SIGSTOP requires POSIX; Windows Job cancellation has backend tests.');
   test.setTimeout(120_000);
   const directory = await mkdtemp(join(tmpdir(), 'bat-preview-stop-'));
   const paths = fixtures<Marker>('preview_fixtures', join(directory, 'originals'));

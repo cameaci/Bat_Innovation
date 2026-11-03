@@ -1,5 +1,15 @@
 # 07 - Research log
 
+## 2026-11-03 - Native Windows test corrections and cloud handover
+
+**Scope:** local Windows infrastructure and desktop investigation, subsequently restricted by the owner to end-to-end UI tests and a real-footage UI/UX walkthrough. Packaging and broad long-file testing are deferred. The owner requested a committed handover for Claude Code Cloud.
+
+**Findings and changes:** writable file handles fix Windows export fsync; bounded directory-rename retries handle transient sharing denials without claiming partial success; read-only snapshot cleanup uses a specific Windows retry. A stdin EOF stop pipe requests graceful backend shutdown before the existing three-second forced fallback. Native test stand-ins use real Job Objects with PID/creation-time identity rather than POSIX signals or `/proc`. Portable Electron specs now execute on Windows. The walkthrough found a submillisecond preview-end rounding failure, an audio derivation request using the ordinary three-second HTTP deadline, and an unbounded dense-track list above the review form; the candidate fixes and their regression tests are included.
+
+**Measured evidence:** the complete initial corrected backend run passed 509 tests with 12 explained skips; two subsequently enabled tests passed within a 71-pass focused group. Latest complete preview file: 35 passed, four Linux-only skips. Strict TypeScript and build pass; latest Node suite: 66 passed, one skipped. The first enabled Windows Electron suite had 23 passes, three failures and three POSIX-only skips; this is not an all-green Windows acceptance result. Two of three real-footage UI flows initially passed including provisional PDF/CSV saves, reopen and unchanged original hashes; one failed at original preview. Follow-up UI outcomes, exact failure boundaries, reproduction commands and local-only checks are recorded in the [detailed handover](19-windows-cloud-handover.md).
+
+**Data and limits:** footage, screenshots, traces, reports and sensitive paths remain outside Git. Only text and synthetic tests are committed. The Camera_Trap reuse map remains a pattern reference; no source was copied and no runtime dependency added. No installer was rebuilt, no ecological acceptance was performed, and X10 remains open.
+
 ## 2026-10-28 - Real-footage test on the owner's authorised test set (Linux)
 
 **Question:** do the app and its methods hold up on real footage rather than synthetic clips: what breaks, how long each step takes, and how close tracking gets to what a reviewer sees?

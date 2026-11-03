@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 import shutil
 import sqlite3
-from threading import Event, Lock
+import sys
+from threading import Event, Lock, Thread
 import time
 from uuid import uuid4
 
@@ -15,6 +16,7 @@ import pytest
 
 from backend.app import imports, media, store, workers
 from backend.app.main import Settings, create_app
+from backend.tests import held_worker
 from backend.tests.media_fixtures import generate_media
 
 TOKEN = "synthetic-private-per-launch-token-long-enough"
@@ -209,6 +211,24 @@ def test_missing_and_changed_originals_are_visible_without_replacing_metadata(tm
 
 def blocking_inspection(monkeypatch: pytest.MonkeyPatch) -> Event:
     entered = Event()
+    if sys.platform == "win32":
+        # Windows inspects in a contained worker; a sleeping synthetic worker stands in for a long decode.
+        from backend.app import contained_import
+
+        contained = contained_import.inspect_source
+
+        def sleeping(path: Path, progress, cancelled):
+            def command(scratch: Path) -> list[str]:
+                def started() -> None:
+                    while not (scratch / "started.marker").exists() and not cancelled():
+                        time.sleep(0.005)
+                    entered.set()
+                Thread(target=started, daemon=True).start()
+                return [sys.executable, str(held_worker.WORKER), "sleep", str(scratch)]
+            return contained(path, progress, cancelled, command)
+
+        monkeypatch.setattr(contained_import, "inspect_source", sleeping)
+        return entered
     inspect = media.inspect_source
 
     def blocked(path: Path, progress, cancelled):
@@ -405,7 +425,7 @@ def test_terminal_import_status_releases_processing_reservation_atomically(
     if outcome != "complete":
         def unsuccessful(*args, **kwargs):
             raise media.MediaError("cancelled" if outcome == "cancelled" else "decode_failed", "Synthetic failure")
-        monkeypatch.setattr(media, "inspect_source", unsuccessful)
+        monkeypatch.setattr(imports, "inspect", unsuccessful)
     try:
         job = jobs.start(session_id, [str(videos["short_mp4"])])
         deadline = time.monotonic() + 3

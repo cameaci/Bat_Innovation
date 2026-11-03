@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import ctypes
 import json
 import os
@@ -18,8 +19,12 @@ from uuid import uuid4
 import numpy as np
 import pytest
 
-from backend.app import media, store, summary_jobs, summary_store
+from backend.app import media, store, summary_jobs, summary_store, workers
+from backend.tests import held_worker
 from backend.tests.summary_fixtures import encode_frames, generate_summary_media
+
+linux_only = pytest.mark.skipif(sys.platform != "linux", reason="Linux rlimits, prctl and /proc; Windows has its own test below")
+windows_only = pytest.mark.skipif(sys.platform != "win32", reason="Windows Job Object; Linux has its own test above")
 
 
 @pytest.fixture(scope="module")
@@ -47,13 +52,17 @@ def wait(jobs: summary_jobs.SummaryJobs, run_id: str) -> dict:
     pytest.fail("The small real summary worker exceeded its test deadline")
 
 
-def stop_worker(jobs: summary_jobs.SummaryJobs) -> int:
+def stop_worker(jobs: summary_jobs.SummaryJobs, markers: Path) -> tuple[int, Callable[[], bool]]:
+    """Stop the running worker (SIGSTOP on Linux, the held sleeper on Windows); return its pid and a reaped check."""
+    if sys.platform == "win32":
+        pid, created = held_worker.held(markers)
+        return pid, lambda: held_worker.ended(pid, created)
     deadline = time.monotonic() + 3
     while time.monotonic() < deadline:
         child = jobs._process
         if child is not None and child.poll() is None:
             os.kill(child.pid, signal.SIGSTOP)
-            return child.pid
+            return child.pid, lambda: not Path(f"/proc/{child.pid}").exists()
         time.sleep(0.001)
     pytest.fail("The real summary child did not start")
 
@@ -63,15 +72,21 @@ def test_real_worker_terminal_status_follows_reap_cleanup_and_reservation_releas
     tmp_path: Path, originals: dict[str, Path], monkeypatch: pytest.MonkeyPatch, end: str,
 ) -> None:
     database, session = prepare(tmp_path / "data", originals["quiet_65"])
+    markers = tmp_path / "held"
+    if sys.platform == "win32":
+        held_worker.hold(monkeypatch, markers)
     if end == "timeout":
-        monkeypatch.setattr(summary_jobs, "WALL_SECONDS", 0.2)
+        # The held Windows worker must start well within the deadline.
+        monkeypatch.setattr(summary_jobs, "WALL_SECONDS", 2 if sys.platform == "win32" else 0.2)
     activity = Lock()
     jobs = summary_jobs.SummaryJobs(database, database.parent, activity)
     run = jobs.start(session)
-    pid = stop_worker(jobs)
+    pid, reaped = stop_worker(jobs, markers)
     assert not activity.acquire(blocking=False)
     if end == "cancel":
         jobs.cancel(run["id"])
+    elif end == "kill" and sys.platform == "win32":
+        held_worker.terminate(pid, workers.JOB_CPU_QUOTA_EXIT)
     elif end == "kill":
         os.kill(pid, signal.SIGKILL)
     elif end == "close":
@@ -80,7 +95,7 @@ def test_real_worker_terminal_status_follows_reap_cleanup_and_reservation_releas
     assert terminal["state"] == ("cancelled" if end in {"cancel", "close"} else "failed")
     assert terminal["error"]["code"] == ("cancelled" if end in {"cancel", "close"} else "summary_limit")
     assert terminal["counts"]["incomplete"] == terminal["counts"]["planned"] == 3
-    assert not Path(f"/proc/{pid}").exists()
+    assert reaped()
     assert not list(jobs.directory.rglob("*.part"))
     assert not (jobs.directory / ".manifest-reserve").exists()
     assert activity.acquire(blocking=False)
@@ -88,6 +103,7 @@ def test_real_worker_terminal_status_follows_reap_cleanup_and_reservation_releas
     jobs.close()
 
 
+@linux_only
 def test_linux_worker_limits_token_removal_and_native_thread_bounds(
     tmp_path: Path, originals: dict[str, Path], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -120,6 +136,34 @@ def test_linux_worker_limits_token_removal_and_native_thread_bounds(
     finally:
         jobs.close()
     assert not Path(f"/proc/{pid}").exists()
+
+
+@windows_only
+def test_windows_worker_job_limits_token_removal_and_native_thread_bounds(
+    tmp_path: Path, originals: dict[str, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from backend.app import winjob
+
+    database, session = prepare(tmp_path / "data", originals["quiet_9"])
+    monkeypatch.setenv("BAT_API_TOKEN", "synthetic-secret-must-not-reach-native-worker")
+    started = []
+    real_run = winjob.run
+
+    def recorded(argv, cwd, limits, cancelled, environment):
+        started.append((limits, environment))
+        return real_run(argv, cwd, limits, cancelled, environment)
+
+    monkeypatch.setattr(winjob, "run", recorded)
+    jobs = summary_jobs.SummaryJobs(database, database.parent, Lock())
+    try:
+        assert wait(jobs, jobs.start(session)["id"])["state"] == "complete"
+    finally:
+        jobs.close()
+    [(limits, environment)] = started
+    assert (limits.memory_bytes, limits.cpu_seconds, limits.active_processes) == (1024 ** 3, 300, 1)
+    assert limits.wall_seconds == summary_jobs.WALL_SECONDS
+    assert "BAT_API_TOKEN" not in environment
+    assert environment["OPENBLAS_NUM_THREADS"] == environment["OMP_NUM_THREADS"] == "1"
 
 
 def test_thread_start_failure_keeps_manifest_cleanup_shutdown_and_retry_safe(
@@ -196,6 +240,7 @@ def test_thread_start_rollback_failure_still_releases_reservation_and_allows_res
         recovered.close()
 
 
+@linux_only
 def test_parent_death_kills_native_worker_and_restart_records_interruption(
     tmp_path: Path, originals: dict[str, Path],
 ) -> None:
@@ -259,6 +304,52 @@ raise RuntimeError('Worker never installed its limits')
                 pass
         assert libc.prctl(36, previous.value, 0, 0, 0) == 0
     assert not Path(f"/proc/{worker_pid}").exists()
+    recovered = summary_jobs.SummaryJobs(database, database.parent, Lock())
+    try:
+        run = recovered.list(session)[0]
+        assert run["state"] == "interrupted" and run["counts"]["incomplete"] == 3
+        assert not (recovered.directory / ".manifest-reserve").exists()
+    finally:
+        recovered.close()
+
+
+@windows_only
+def test_owner_death_kills_contained_worker_and_restart_records_interruption(
+    tmp_path: Path, originals: dict[str, Path],
+) -> None:
+    """A hard-killed backend closes its Job handle: kill-on-job-close ends the worker and the restart records the gap."""
+    database, session = prepare(tmp_path / "data", originals["quiet_65"])
+    markers, scratch = tmp_path / "held", tmp_path / "temp"
+    markers.mkdir()
+    scratch.mkdir()
+    controller_code = """
+import json, sys, time
+from pathlib import Path
+from threading import Lock
+from backend.app import workers
+from backend.app.summary_jobs import SummaryJobs
+payload = json.loads(sys.stdin.read())
+workers.command = lambda _module: [sys.executable, payload['worker'], 'sleep', payload['markers']]
+database = Path(payload['database'])
+SummaryJobs(database, database.parent, Lock()).start(payload['session'])
+while True: time.sleep(1)
+"""
+    # The killed owner cannot remove its worker scratch folder: keep it inside this test's directory.
+    environment = {**os.environ, "TMPDIR": str(scratch), "TEMP": str(scratch), "TMP": str(scratch)}
+    controller = subprocess.Popen([sys.executable, "-c", controller_code], stdin=subprocess.PIPE,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=environment)
+    try:
+        controller.stdin.write(json.dumps({"database": str(database), "session": session,
+                                           "worker": str(held_worker.WORKER), "markers": str(markers)}).encode())
+        controller.stdin.close()
+        pid, created = held_worker.held(markers)
+        controller.kill()
+        controller.wait(timeout=3)
+        assert held_worker.ended(pid, created, 3), "Kill-on-job-close did not end the contained worker"
+    finally:
+        if controller.poll() is None:
+            controller.kill()
+            controller.wait(timeout=3)
     recovered = summary_jobs.SummaryJobs(database, database.parent, Lock())
     try:
         run = recovered.list(session)[0]
@@ -402,8 +493,9 @@ from backend.app import summary_worker
 original_open = Path.open
 def fail_image(self, *args, **kwargs):
     if self.name.endswith('.png.part'):
-        reserve = self.parent.parent / '.manifest-reserve'
-        assert reserve.stat().st_blocks * 512 >= 8 * 1024 * 1024
+        reserve = (self.parent.parent / '.manifest-reserve').stat()
+        # Linux allocates the reserve with posix_fallocate; Windows writes real zeros (no st_blocks there).
+        assert getattr(reserve, 'st_blocks', reserve.st_size // 512) * 512 >= 8 * 1024 * 1024
         raise OSError(errno.ENOSPC, 'Synthetic full output volume')
     return original_open(self, *args, **kwargs)
 Path.open = fail_image
@@ -414,7 +506,10 @@ summary_worker.main()
         return real_popen([sys.executable, "-c", fault], **kwargs)
 
     with monkeypatch.context() as patch:
-        patch.setattr(summary_jobs.subprocess, "Popen", faulty_worker)
+        if sys.platform == "win32":
+            patch.setattr(workers, "command", lambda _module: [sys.executable, "-c", fault])
+        else:
+            patch.setattr(summary_jobs.subprocess, "Popen", faulty_worker)
         failed = wait(jobs, jobs.start(session)["id"])
     assert failed["state"] == "failed" and failed["error"]["code"] == "summary_limit"
     assert failed["counts"]["failed"] + failed["counts"]["incomplete"] == 3
@@ -430,13 +525,25 @@ summary_worker.main()
         reopened.close()
 
 
-def test_full_hd_weak_targets_survive_the_actual_limited_worker(tmp_path: Path) -> None:
+def test_full_hd_weak_targets_survive_the_actual_limited_worker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     source = tmp_path / "original-full-hd.mp4"
     arrays = [np.full((1080, 1920), 32, np.uint8) for _ in range(5)]
     for index, (x, y) in enumerate(((100, 100), (300, 200), (500, 300)), start=1):
         arrays[index][y:y+2, x:x+2] += 6
     encode_frames(source, arrays, [0, 1100, 11100, 21100, 29960])
     database, session = prepare(tmp_path / "data", source)
+    peaks: list[int] = []
+    if sys.platform == "win32":
+        from backend.app import winjob
+
+        real_run = winjob.run
+
+        def measured(*args):
+            outcome = real_run(*args)
+            peaks.append(outcome.peak_memory_bytes // 1024)  # The Job's peak committed memory.
+            return outcome
+
+        monkeypatch.setattr(winjob, "run", measured)
     jobs = summary_jobs.SummaryJobs(database, database.parent, Lock())
     started = time.monotonic()
     run_id = jobs.start(session)["id"]
@@ -454,6 +561,7 @@ def test_full_hd_weak_targets_survive_the_actual_limited_worker(tmp_path: Path) 
         if run["state"] not in {"queued", "running"}:
             break
         time.sleep(0.002)
+    peak_kib = max([peak_kib, *peaks])
     try:
         assert run["state"] == "complete", run
         window = run["windows"][0]
@@ -461,7 +569,7 @@ def test_full_hd_weak_targets_survive_the_actual_limited_worker(tmp_path: Path) 
         assert all(count > 0 for count in window["stats"]["phase_pixels"])
         assert 0 < peak_kib < 1024 * 1024
         image = jobs.image(window["id"])
-        print(f"Full-HD limited worker: {time.monotonic()-started:.3f}s, peak RSS {peak_kib} KiB, PNG {len(image)} bytes, phase pixels {window['stats']['phase_pixels']}")
+        print(f"Full-HD limited worker: {time.monotonic()-started:.3f}s, peak memory {peak_kib} KiB, PNG {len(image)} bytes, phase pixels {window['stats']['phase_pixels']}")
     finally:
         jobs.close()
 

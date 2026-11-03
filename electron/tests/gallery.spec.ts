@@ -98,7 +98,7 @@ async function binaryCounts(shell: RunningShell): Promise<BinaryCounts> {
   return shell.application.evaluate(() => (globalThis as unknown as { galleryBinary: BinaryCounts }).galleryBinary);
 }
 
-test.skip(process.platform !== 'linux', 'Gallery media and Electron lifecycle acceptance are locally verified on Linux only.');
+test.skip(!['linux', 'win32'].includes(process.platform), 'Desktop acceptance requires Linux or Windows.');
 
 test('gallery filters preserve every-window progress and exact displayed source PTS without losing drafts', async () => {
   test.setTimeout(150_000);

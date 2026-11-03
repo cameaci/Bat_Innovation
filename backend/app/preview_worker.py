@@ -190,7 +190,9 @@ def render(payload: dict) -> dict:
                         deadline = actual_time + seconds
                         if pending is not None:
                             encode(pending, min(timestamp, deadline, source_end))
-                        if timestamp >= deadline:
+                        # A frame rounded onto the display deadline has no visible interval
+                        # in this clip. Stop at its exact PTS rather than encode zero duration.
+                        if timestamp >= deadline or round((timestamp - actual_time) / display_base) >= seconds * 1000:
                             reached_bound = True
                             break
                         pending = (frame, pts, timestamp)

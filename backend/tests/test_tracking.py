@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import sys
 import time
 from pathlib import Path
 
@@ -445,6 +446,7 @@ def test_large_targets_are_analysed_on_a_coarser_grid() -> None:
     assert tracks.Analyzer(320, 240, 30.0, 1 / 30, {"target_px": 12}).step == 1
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux file-size rlimit; a Windows Job Object does not bound disk (docs/18)")
 def test_database_writing_workers_may_grow_the_survey_database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The tracking and summary workers write rows at the end of the survey database. A fixed 1 MiB file limit made
     every real tracking run that added more than about 1 MiB of tracks fail with a disk I/O error (a dense thermal

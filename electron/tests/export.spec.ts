@@ -7,7 +7,7 @@ import type { BatAPI } from '../src/contracts';
 import { launch, quit, type RunningShell } from './shell-helpers';
 import { cleanupDraftShell, closeWindow, digests, expand, fixtures, goTo, latestRun, openAt, preparedReview, savedReview, windowCards } from './ui-helpers';
 
-test.skip(process.platform !== 'linux', 'Export process limits and native save acceptance are verified locally on Linux only.');
+test.skip(!['linux', 'win32'].includes(process.platform), 'Desktop acceptance requires Linux or Windows.');
 
 test('provisional native CSV export includes all windows despite filters, protects drafts and persists a complete bundle', async () => {
   test.setTimeout(150_000);

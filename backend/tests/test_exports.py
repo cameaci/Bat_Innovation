@@ -1,5 +1,5 @@
 """Synthetic real snapshot/CSV exports and negative publication/resource cases."""
-from contextlib import closing
+from contextlib import closing, contextmanager
 import csv
 import errno
 from fractions import Fraction
@@ -8,6 +8,7 @@ import io
 import json
 from pathlib import Path
 import sqlite3
+import sys
 import time
 from uuid import uuid4
 
@@ -160,7 +161,7 @@ def test_stale_qa_agree_never_exports_current_approval_without_mutating_epochs(t
 def test_every_text_cell_safe_reversible_and_csv_roundtrips(tmp_path,text):
     file=export.CSVFile(tmp_path/'test.csv',['actor','start_pts','count','canonical_json'],lambda:None)
     file.row({'actor':text,'start_pts':'-9223372036854775808','count':None});file.close()
-    row=next(csv.DictReader(io.StringIO((tmp_path/'test.csv').open(newline='').read(),newline='')))
+    row=next(csv.DictReader(io.StringIO((tmp_path/'test.csv').open(newline='',encoding='utf-8').read(),newline='')))
     assert row['actor'].startswith("'") and export.decode_text(row['actor'])==text
     assert row['start_pts']=='-9223372036854775808' and row['count']==''
     assert json.loads(export.decode_text(row['canonical_json']))=={'actor':text,'start_pts':'-9223372036854775808','count':None}
@@ -197,7 +198,7 @@ def test_snapshot_allows_real_first_and_qa_writes_with_one_pinned_revision(tmp_p
             assert qa_post(client,row['id'],decision='needs_clarification',note='Synthetic QA retry').status_code==200
             action(client,row['id'],first['revision'],'unable_to_assess',note='Synthetic first edit retry')
         out=tmp_path/'csv';out.mkdir();manifest=export.export_rows(target,db.parent,row['run_id'],out,asof,lambda:None)
-        audit=next(csv.DictReader((out/export.FILES['audit']).open(newline='')))
+        audit=next(csv.DictReader((out/export.FILES['audit']).open(newline='',encoding='utf-8')))
         assert audit['first_review_revision']==str(first['revision']) and audit['qa_revision']=='1'
         assert export.decode_text(audit['qa_effective_status'])=='agree'
         assert manifest['counts']['qa']['agree']==1 # explicitly snapshot approval, not live approval
@@ -313,20 +314,40 @@ def test_real_weak_motion_and_unknown_end_are_retained_with_source_boundaries(tm
 
 def test_source_unreadable_is_not_missing_and_history_survives_export(tmp_path, originals):
     import os
-    if os.geteuid()==0:pytest.skip('Permission denial requires a non-root local test user')
+    if sys.platform!='win32' and os.geteuid()==0:pytest.skip('Permission denial requires a non-root local test user')
     source=tmp_path/'original.mp4';source.write_bytes(originals['quiet_9'].read_bytes())
     db,session=prepare(tmp_path/'data',[source])
     with TestClient(create_app(Settings(db.parent,TOKEN))) as client:
         row=setup(client,session)['windows'][0];finish_first(client,row,True)
         before=logical_dump(db)
-        source.chmod(0)
-        try:
+        with unreadable(source):
             job=wait_export(client,row['run_id']);audit=parsed(client,job,'audit')
             assert audit[0]['first_review_reason']=='unreadable_source'
             assert audit[0]['qa_effective_status']=='unassessable'
             assert len(parsed(client,job,'observations'))==1
             assert logical_dump(db)==before
-        finally:source.chmod(0o600)
+
+
+@contextmanager
+def unreadable(path):
+    """Deny reads of an existing file. Windows chmod only sets the read-only attribute, so a handle that shares
+    nothing (as another program holding the file open exclusively would) makes every other open fail instead."""
+    if sys.platform!='win32':
+        path.chmod(0)
+        try:yield
+        finally:path.chmod(0o600)
+        return
+    import ctypes
+    from ctypes import wintypes
+    kernel32=ctypes.WinDLL('kernel32',use_last_error=True)
+    kernel32.CreateFileW.argtypes=[wintypes.LPCWSTR,wintypes.DWORD,wintypes.DWORD,ctypes.c_void_p,wintypes.DWORD,wintypes.DWORD,wintypes.HANDLE]
+    kernel32.CreateFileW.restype=wintypes.HANDLE
+    kernel32.CloseHandle.argtypes=[wintypes.HANDLE]
+    GENERIC_READ,OPEN_EXISTING,NORMAL=0x80000000,3,0x80
+    handle=kernel32.CreateFileW(str(path),GENERIC_READ,0,None,OPEN_EXISTING,NORMAL,None)
+    if handle in (None,wintypes.HANDLE(-1).value):raise ctypes.WinError(ctypes.get_last_error())
+    try:yield
+    finally:kernel32.CloseHandle(handle)
 
 
 def test_clock_is_segment_bound_exact_and_never_inferred(tmp_path):
@@ -368,9 +389,15 @@ def test_wal_worker_publication_contains_only_declared_artifacts_and_delivery_is
 @pytest.mark.parametrize(('error','code'),[(MemoryError(),'export_too_large'),(OSError(errno.EFBIG,'synthetic file limit'),'export_too_large'),(OSError(errno.ENOSPC,'synthetic full disk'),'export_write_failed')])
 def test_worker_resource_failures_are_fixed_explicit_codes(tmp_path,monkeypatch,capsys,error,code):
     import os
-    monkeypatch.setattr(export_worker.sys,'argv',['export_worker',str(tmp_path),str(uuid4()),str(uuid4()),str(os.getpid())])
+    if sys.platform=='win32':
+        # A Windows worker reads request.json from, and answers in, the scratch directory given as argv[1].
+        (tmp_path/'request.json').write_text(json.dumps({'data_dir':str(tmp_path),'job_id':str(uuid4()),'run_id':str(uuid4())}))
+        monkeypatch.setattr(export_worker.sys,'argv',['export_worker',str(tmp_path)])
+    else:
+        monkeypatch.setattr(export_worker.sys,'argv',['export_worker',str(tmp_path),str(uuid4()),str(uuid4()),str(os.getpid())])
     monkeypatch.setattr(export_worker,'limits',lambda _:None) # only failure-code serialization is under test
     def fail(*_):raise error
     monkeypatch.setattr(export_worker,'render',fail)
     export_worker.main()
-    assert json.loads(capsys.readouterr().out)=={'ok':False,'code':code}
+    output=(tmp_path/'response.json').read_text() if sys.platform=='win32' else capsys.readouterr().out
+    assert json.loads(output)=={'ok':False,'code':code}

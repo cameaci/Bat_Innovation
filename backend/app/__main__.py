@@ -54,6 +54,16 @@ def main() -> None:
             wait_for_exit(int(parent))
             server.should_exit = True
         threading.Thread(target=stop_with_parent, daemon=True).start()
+    if os.environ.get("BAT_STOP_ON_STDIN_EOF") == "1":
+        def stop_on_stdin_eof() -> None:
+            """Windows has no termination signal a process can handle, so the shell closes stdin to ask for a graceful stop.
+            os.read avoids the buffered stdin lock, which would abort interpreter exit while this thread waits."""
+            try:
+                while os.read(0, 4096):
+                    pass
+            finally:
+                server.should_exit = True
+        threading.Thread(target=stop_on_stdin_eof, daemon=True).start()
     server.run()
 
 

@@ -6,7 +6,6 @@ Skipped off Windows. Processes are identified by pid plus creation time, never b
 from __future__ import annotations
 
 import ctypes
-from ctypes import wintypes as W
 import json
 from pathlib import Path
 import subprocess
@@ -17,12 +16,12 @@ import time
 import pytest
 
 from backend.app import contained_import, imports
+from backend.tests.held_worker import WORKER, identity
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows Job Objects")
 if sys.platform == "win32":
     from backend.app import winjob
 
-WORKER = Path(__file__).with_name("winjob_worker.py")
 ROOT = Path(__file__).resolve().parents[2]
 FAST = dict(memory_bytes=512 * 1024 ** 2, cpu_seconds=60, active_processes=4, wall_seconds=30)
 
@@ -34,27 +33,6 @@ def limits(**changes) -> "winjob.Limits":
 def start(mode: str, scratch: Path, *extra: str, **kw):
     return winjob.run([sys.executable, str(WORKER), mode, str(scratch), *extra], ROOT, kw.pop("limits", limits()),
                       **kw)
-
-
-def identity(pid: int):
-    """Creation time of a live process, or None when it is gone."""
-    k = ctypes.WinDLL("kernel32", use_last_error=True)
-    k.OpenProcess.restype = ctypes.c_void_p
-    k.OpenProcess.argtypes = [W.DWORD, W.BOOL, W.DWORD]
-    k.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-    k.CloseHandle.argtypes = [ctypes.c_void_p]
-    handle = k.OpenProcess(0x1000, False, pid)
-    if not handle:
-        return None
-    try:
-        code = W.DWORD()
-        times = (ctypes.c_ulonglong * 4)()
-        k.GetProcessTimes.argtypes = [ctypes.c_void_p] + [ctypes.c_void_p] * 4
-        k.GetProcessTimes(handle, *[ctypes.byref(times, 8 * i) for i in range(4)])
-        k.GetExitCodeProcess(handle, ctypes.byref(code))
-        return times[0] if code.value == 259 else None
-    finally:
-        k.CloseHandle(handle)
 
 
 def read_pids(scratch: Path) -> list[int]:

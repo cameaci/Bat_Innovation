@@ -5,10 +5,14 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import subprocess
 import sys
 import threading
+import time
 import types
+import urllib.request
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -39,7 +43,15 @@ def test_frozen_entry_point_rejects_unknown_workers(arguments):
     assert result.returncode == 2 and result.stdout == b""
 
 
-def test_frozen_entry_point_reenters_a_worker_module():
+def test_frozen_entry_point_reenters_a_worker_module(tmp_path):
+    if sys.platform == "win32":
+        # A Windows worker exchanges request.json/response.json through the scratch directory given as argv[1].
+        (tmp_path / "request.json").write_text("{}")
+        result = subprocess.run([sys.executable, "-m", "backend.run_backend", "--worker", "preview_worker", str(tmp_path)],
+                                cwd=ROOT, capture_output=True, timeout=30)
+        assert result.returncode == 0 and result.stdout == b""
+        assert json.loads((tmp_path / "response.json").read_text()) == {"manifest": None, "error": "preview_failed"}
+        return
     result = subprocess.run([sys.executable, "-m", "backend.run_backend", "--worker", "preview_worker"], cwd=ROOT,
                             input=b"{}", capture_output=True, timeout=30)
     assert result.returncode == 0 and json.loads(result.stdout) == {"manifest": None, "error": "preview_failed"}
@@ -84,6 +96,81 @@ def test_wait_for_exit_returns_when_the_process_is_gone():
     done = threading.Event()
     threading.Thread(target=lambda: (launcher.wait_for_exit(process.pid), done.set()), daemon=True).start()
     assert done.wait(5)
+
+
+def test_closing_the_stop_pipe_shuts_the_api_down_gracefully(tmp_path):
+    """Windows has no termination signal a process can handle, so the shell closes stdin; only the flag enables this."""
+    token = "t" * 32
+    servers = []
+    for name, flag, stdin in (("piped", "1", subprocess.PIPE), ("unflagged", "0", subprocess.DEVNULL)):
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        (tmp_path / name).mkdir()
+        env = {**os.environ, "BAT_APP_DATA_DIR": str(tmp_path / name), "BAT_API_TOKEN": token, "BAT_API_PORT": str(port),
+               "BAT_STOP_ON_STDIN_EOF": flag}
+        servers.append((port, subprocess.Popen([sys.executable, "-m", "backend.app"], cwd=ROOT, env=env, stdin=stdin,
+                                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)))
+
+    def healthy(port: int) -> bool:
+        request = urllib.request.Request(f"http://127.0.0.1:{port}/api/health", headers={"X-Bat-Token": token})
+        try:
+            with urllib.request.urlopen(request, timeout=2) as response:
+                return response.status == 200
+        except OSError:
+            return False
+    try:
+        for port, process in servers:
+            deadline = time.monotonic() + 30
+            while not healthy(port):
+                assert process.poll() is None and time.monotonic() < deadline
+                time.sleep(0.1)
+        leftover = tmp_path / "piped" / "exports" / str(uuid.uuid4())
+        leftover.mkdir()
+        (leftover / "provisional-tracks.csv").write_bytes(b"synthetic")
+        servers[0][1].stdin.close()
+        assert servers[0][1].wait(timeout=15) == 0
+        assert not leftover.exists()  # the lifespan shutdown ran
+        assert healthy(servers[1][0])  # an empty stdin stops nothing without the flag
+    finally:
+        for _, process in servers:
+            if process.poll() is None:
+                process.kill()
+            process.wait()
+
+
+def test_remove_tree_removes_a_read_only_file(tmp_path):
+    """A failed export leaves its 0o400 database snapshot behind; Windows refuses to unlink a read-only file."""
+    folder = tmp_path / "stage" / "nested"
+    folder.mkdir(parents=True)
+    snapshot = folder.parent / "snapshot.sqlite3"
+    snapshot.write_bytes(b"x")
+    (folder / "rows.csv").write_bytes(b"y")
+    os.chmod(snapshot, 0o400)
+    workers.remove_tree(tmp_path / "stage")
+    assert not (tmp_path / "stage").exists()
+    with pytest.raises(FileNotFoundError):
+        workers.remove_tree(tmp_path / "stage")
+
+
+def test_rename_directory_retries_only_a_windows_denial(tmp_path, monkeypatch):
+    (tmp_path / "stage").mkdir()
+    calls = []
+    real = os.rename
+
+    def denied_twice(source, target):
+        calls.append(source)
+        if len(calls) < 3:
+            raise PermissionError(13, "synthetic file held open in the directory")
+        real(source, target)
+    monkeypatch.setattr(workers.os, "rename", denied_twice)
+    if sys.platform == "win32":
+        workers.rename_directory(tmp_path / "stage", tmp_path / "final")
+        assert len(calls) == 3 and (tmp_path / "final").is_dir()
+    else:
+        with pytest.raises(PermissionError):
+            workers.rename_directory(tmp_path / "stage", tmp_path / "final")
+        assert len(calls) == 1
 
 
 # --- Windows branch against a fake supervisor -------------------------------------------------
@@ -222,3 +309,25 @@ def test_windows_worker_runs_inside_a_job_with_limits_in_force():
     status, body = workers.run_contained("preview_worker", {"parent_pid": os.getpid()}, limits, lambda: False, 4096, 4096)
     # The worker started, saw its Job Object limits and failed only because the request has no source.
     assert (status, body) == ("ok", {"manifest": None, "error": "preview_failed"})
+
+
+@windows
+def test_windows_directory_rename_waits_for_a_file_held_open_then_fails_explicitly(tmp_path):
+    """A virus scanner reading a just-written CSV intermittently made native export publication fail."""
+    stage = tmp_path / ".stage.part"
+    stage.mkdir()
+    (stage / "rows.csv").write_bytes(b"x")
+    (tmp_path / "taken").mkdir()
+    handle = open(stage / "rows.csv", "rb")
+    try:
+        with pytest.raises(PermissionError):
+            workers.rename_directory(stage, tmp_path / "held", seconds=0.2)
+        threading.Timer(0.3, handle.close).start()
+        workers.rename_directory(stage, tmp_path / "final")
+    finally:
+        handle.close()
+    assert (tmp_path / "final" / "rows.csv").read_bytes() == b"x" and not stage.exists()
+    began = time.monotonic()
+    with pytest.raises(FileExistsError):
+        workers.rename_directory(tmp_path / "final", tmp_path / "taken")
+    assert time.monotonic() - began < 1

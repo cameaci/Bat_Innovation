@@ -5,7 +5,7 @@ import { expect, test } from '@playwright/test';
 import { launch, quit, type RunningShell } from './shell-helpers';
 import { addVideos, cleanupDraftShell, createSurvey, fixtures, goTo, openAt, previewReady, summarize, windowCards, hideProcessing } from './ui-helpers';
 
-test.skip(process.platform !== 'linux', 'Media processing E2E is verified on Linux only.');
+test.skip(!['linux', 'win32'].includes(process.platform), 'Desktop acceptance requires Linux or Windows.');
 
 test('tracks are computed from a finished summary run and drawn as trails over the original frames', async () => {
   test.setTimeout(120_000);
@@ -34,7 +34,10 @@ test('tracks are computed from a finished summary run and drawn as trails over t
     await goTo(shell, 'Review');
     await expect(windowCards(shell).first()).toContainText('2 tracks (unverified)');
     const view = await openAt(shell, 0);
-    await expect(view.getByRole('list', { name: 'Tracks in this window', exact: true }).getByRole('listitem')).toHaveCount(2);
+    const list = view.getByRole('list', { name: 'Tracks in this window', exact: true });
+    await expect(list.getByRole('listitem')).toHaveCount(2);
+    await expect(list).toHaveAttribute('tabindex', '0');
+    expect(await list.evaluate(element => element.getBoundingClientRect().height)).toBeLessThanOrEqual(160);
     await previewReady(view);
     const video = view.getByLabel('Derived source preview', { exact: true });
     await video.evaluate(element => { (element as HTMLVideoElement).currentTime = 0.5; });

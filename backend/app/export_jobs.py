@@ -7,7 +7,6 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
-import shutil
 import stat
 import subprocess
 import sys
@@ -62,7 +61,7 @@ class ExportJobs:
                 if folder.is_symlink():
                     folder.unlink()
                 elif folder.is_dir():
-                    shutil.rmtree(folder)
+                    workers.remove_tree(folder)
 
     def start(self, run_id: str) -> dict:
         if not workers.supported():

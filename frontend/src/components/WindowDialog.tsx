@@ -161,7 +161,7 @@ export function WindowDialog({ windows, initialID, onClose }: { windows: Summary
           {trackingID && <Card title="Tracks (unverified)">
             {tracksError ? <p role="alert" className="text-xs text-red-700">{tracksError}</p>
               : tracks.length === 0 ? <p className="text-xs text-muted-foreground">No tracks in this window. This does not mean no bats: review the window as usual.</p>
-              : <ol aria-label="Tracks in this window" className="space-y-1 text-xs">{tracks.map(track => <li key={track.id}>
+              : <ol aria-label="Tracks in this window" tabIndex={0} className="max-h-40 space-y-1 overflow-y-auto text-xs">{tracks.map(track => <li key={track.id}>
                 T{track.track_index + 1}: {clock(ptsSeconds(track.first_pts, windowStart, selected.time_base))} to {clock(ptsSeconds(track.last_pts, windowStart, selected.time_base))} into the window · {track.point_count} points
               </li>)}</ol>}
             {tracksNote && <p role="status" className="mt-1 text-xs text-amber-800">{tracksNote}</p>}

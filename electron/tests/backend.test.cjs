@@ -636,6 +636,27 @@ test('review transport returns fixed messages instead of backend exception text 
   } finally { await new Promise(resolve => server.close(resolve)); }
 });
 
+test('audio derivation may exceed the ordinary HTTP deadline without declaring backend loss', { timeout: 15000 }, async () => {
+  const server = httpServer((request, response) => {
+    setTimeout(() => {
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ id: '00000000-0000-4000-8000-000000000000' }));
+    }, 3500);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const client = new BackendClient(server.address().port, 'synthetic-audio-deadline-token');
+    const id = '00000000-0000-4000-8000-000000000000';
+    const [audio, ordinary] = await Promise.all([
+      client.deriveAudio(id, { segment_id: id, start_pts: '0', seconds: 2, kind: 'spectrogram', tune_hz: null }),
+      client.listSessions(),
+    ]);
+    assert.equal(audio.ok, true);
+    expectFailure(ordinary, 'timeout');
+    assert.doesNotMatch(ordinary.error.message, /backend unavailable/i);
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
 test('invalid startup configuration is rejected before launching a backend', { timeout: 15000 }, async t => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'bat-config-'));
   t.after(() => rm(dataDir, { recursive: true, force: true }));

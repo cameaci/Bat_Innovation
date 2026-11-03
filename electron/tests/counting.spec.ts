@@ -5,7 +5,7 @@ import { expect, test } from '@playwright/test';
 import { launch, quit, type RunningShell } from './shell-helpers';
 import { addVideos, cleanupDraftShell, createSurvey, fixtures, goTo, summarize, findTracks } from './ui-helpers';
 
-test.skip(process.platform !== 'linux', 'Media processing E2E is verified on Linux only.');
+test.skip(!['linux', 'win32'].includes(process.platform), 'Desktop acceptance requires Linux or Windows.');
 
 test('a gate counts tracked bats live; a camera move pauses it for one reconfirmation before the count is accepted', async () => {
   test.setTimeout(180_000);

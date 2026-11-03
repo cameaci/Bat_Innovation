@@ -10,7 +10,7 @@ import { addVideos, createSurvey, digests, fixtures, goTo, latestRun, openSurvey
 type Sources = 'quiet_65' | 'quiet_9' | 'empty_middle' | 'brightness_9' | 'single';
 const SURVEY = 'Synthetic summary survey';
 
-test.skip(process.platform !== 'linux', 'Summary processing and Electron lifecycle are currently verified on Linux only.');
+test.skip(!['linux', 'win32'].includes(process.platform), 'Desktop acceptance requires Linux or Windows.');
 
 test('all quiet, quality-flagged and incomplete source windows survive Electron reopening', async () => {
   test.setTimeout(120_000);

@@ -5,7 +5,7 @@ import { expect, test } from '@playwright/test';
 import { launch, quit, type RunningShell } from './shell-helpers';
 import { addVideos, cleanupDraftShell, createSurvey, fixtures, goTo, summarize, findTracks } from './ui-helpers';
 
-test.skip(process.platform !== 'linux', 'Media processing E2E is verified on Linux only.');
+test.skip(!['linux', 'win32'].includes(process.platform), 'Desktop acceptance requires Linux or Windows.');
 
 test('Watch plays the prepared copy continuously and rings every tracked target at the displayed frame', async () => {
   test.setTimeout(120_000);

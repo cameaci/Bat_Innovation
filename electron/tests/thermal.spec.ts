@@ -5,7 +5,7 @@ import { expect, test } from '@playwright/test';
 import { launch, quit, type RunningShell } from './shell-helpers';
 import { addVideos, cleanupDraftShell, createSurvey, fixtures, getMedia, goTo, openAt, summarize, videos, windowCards } from './ui-helpers';
 
-test.skip(process.platform !== 'linux', 'Media processing E2E is verified on Linux only.');
+test.skip(!['linux', 'win32'].includes(process.platform), 'Desktop acceptance requires Linux or Windows.');
 
 test('rendered thermal video is declared at import and labelled as not temperature throughout review', async () => {
   test.setTimeout(120_000);

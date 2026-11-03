@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
 import sys
 import tempfile
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,8 @@ from typing import Any
 MODULES = frozenset({"contained_import", "preview_worker", "summary_worker", "export_worker", "track_worker", "audio_worker", "proxy_worker", "render_worker"})
 # Windows NTSTATUS exit codes that mean a Job Object limit ended the worker.
 JOB_CPU_QUOTA_EXIT, NO_MEMORY_EXIT = 0xC0000044, 0xC0000017
+# Bound on retrying a Windows directory rename denied while another program briefly holds a file in it open.
+RENAME_RETRY_SECONDS = 5.0
 FROZEN = bool(getattr(sys, "frozen", False))
 
 
@@ -250,3 +254,28 @@ def make_writable(path: Path) -> None:
     """Windows cannot unlink a read-only file; Linux permissions on the file do not affect unlink."""
     if sys.platform == "win32":
         os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+
+
+def remove_tree(path: Path) -> None:
+    """shutil.rmtree that also removes a read-only file left behind, such as a failed export's snapshot."""
+    def retry(function: Callable[[str], object], name: str, error: BaseException) -> None:
+        if sys.platform != "win32" or not isinstance(error, PermissionError):
+            raise error
+        make_writable(Path(name))
+        function(name)
+    shutil.rmtree(path, onexc=retry)
+
+
+def rename_directory(source: Path, target: Path, seconds: float = RENAME_RETRY_SECONDS) -> None:
+    """Publish a staged directory. Windows refuses to rename a directory while any file in it is open, which a virus
+    scanner or search indexer reading a just-written file causes for a moment, so only that denial is retried, briefly."""
+    deadline, delay = time.monotonic() + seconds, 0.01
+    while True:
+        try:
+            os.rename(source, target)
+            return
+        except PermissionError:
+            if sys.platform != "win32" or time.monotonic() + delay > deadline:
+                raise
+        time.sleep(delay)
+        delay = min(delay * 2, 0.5)

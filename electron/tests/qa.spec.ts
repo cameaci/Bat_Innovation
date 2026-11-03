@@ -46,7 +46,7 @@ async function saveQA(shell: RunningShell, view: Locator, row: SummaryWindow, st
   await expect(panel(view).getByText(status.replaceAll('_', ' '), { exact: true })).toBeVisible();
 }
 
-test.skip(process.platform !== 'linux', 'QA source-processing and desktop acceptance currently run locally on Linux only.');
+test.skip(!['linux', 'win32'].includes(process.platform), 'Desktop acceptance requires Linux or Windows.');
 
 test('independent QA decisions, suggestions and disagreement history survive restart without altering first review', async () => {
   test.setTimeout(150_000);
@@ -192,9 +192,9 @@ test('QA drafts survive protected navigation, native close, concurrent first-rev
     expect((await history(shell, row.id)).events).toEqual([]);
     await expect(notes).toHaveValue('Retain QA draftug');
 
-    process.kill(shell.backendPid, 'SIGSTOP');
+    process.kill(shell.backendPid, process.platform === 'win32' ? 'SIGKILL' : 'SIGSTOP');
     await view.getByRole('button', { name: 'Save QA decision', exact: true }).click();
-    process.kill(shell.backendPid, 'SIGKILL');
+    if (process.platform !== 'win32') process.kill(shell.backendPid, 'SIGKILL');
     await expect(panel(view).getByRole('alert').filter({ hasText: /Backend unavailable|local backend is unavailable/i }).first()).toBeVisible();
     await expect(notes).toHaveValue('Retain QA draftug');
     await expect(view.getByLabel('QA reviewer', { exact: true })).toHaveValue('Unsaved synthetic QA reviewer');

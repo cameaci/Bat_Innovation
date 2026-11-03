@@ -11,7 +11,7 @@ type Fixture = 'quiet_65' | 'quiet_9' | 'empty_middle' | 'brightness_9' | 'singl
 const SURVEY = 'Synthetic first review';
 const prepared = (shell: RunningShell, paths: string[]) => preparedReview(shell, paths, SURVEY);
 
-test.skip(process.platform !== 'linux', 'First-review media processing and Electron lifecycle are locally verified on Linux only.');
+test.skip(!['linux', 'win32'].includes(process.platform), 'Desktop acceptance requires Linux or Windows.');
 
 test('explicit first review keeps all quiet and incomplete windows visible with zero-to-many audited observations', async () => {
   test.setTimeout(150_000);
@@ -172,17 +172,17 @@ test('dirty review drafts survive stale saves and cancelled native close, reload
     const external = await shell.page.evaluate(id => (window as unknown as { batAPI: BatAPI }).batAPI.saveReview(id, {
       actor: 'Another synthetic reviewer', expected_revision: 0, action: 'unable_to_assess', note: 'External revision',
     }), first.id);
-    expect(external.ok).toBe(true);
+    expect(external, JSON.stringify(external)).toMatchObject({ ok: true });
     await view.getByRole('button', { name: 'Save observation', exact: true }).click();
     await expect(view.getByRole('alert').filter({ hasText: /changed|conflict|revision/i }).first()).toBeVisible();
     await expect(view.getByLabel('Notes', { exact: true })).toHaveValue('Draft must survive cancelled close');
     expect((await savedReview(shell, first.id)).observations).toEqual([]);
 
-    // Stop the real backend before dispatching save, then kill it with that request
-    // outstanding. No successful action or unavailable response is substituted.
-    process.kill(shell.backendPid, 'SIGSTOP');
+    // POSIX also exercises a request outstanding at death. Windows has no SIGSTOP.
+    // Both paths retain the real unavailable response and the unsaved draft.
+    process.kill(shell.backendPid, process.platform === 'win32' ? 'SIGKILL' : 'SIGSTOP');
     await view.getByRole('button', { name: 'Save observation', exact: true }).click();
-    process.kill(shell.backendPid, 'SIGKILL');
+    if (process.platform !== 'win32') process.kill(shell.backendPid, 'SIGKILL');
     await expect(view.getByRole('alert').filter({ hasText: /^Backend unavailable\./ }).first()).toBeVisible();
     await expect(view.getByLabel('Reviewer', { exact: true })).toHaveValue('Synthetic draft reviewer');
     await expect(view.getByLabel('Observation start source PTS', { exact: true })).toHaveValue(start);

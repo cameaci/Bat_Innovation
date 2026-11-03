@@ -6,7 +6,7 @@ import type { BatAPI } from '../src/contracts';
 import { backendChildren, cleanup, launch, launchEnvironment, quit, type RunningShell } from './shell-helpers';
 import { createSurvey } from './ui-helpers';
 
-test.skip(process.platform !== 'linux', 'Linux /proc verifies backend credentials and process cleanup; Windows is unverified.');
+test.skip(!['linux', 'win32'].includes(process.platform), 'Desktop acceptance requires Linux or Windows.');
 
 test('real backend readiness, SQLite session persistence and narrow renderer bridge', async () => {
   const dataDir = await mkdtemp(join(tmpdir(), 'bat-shell-test-'));
@@ -53,7 +53,9 @@ test('real backend readiness, SQLite session persistence and narrow renderer bri
     await quit(shell);
     shell = undefined;
     shell = await launch(dataDir);
-    expect(shell.tokenDigest, 'Each app launch gets a fresh credential').not.toBe(firstTokenDigest);
+    if (process.platform === 'linux') {
+      expect(shell.tokenDigest, 'Each app launch gets a fresh credential').not.toBe(firstTokenDigest);
+    }
     await expect(shell.page.getByRole('link', { name: 'Open survey Synthetic persistence survey', exact: true })).toContainText('Synthetic camera A');
     await quit(shell);
     shell = undefined;

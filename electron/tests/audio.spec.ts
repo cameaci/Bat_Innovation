@@ -5,7 +5,7 @@ import { expect, test } from '@playwright/test';
 import { launch, quit, type RunningShell } from './shell-helpers';
 import { addVideos, cleanupDraftShell, closeWindow, createSurvey, fixtures, goTo, openAt, previewReady, selectFiles, summarize, findTracks } from './ui-helpers';
 
-test.skip(process.platform !== 'linux', 'Media processing E2E is verified on Linux only.');
+test.skip(!['linux', 'win32'].includes(process.platform), 'Desktop acceptance requires Linux or Windows.');
 
 test('a full-spectrum WAV is anchored to a video frame and shown as a spectrogram with a heterodyne monitor', async () => {
   test.setTimeout(150_000);

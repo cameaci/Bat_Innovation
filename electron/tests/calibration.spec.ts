@@ -6,7 +6,7 @@ import type { TrackingRun } from '../src/contracts';
 import { launch, quit, type RunningShell } from './shell-helpers';
 import { addVideos, cleanupDraftShell, createSurvey, fixtures, goTo, summarize } from './ui-helpers';
 
-test.skip(process.platform !== 'linux', 'Media processing E2E is verified on Linux only.');
+test.skip(!['linux', 'win32'].includes(process.platform), 'Desktop acceptance requires Linux or Windows.');
 
 test('tracking is set up on the footage: draw an excluded zone, test 10 s, then track the survey with those settings', async () => {
   test.setTimeout(150_000);

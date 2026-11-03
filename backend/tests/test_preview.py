@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from fractions import Fraction
 from hashlib import sha256
 from io import BytesIO
@@ -11,6 +12,7 @@ from pathlib import Path
 import shutil
 import signal
 import sqlite3
+import sys
 from threading import Event, Lock
 import time
 from uuid import uuid4
@@ -19,12 +21,14 @@ import av
 from fastapi.testclient import TestClient
 import pytest
 
-from backend.app import media, preview, preview_worker, store
+from backend.app import imports, media, preview, preview_worker, store
 from backend.app.main import Settings, create_app
+from backend.tests import held_worker
 from backend.tests.preview_fixtures import CASES, generate_marker_media
 
 TOKEN = "synthetic-preview-test-launch-token-long-enough"
 HEADERS = {"X-Bat-Token": TOKEN}
+linux_only = pytest.mark.skipif(sys.platform != "linux", reason="Linux rlimits and /proc; Windows Job limits are tested in test_winjob")
 
 
 @pytest.fixture(scope="module")
@@ -59,6 +63,48 @@ def api_job(client: TestClient, segment_id: str, pts: str) -> dict:
 
 def rational(value: dict) -> Fraction:
     return Fraction(int(value["num"]), int(value["den"]))
+
+
+@pytest.mark.parametrize("seconds", [2, 6, 12])
+def test_submillisecond_clip_boundary_uses_exact_pts_without_a_zero_duration_frame(tmp_path, seconds):
+    source = tmp_path / "synthetic-fractional-clock.mp4"
+    base = Fraction(1, 10_000_000)
+    step = 333_333
+    with av.open(str(source), "w") as container:
+        stream = container.add_stream("libx264", rate=Fraction(10_000_000, step))
+        stream.width, stream.height, stream.pix_fmt = 96, 64, "yuv420p"
+        stream.time_base = stream.codec_context.time_base = base
+        stream.codec_context.thread_count = 1
+        for index in range(seconds * 30 + 2):
+            frame = av.VideoFrame(96, 64, "yuv420p")
+            for plane in frame.planes:
+                plane.update(bytes([128]) * plane.buffer_size)
+            frame.pts, frame.time_base = index * step, base
+            for packet in stream.encode(frame):
+                container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)
+    before = sha256(source.read_bytes()).hexdigest()
+    database, row = prepared(tmp_path / "app-data", source)
+    assert json.loads(row["metadata_json"])["time_base"] == {"num": "1", "den": "10000000"}
+    with TestClient(create_app(Settings(database.parent, TOKEN))) as client:
+        response = client.post("/api/media/preview", headers=HEADERS,
+                               json={"segment_id": row["id"], "source_pts": "0", "clip_seconds": seconds})
+        assert response.status_code == 202
+        job = wait_job(lambda key: client.get(f"/api/media/preview/{key}", headers=HEADERS).json(), response.json()["id"])
+        assert job["state"] == "ready", job
+        manifest = job["manifest"]
+        assert len(manifest["frames"]) == seconds * 30
+        assert rational(manifest["source_end"]) == seconds * 30 * step * base
+        assert 0 < seconds - rational(manifest["source_end"]) < Fraction(1, 2000)
+        assert manifest["preview_duration_ms"] == seconds * 1000
+        content = client.get(f"/api/media/preview/{job['id']}/content", headers=HEADERS)
+        assert content.status_code == 200
+        with av.open(BytesIO(content.content)) as derived:
+            frames = list(derived.decode(video=0))
+        assert len(frames) == len(manifest["frames"])
+        assert all(frame.duration > 0 for frame in frames)
+    assert sha256(source.read_bytes()).hexdigest() == before
 
 
 @pytest.mark.parametrize("name", list(CASES))
@@ -187,13 +233,17 @@ def test_auth_paths_integer_bounds_unknown_timing_and_end_boundary(tmp_path: Pat
         assert response.status_code == 409 and response.json()["detail"]["code"] == "unknown_timing"
 
 
-def stopped_worker(jobs: preview.PreviewJobs, job: dict) -> int:
+def stopped_worker(jobs: preview.PreviewJobs, markers: Path) -> Callable[[], bool]:
+    """Stop the running worker (SIGSTOP on Linux, the held sleeper on Windows); return a check that it was reaped."""
+    if sys.platform == "win32":
+        pid, created = held_worker.held(markers)
+        return lambda: held_worker.ended(pid, created)
     deadline = time.monotonic() + 2
     while time.monotonic() < deadline:
         process = jobs._process
         if process is not None and process.poll() is None:
             os.kill(process.pid, signal.SIGSTOP)
-            return process.pid
+            return lambda: not Path(f"/proc/{process.pid}").exists()
         time.sleep(0.001)
     pytest.fail("Real preview worker did not start")
 
@@ -203,12 +253,16 @@ def test_real_worker_cancellation_timeout_shutdown_reap_and_clean(
     tmp_path: Path, videos: dict[str, Path], monkeypatch: pytest.MonkeyPatch, stop: str,
 ) -> None:
     database, row = prepared(tmp_path / "data", videos["long_mp4"])
+    markers = tmp_path / "held"
+    if sys.platform == "win32":
+        held_worker.hold(monkeypatch, markers)
     if stop == "timeout":
-        monkeypatch.setattr(preview, "WALL_SECONDS", 0.15)
+        # The Windows Job wall deadline is whole seconds; the held worker must start well within it.
+        monkeypatch.setattr(preview, "WALL_SECONDS", 2 if sys.platform == "win32" else 0.15)
     activity = Lock()
     jobs = preview.PreviewJobs(database, database.parent, activity)
     job = jobs.start(row["id"], "0")
-    pid = stopped_worker(jobs, job)
+    reaped = stopped_worker(jobs, markers)
     assert not activity.acquire(blocking=False)
     if stop == "cancel":
         jobs.cancel(job["id"])
@@ -217,13 +271,14 @@ def test_real_worker_cancellation_timeout_shutdown_reap_and_clean(
     completed = wait_job(jobs.get, job["id"])
     assert completed["state"] == ("failed" if stop == "timeout" else "cancelled")
     assert completed["error"]["code"] == ("preview_limit" if stop == "timeout" else "cancelled")
-    assert not Path(f"/proc/{pid}").exists()
+    assert reaped()
     assert list(jobs.directory.iterdir()) == []
     assert activity.acquire(blocking=False)
     activity.release()
     jobs.close()
 
 
+@linux_only
 def test_preview_worker_enforces_hard_linux_limits_and_no_launch_token(tmp_path: Path, videos: dict[str, Path]) -> None:
     database, row = prepared(tmp_path / "data", videos["long_mp4"])
     jobs = preview.PreviewJobs(database, database.parent, Lock())
@@ -284,17 +339,17 @@ def test_import_and_preview_share_one_atomic_processing_reservation(
 ) -> None:
     database, row = prepared(tmp_path / "data", videos["cfr_mp4"])
     entered, release = Event(), Event()
-    real_inspect = media.inspect_source
+    real_inspect = imports.inspect
 
     def paused(path, progress, cancelled):
         entered.set()
         while not release.wait(0.005):
-            if cancelled():
+            if cancelled.is_set():
                 raise media.MediaError("cancelled", "Cancelled")
         return real_inspect(path, progress, cancelled)
 
     with TestClient(create_app(Settings(database.parent, TOKEN))) as client:
-        monkeypatch.setattr(media, "inspect_source", paused)
+        monkeypatch.setattr(imports, "inspect", paused)
         imported = client.post("/api/media/import", headers=HEADERS,
                                json={"session_id": row["session_id"], "paths": [str(videos["short_mp4"])]}).json()
         assert entered.wait(2)
@@ -468,6 +523,7 @@ def test_actual_encoded_output_exceeding_byte_limit_is_rejected(
     assert output.stat().st_size > 1
 
 
+@linux_only
 @pytest.mark.parametrize("kind", ["memory", "cpu", "file"])
 def test_linux_guards_actually_reject_resource_exhaustion_with_lower_inherited_caps(tmp_path: Path, kind: str) -> None:
     import subprocess
@@ -509,21 +565,28 @@ else:
         assert output.stat().st_size == 1024
 
 
-def test_running_real_preview_blocks_import_then_releases_reservation(tmp_path: Path, videos: dict[str, Path]) -> None:
+def test_running_real_preview_blocks_import_then_releases_reservation(
+    tmp_path: Path, videos: dict[str, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from backend.app.imports import ImportErrorResponse, ImportJobs
+    # Bind the import worker's own command before the preview-only stand-in is installed.
+    from backend.app import contained_import
 
     database, row = prepared(tmp_path / "data", videos["long_mp4"])
+    markers = tmp_path / "held"
+    if sys.platform == "win32":
+        held_worker.hold(monkeypatch, markers)  # imports keep their own contained worker command
     activity = Lock()
     previews = preview.PreviewJobs(database, database.parent, activity)
     imports = ImportJobs(database, database.parent, activity)
     try:
-        job = previews.start(row["id"], "0")
-        pid = stopped_worker(previews, job)
+        previews.start(row["id"], "0")
+        reaped = stopped_worker(previews, markers)
         with pytest.raises(ImportErrorResponse) as error:
             imports.start(row["session_id"], [str(videos["short_mp4"])])
         assert error.value.code == "preview_busy"
         previews.close()
-        assert not Path(f"/proc/{pid}").exists()
+        assert reaped()
         assert list(previews.directory.iterdir()) == []
         imported = imports.start(row["session_id"], [str(videos["short_mp4"])])
         assert wait_job(imports.get, imported["id"])["state"] == "complete"

@@ -358,7 +358,7 @@ export class BackendClient {
   private readingPreview = false;
   constructor(private readonly port: number, private readonly token: string) {}
 
-  private call<T>(path: ApiRoute, method: 'GET' | 'POST' | 'PUT' = 'GET', input?: unknown): Promise<ApiResult<T>> {
+  private call<T>(path: ApiRoute, method: 'GET' | 'POST' | 'PUT' = 'GET', input?: unknown, timeoutMs = 3000): Promise<ApiResult<T>> {
     return new Promise((resolve) => {
       const body = input === undefined ? undefined : JSON.stringify(input);
       const req = request({
@@ -396,7 +396,10 @@ export class BackendClient {
         });
       });
       // An absolute deadline also covers a server that accepts but never completes a response.
-      const timeout = setTimeout(() => req.destroy(new Error('Request timed out')), 3000);
+      const timeout = setTimeout(() => {
+        resolve({ ok: false, error: { code: 'timeout', message: 'The operation exceeded its response deadline. Check its status before trying again.' } });
+        req.destroy(new Error('Request timed out'));
+      }, timeoutMs);
       req.on('close', () => clearTimeout(timeout));
       req.on('error', () => resolve(unavailable()));
       req.end(body);
@@ -543,7 +546,8 @@ export class BackendClient {
     return isUUID(audioID) && isAudioAnchor(input) ? this.call(`/api/audio/${audioID}/anchor`, 'POST', input) : Promise.resolve(invalid());
   }
   deriveAudio(audioID: string, input: AudioDeriveInput): Promise<ApiResult<AudioDerived>> {
-    return isUUID(audioID) && isAudioDerive(input) ? this.call(`/api/audio/${audioID}/derive`, 'POST', input) : Promise.resolve(invalid());
+    // Audio has a 150 s worker deadline; allow delivery and cleanup before timing out.
+    return isUUID(audioID) && isAudioDerive(input) ? this.call(`/api/audio/${audioID}/derive`, 'POST', input, 155_000) : Promise.resolve(invalid());
   }
   audioContent(derivedID: string, kind: 'spectrogram' | 'heterodyne'): Promise<ApiResult<{ bytes: Uint8Array }>> {
     return isUUID(derivedID) ? this.binary(`/api/audio/derived/${derivedID}/content`, kind === 'spectrogram' ? 'image/png' : 'audio/wav', 8 * 1024 * 1024) : Promise.resolve(invalid());
@@ -781,11 +785,17 @@ export class BackendRuntime {
       const token = randomBytes(32).toString('hex');
       this.client = new BackendClient(port, token);
       const packaged = 'packaged' in options;
+      // Windows has no termination signal a process can handle, so the shell holds the backend's stdin open and
+      // closes it to ask for a graceful stop. POSIX keeps SIGTERM.
+      const stopPipe = process.platform === 'win32';
       const child = spawn(packaged ? options.packaged : options.python, packaged ? [] : ['-m', 'backend.app'], {
         cwd: packaged ? dirname(options.packaged) : options.repoRoot, shell: false, windowsHide: true,
-        stdio: ['ignore', 'ignore', 'pipe'],
-        env: { ...process.env, BAT_APP_DATA_DIR: options.dataDir, BAT_API_TOKEN: token, BAT_API_PORT: String(port), BAT_PARENT_PID: String(process.pid) },
+        stdio: [stopPipe ? 'pipe' : 'ignore', 'ignore', 'pipe'],
+        env: { ...process.env, BAT_APP_DATA_DIR: options.dataDir, BAT_API_TOKEN: token, BAT_API_PORT: String(port), BAT_PARENT_PID: String(process.pid),
+          BAT_STOP_ON_STDIN_EOF: stopPipe ? '1' : '0' },
       });
+      // Closing the pipe after the backend has exited can fail; the close event below still settles the stop.
+      child.stdin?.on('error', () => undefined);
       this.child = child;
       this.closed = new Promise<void>((resolve) => {
         child.once('error', () => { this.failure = unavailable(packaged ? 'Backend could not start. Reinstall Bat Innovation; the installed backend is missing or blocked.' : 'Backend could not start. Check BAT_PYTHON and the installed Python requirements.'); });
@@ -929,7 +939,8 @@ export class BackendRuntime {
   private async stopChild(): Promise<void> {
     const child = this.child;
     if (!child) return;
-    child.kill('SIGTERM');
+    if (child.stdin) child.stdin.end();
+    else child.kill('SIGTERM');
     const timeout = setTimeout(() => child.kill('SIGKILL'), 3000);
     try { await this.closed; }
     finally { clearTimeout(timeout); }

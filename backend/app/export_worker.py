@@ -87,7 +87,7 @@ def render(data_dir: Path, job_id: str, run_id: str) -> dict:
     check()
     if target.exists():
         raise ExportFailure("export_write_failed")
-    os.rename(stage, target)
+    workers.rename_directory(stage, target)
     workers.sync_directory(root)
     return {**manifest, "files": {**manifest["files"], "manifest": {"name": FILES["manifest"], "bytes": len(encoded), "sha256": sha256(encoded).hexdigest()}}}
 

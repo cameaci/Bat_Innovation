@@ -1,5 +1,7 @@
 # Implementation plan
 
+**2026-11-03 Windows continuation:** native tests and selected real-footage desktop flows are recorded in the [cloud handover](../docs/19-windows-cloud-handover.md). Windows UI acceptance is still incomplete; packaging and broad stress testing were deferred by the owner. The fixed 44/70 tracker and release gates below are unchanged.
+
 Reviewed 2026-10-20. Status: **Slices 0 (Linux foundation), 1A, 1B, 2A, 3A, 3B, 4A and 4B1 (provisional CSV exports) are merged. Early Windows beta Stage A is a feasibility report, not an installer; native Windows, distribution, ownership and ecological pilot gates remain open**. This is a dependency-ordered sequence, not a promise of dates. The application is built in **small vertical slices**, each delivering observable behavior and tests. No workarounds or speculative infrastructure.
 
 ## Fixed-scope completion tracker (checklist, not release readiness)

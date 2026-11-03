@@ -10,7 +10,7 @@ import { addVideos, cleanupDraftShell as cleanup, createSurvey, digests, fixture
 type Media = 'cfr_mp4' | 'nonzero_mts' | 'irregular_mp4' | 'short_mp4';
 const SURVEY = 'Synthetic media survey';
 
-test.skip(process.platform !== 'linux', 'Electron lifecycle assertions currently use Linux /proc; Windows is unverified.');
+test.skip(!['linux', 'win32'].includes(process.platform), 'Desktop acceptance requires Linux or Windows.');
 
 test('native selection inspects real media and persists explicit video order across reopening', async () => {
   test.setTimeout(120_000);
@@ -160,6 +160,7 @@ test('corrupt batches attach nothing and changed or missing originals remain exp
 });
 
 test('unsupported-platform import refusal reaches the picker UI without source inspection or worker creation', async () => {
+  test.skip(process.platform !== 'linux', 'Executable shebang fixture requires Linux.');
   const directory = await mkdtemp(join(tmpdir(), 'bat-import-guard-e2e-'));
   const originalPython = process.env.BAT_PYTHON;
   const resolved = spawnSync(originalPython ?? 'python', ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8' });
